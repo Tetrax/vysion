@@ -29,6 +29,7 @@ config system admin
     next
 end
 """
+REALISTIC_FIXTURE = Path(__file__).parents[1] / "fixtures" / "anonymized_fortigate_export.conf"
 
 
 class AvailableFortiGuard:
@@ -41,6 +42,102 @@ def api_client(app) -> httpx.AsyncClient:
         transport=httpx.ASGITransport(app=app),
         base_url="http://vysion.test",
     )
+
+
+@pytest.mark.asyncio
+async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path) -> None:
+    app = create_app(
+        settings=Settings(report_directory=tmp_path),
+        fortiguard=AvailableFortiGuard(),
+    )
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={
+                "configuration": (
+                    "anonymized-fortigate.conf",
+                    REALISTIC_FIXTURE.read_bytes(),
+                    "text/plain",
+                )
+            },
+        )
+
+    assert response.status_code == 201
+    assert [finding["status"] for finding in response.json()["findings"]] == [
+        "PASS",
+        "PASS",
+        "PASS",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        b"""config system interface extra
+    edit "wan-hidden"
+        set allowaccess ssh
+    next
+end
+config system interface
+    edit "wan1"
+        set allowaccess ping https
+    next
+end
+""",
+        b"""config system interface
+    set allowaccess ssh
+    edit "wan1"
+        set allowaccess ping https
+    next
+end
+""",
+    ],
+)
+async def test_api_rejects_ambiguous_audited_evidence(
+    tmp_path: Path,
+    configuration: bytes,
+) -> None:
+    app = create_app(
+        settings=Settings(report_directory=tmp_path),
+        fortiguard=AvailableFortiGuard(),
+    )
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={"configuration": ("ambiguous.conf", configuration, "text/plain")},
+        )
+
+    assert response.status_code == 422
+    assert not list(tmp_path.glob("*.json"))
+
+
+@pytest.mark.asyncio
+async def test_api_never_reports_pass_from_a_stale_hostname_proof(tmp_path: Path) -> None:
+    app = create_app(
+        settings=Settings(report_directory=tmp_path),
+        fortiguard=AvailableFortiGuard(),
+    )
+    configuration = b"""config system global
+    set hostname safe.example
+    set hostname
+end
+"""
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={"configuration": ("stale-proof.conf", configuration, "text/plain")},
+        )
+
+    assert response.status_code == 201
+    assert [finding["status"] for finding in response.json()["findings"]] == [
+        "UNKNOWN",
+        "UNKNOWN",
+        "UNKNOWN",
+    ]
 
 
 @pytest.mark.asyncio

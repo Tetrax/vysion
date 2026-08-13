@@ -21,6 +21,23 @@ type AuditReport = {
   findings: Finding[]
 }
 
+type ApiErrorDetail = {
+  detail?: string | Array<{ msg?: string }>
+}
+
+async function auditError(response: Response): Promise<Error> {
+  try {
+    const payload = (await response.json()) as ApiErrorDetail
+    const detail = typeof payload.detail === 'string'
+      ? payload.detail
+      : payload.detail?.map((item) => item.msg).filter(Boolean).join(' · ')
+    if (detail) return new Error(`Audit refusé : ${detail}`)
+  } catch {
+    // The HTTP status remains available when the response is not valid JSON.
+  }
+  return new Error(`Audit refusé (HTTP ${response.status})`)
+}
+
 function App() {
   const [file, setFile] = useState<File | null>(null)
   const [report, setReport] = useState<AuditReport | null>(null)
@@ -32,11 +49,12 @@ function App() {
     if (!file) return
     setLoading(true)
     setError(null)
+    setReport(null)
     try {
       const form = new FormData()
       form.append('configuration', file)
       const response = await fetch('/api/audits', { method: 'POST', body: form })
-      if (!response.ok) throw new Error(`Audit refusé (HTTP ${response.status})`)
+      if (!response.ok) throw await auditError(response)
       setReport((await response.json()) as AuditReport)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Audit impossible')

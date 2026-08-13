@@ -40,13 +40,14 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 ## Limites connues du socle
 
 - authentification applicative volontairement absente ; le contrôle d'accès repose sur l'allowlist IP externe acceptée pour Vysion ;
-- parser volontairement minimal ;
-- parser fail-closed dans les sections auditées : section absente/vide ou interface WAN sans `allowaccess` → `UNKNOWN`; structure tronquée/imbriquée, bloc audité top-level dupliqué, mutation non interprétée, directive hors entrée, directive dupliquée/malformée ou clé/valeur `allowaccess` non supportée → rejet ;
-- le tracer rejette toute sous-section `config`, même sous une section inconnue ;
-- un lexer commun ferme la grammaire de `config`, `edit` et `set` sans transformation : ASCII imprimable, guillemets doubles autour d'un token entier, séparateurs whitespace explicites, aucun backslash ni whitespace terminal de ligne et noms de section alphanumériques/tirets ; les sections auditées doivent être top-level, sont canonicalisées avant classification et tout lookalike d'un nom audité est rejeté comme ambigu ;
+- parser FortiGate structurel limité aux trois contrôles du socle ;
+- parser fail-closed sur les preuves auditées : section/preuve absente, interface WAN non identifiable, `allowaccess`/MFA indéterminable ou mutation non interprétée d'une clé auditée → `UNKNOWN`, jamais `PASS` ; une preuve antérieure est invalidée par toute directive ultérieure incomplète ou mutation non interprétée de la même clé ; une non-conformité explicitement prouvée reste `FAIL` ;
+- sections réellement non auditées, clés supplémentaires et sous-sections inconnues traversées puis ignorées sans devenir des preuves ; section auditée imbriquée ou nom de section ressemblant à une section auditée → rejet ;
+- UTF-8 et BOM UTF-8 initial acceptés ; NUL, contrôles C0/C1 non autorisés, DEL, caractères de format invisibles et séparateurs Unicode dangereux rejetés ; lexer probant sans transformation implicite des backslashes ou guillemets ;
+- structure tronquée, section auditée top-level dupliquée, directive placée hors `edit` dans une section à entrées, directive probante dupliquée ou valeur probante lexicalement ambiguë → rejet ;
 - le hostname doit respecter une syntaxe DNS/hostname ; vide ou générique → `FAIL`, lexicalement malformé → rejet ;
 - seulement trois contrôles représentatifs ;
-- le contrôle WAN du tracer identifie uniquement les interfaces dont le nom commence par `wan` ; rôles, zones et SD-WAN restent à porter depuis l'oracle legacy avant équivalence fonctionnelle ;
+- le contrôle WAN identifie les interfaces nommées `wan*` ou portant explicitement `set role wan` ; zones et SD-WAN restent hors périmètre ;
 - le contrôle MFA ne reconnaît encore que `fortitoken`, `email` et `sms` ; une autre valeur reste `UNKNOWN` ;
 - le rapport JSON canonique est persisté ; les exports DOCX et XLSX sont générés à la demande depuis le même modèle Pydantic typé, sans copie persistante supplémentaire ;
 - FortiGuard vérifie actuellement la disponibilité du endpoint, pas encore les advisories corrélés au firmware ;

@@ -14,17 +14,24 @@ def check_wan_management_access(configuration: FortiGateConfiguration) -> AuditF
     wan_interfaces = [
         interface
         for interface in configuration.interfaces
-        if interface.name.lower().startswith("wan")
+        if interface.name.lower().startswith("wan") or interface.role == "wan"
     ]
+    if not wan_interfaces:
+        return AuditFinding(
+            control_id="NET-WAN-MGMT-001",
+            title="Administration SSH sur interface WAN",
+            status=AuditStatus.UNKNOWN,
+            message="Aucune interface WAN identifiable dans la configuration fournie.",
+            risk="Exposition WAN impossible à déterminer.",
+            recommendation="Fournir une configuration permettant d'identifier les interfaces WAN.",
+        )
     exposed = [
         f"{interface.name}: allowaccess includes ssh"
         for interface in wan_interfaces
         if "ssh" in interface.allowaccess
     ]
     missing_evidence = [
-        interface.name
-        for interface in wan_interfaces
-        if "allowaccess" not in interface.parsed_keys
+        interface.name for interface in wan_interfaces if "allowaccess" not in interface.parsed_keys
     ]
     if not exposed and missing_evidence:
         return AuditFinding(
@@ -32,18 +39,13 @@ def check_wan_management_access(configuration: FortiGateConfiguration) -> AuditF
             title="Administration SSH sur interface WAN",
             status=AuditStatus.UNKNOWN,
             evidence=tuple(
-                f"allowaccess absent pour l'interface WAN: {name}"
-                for name in missing_evidence
+                f"allowaccess absent pour l'interface WAN: {name}" for name in missing_evidence
             ),
             message="Accès d'administration WAN impossible à déterminer.",
             risk="Exposition WAN impossible à exclure.",
             recommendation="Fournir la directive allowaccess de chaque interface WAN.",
         )
-    message = (
-        "SSH est exposé sur une interface WAN."
-        if exposed
-        else "Aucun accès SSH WAN détecté."
-    )
+    message = "SSH est exposé sur une interface WAN." if exposed else "Aucun accès SSH WAN détecté."
     return AuditFinding(
         control_id="NET-WAN-MGMT-001",
         title="Administration SSH sur interface WAN",

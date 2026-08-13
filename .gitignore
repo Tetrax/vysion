@@ -16,6 +16,7 @@ frontend/vite.config.d.ts
 /reports/
 *.conf
 !deploy/nginx.conf
+!tests/fixtures/anonymized_fortigate_export.conf
 *.docx
 *.xlsx
 *.crt

@@ -16,6 +16,7 @@ class Interface(BaseModel):
     name: str
     address: str | None = None
     allowaccess: frozenset[str] = Field(default_factory=frozenset)
+    role: str | None = None
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
 
 
@@ -24,6 +25,7 @@ class Administrator(BaseModel):
 
     name: str
     two_factor: str | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
 
 
 class FortiGateConfiguration(BaseModel):
