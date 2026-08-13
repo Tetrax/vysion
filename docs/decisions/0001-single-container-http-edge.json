@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "decision_id": "0001-single-container-http-edge",
+  "status": "accepted",
+  "scope": "Vysion v2 foundation",
+  "decision": "Use Nginx and FastAPI in one application container. Nginx terminates TLS, serves the compiled React application, applies HTTP limits and security headers, and proxies /api to FastAPI on 127.0.0.1:8000.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Uvicorn/FastAPI handles TLS, React files and API",
+      "assessment": {
+        "tls": "Supported directly, but certificate reload requires process restart and application ownership of TLS settings.",
+        "certificate_renewal": "Container restart or application-specific reload procedure.",
+        "upload_limits": "Requires ASGI middleware or request-stream enforcement before multipart parsing.",
+        "timeouts": "Uvicorn exposes keep-alive and graceful-shutdown timeouts, but request-body and upstream-style policies require application code or another component.",
+        "security_headers": "Application middleware.",
+        "static_files": "FastAPI/Starlette can serve them, but cache policy and SPA fallback become application concerns.",
+        "logs": "Single process, but access and application concerns share configuration.",
+        "healthcheck": "Simple direct endpoint.",
+        "diagnostic": "One process, but more HTTP-edge behavior is custom code.",
+        "docker_complexity": "One process and no Nginx configuration; additional application middleware and tests are required."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Nginx and FastAPI in the same container",
+      "assessment": {
+        "tls": "Nginx owns the HTTPS edge using mature SSL directives.",
+        "certificate_renewal": "A container restart is the canonical Portainer procedure; Nginx can also reload certificates without changing application code if later required.",
+        "upload_limits": "client_max_body_size and client_body_timeout reject requests at the HTTP edge before FastAPI multipart handling.",
+        "timeouts": "Nginx owns client and proxy timeouts declaratively.",
+        "security_headers": "Central declarative headers at the edge.",
+        "static_files": "Nginx serves immutable Vite assets efficiently with explicit cache rules and SPA fallback.",
+        "logs": "Nginx access/error logs and FastAPI application logs remain distinct on stdout/stderr.",
+        "healthcheck": "Nginx /healthz verifies the edge while proxying /api/health verifies FastAPI; the container healthcheck uses the edge.",
+        "diagnostic": "Two process logs, but clear separation between HTTP edge and business application.",
+        "docker_complexity": "Two processes in one container and a small PID 1 entrypoint; still one Portainer service, image, volume and compose file."
+      }
+    }
+  ],
+  "criteria": [
+    "TLS lifecycle",
+    "certificate renewal",
+    "upload limits before multipart parsing",
+    "HTTP timeouts",
+    "security headers",
+    "React static delivery",
+    "logs",
+    "healthcheck",
+    "diagnostic",
+    "Docker and Portainer maintainability"
+  ],
+  "rationale": [
+    "The target optimizes maintainability and reinstallability, not process count.",
+    "Variant A would move reverse-proxy responsibilities into custom ASGI middleware and application tests.",
+    "Variant B keeps those policies declarative while preserving one image, one service, one container and one compose.yml.",
+    "No third-party process supervisor is required: the entrypoint starts both processes, traps TERM/INT, and exits if either child exits."
+  ],
+  "constraints": [
+    "FastAPI listens only on 127.0.0.1 inside the container.",
+    "Only Nginx publishes HTTPS.",
+    "Node and Vite exist only in the frontend build stage.",
+    "Certificate files are mounted read-only and are never included in Git or the image.",
+    "Portainer Git Stack remains the only deployment and lifecycle interface.",
+    "Certificate replacement is completed through a Portainer redeploy for the V2 foundation."
+  ],
+  "sources": [
+    {
+      "url": "https://www.uvicorn.org/settings/",
+      "purpose": "Uvicorn SSL and timeout settings",
+      "retrieved_at": null,
+      "retrieval_note": "Official source selected; automated extraction was unavailable during the session. Claims are limited to stable documented Uvicorn settings and will be verified through executable configuration tests."
+    },
+    {
+      "url": "https://nginx.org/en/docs/http/ngx_http_ssl_module.html",
+      "purpose": "Nginx TLS directives",
+      "retrieved_at": null,
+      "retrieval_note": "Official source selected; automated extraction was unavailable during the session. Configuration will be validated with nginx -t and an HTTPS smoke test."
+    },
+    {
+      "url": "https://nginx.org/en/docs/http/ngx_http_core_module.html#client_max_body_size",
+      "purpose": "Nginx upload size and client timeout directives",
+      "retrieved_at": null,
+      "retrieval_note": "Official source selected; automated extraction was unavailable during the session. The selected behavior will be covered by configuration and container tests."
+    },
+    {
+      "url": "https://nginx.org/en/docs/http/ngx_http_proxy_module.html",
+      "purpose": "Nginx proxy timeout and localhost upstream directives",
+      "retrieved_at": null,
+      "retrieval_note": "Official source selected; automated extraction was unavailable during the session."
+    }
+  ],
+  "approval": {
+    "architecture_direction": "Vysion v2 approved by user on 2026-08-12",
+    "variant_selection": "Selected during foundation implementation from the user's explicit A/B challenge",
+    "remote_publication": "not approved",
+    "portainer_deployment": "not approved"
+  },
+  "rollback_boundary": "Before any remote migration, delete the new local repository or restore from its local Git history. The old repository and confidential backup remain untouched."
+}
