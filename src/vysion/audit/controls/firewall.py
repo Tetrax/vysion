@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vysion.audit.controls._evidence import (
+    evidence_for_complete_backup,
     evidence_for_directive,
     evidence_for_section,
 )
@@ -155,11 +156,31 @@ def _policy_section(configuration: FortiGateConfiguration):
 
 
 def _interface_by_name(configuration: FortiGateConfiguration) -> dict[str, object]:
-    return {interface.name.casefold(): interface for interface in configuration.interfaces}
+    result: dict[str, object] = {}
+    collisions: set[str] = set()
+    for interface in configuration.interfaces:
+        key = interface.name.casefold()
+        if key in result:
+            collisions.add(key)
+        else:
+            result[key] = interface
+    for key in collisions:
+        result.pop(key, None)
+    return result
 
 
 def _zone_by_name(configuration: FortiGateConfiguration) -> dict[str, object]:
-    return {zone.name.casefold(): zone for zone in configuration.zones}
+    result: dict[str, object] = {}
+    collisions: set[str] = set()
+    for zone in configuration.zones:
+        key = zone.name.casefold()
+        if key in result:
+            collisions.add(key)
+        else:
+            result[key] = zone
+    for key in collisions:
+        result.pop(key, None)
+    return result
 
 
 def _context_wan_scope(
@@ -434,7 +455,7 @@ def check_internet_all_service(
             recommendation="Fournir la section firewall policy complète.",
             remediation="Relancer l'export avec les politiques et leurs services.",
         )
-    if not section.entries:
+    if not section.entries and section.certainty is EvidenceCertainty.CERTAIN:
         return _finding(
             control_id=control_id,
             title=title,
@@ -588,11 +609,24 @@ def _profile_is_disabled(name: str | None) -> bool:
 
 def _profile_index(configuration: FortiGateConfiguration) -> dict[tuple[str, str], object]:
     profiles: dict[tuple[str, str], object] = {}
+    collisions: set[tuple[str, str]] = set()
     for profile in configuration.security_profiles:
         if profile.profile_type is not None:
-            profiles[(profile.profile_type.casefold(), profile.name.casefold())] = profile
+            key = (profile.profile_type.casefold(), profile.name.casefold())
+            if key in profiles or key in collisions:
+                collisions.add(key)
+                profiles.pop(key, None)
+            else:
+                profiles[key] = profile
     for profile in configuration.utm_profiles:
-        profiles[(profile.profile_type.casefold(), profile.name.casefold())] = profile
+        key = (profile.profile_type.casefold(), profile.name.casefold())
+        if key in profiles or key in collisions:
+            collisions.add(key)
+            profiles.pop(key, None)
+        else:
+            profiles[key] = profile
+    for key in collisions:
+        profiles.pop(key, None)
     return profiles
 
 
@@ -659,7 +693,17 @@ def check_utm_profile_binding(
             remediation="Relancer l'export avec les bindings UTM complets.",
         )
     scope = _context_wan_scope(configuration, context)
-    groups = {group.name.casefold(): group for group in configuration.profile_groups}
+    groups: dict[str, ProfileGroup] = {}
+    group_collisions: set[str] = set()
+    for group in configuration.profile_groups:
+        key = group.name.casefold()
+        if key in groups or key in group_collisions:
+            group_collisions.add(key)
+            groups.pop(key, None)
+        else:
+            groups[key] = group
+    for key in group_collisions:
+        groups.pop(key, None)
     failures: list[Policy] = []
     unknown: list[Policy] = []
     compliant: list[Policy] = []
@@ -821,6 +865,25 @@ def _check_extintf_any(
         "Limiter extintf à des interfaces explicitement nécessaires.",
     )
     if section is None:
+        if configuration.complete_backup:
+            return _finding(
+                control_id=control_id,
+                title=title,
+                status=AuditStatus.PASS,
+                applicability=Applicability.NOT_APPLICABLE,
+                evidence=(f"backup complet: aucun objet {expected_type}",),
+                evidence_items=(evidence_for_complete_backup(),),
+                affected_objects=(),
+                message=f"Aucun objet {expected_type} n'est déclaré dans le backup complet.",
+                risk=_risk(
+                    f"Aucun objet {expected_type} n'est applicable.",
+                    "La règle extintf any ne s'applique à aucun objet prouvé.",
+                    "faible",
+                    "Réévaluer après toute création d'objet.",
+                ),
+                recommendation=f"Surveiller les nouveaux objets {expected_type}.",
+                remediation="Aucune remédiation immédiate.",
+            )
         return _finding(
             control_id=control_id,
             title=title,
@@ -838,7 +901,10 @@ def _check_extintf_any(
             recommendation="Fournir firewall vip complet.",
             remediation="Relancer l'export avec les VIP et virtual servers.",
         )
-    if not section.entries or not objects:
+    if (
+        (not section.entries or not objects)
+        and section.certainty is EvidenceCertainty.CERTAIN
+    ):
         if section.entries and len(configuration.vips) + len(configuration.virtual_servers) != len(
             section.entries
         ):
@@ -991,19 +1057,24 @@ def _service_coverage(
     *,
     seen: frozenset[str] = frozenset(),
 ) -> _PortCoverage:
-    normalized = name.casefold()
-    if normalized in seen or normalized == "all":
+    if name in seen or name.casefold() == "all":
         return _PortCoverage(known=False)
-    catalog = {
-        service.name.casefold(): service
-        for service in configuration.service_objects + configuration.service_groups
-    }
-    service = catalog.get(normalized)
-    if service is None or service.proof_state is not ProofState.PROVEN:
+    catalog = configuration.service_objects + configuration.service_groups
+    exact = tuple(service for service in catalog if service.name == name)
+    if len(exact) == 1:
+        service = exact[0]
+    elif exact:
+        return _PortCoverage(known=False)
+    else:
+        folded = tuple(service for service in catalog if service.name.casefold() == name.casefold())
+        if len(folded) != 1:
+            return _PortCoverage(known=False)
+        service = folded[0]
+    if service.proof_state is not ProofState.PROVEN or service.name in seen:
         return _PortCoverage(known=False)
     if service.members:
         children = tuple(
-            _service_coverage(configuration, member.name, seen=seen | {normalized})
+            _service_coverage(configuration, member.name, seen=seen | {service.name})
             for member in service.members
         )
         if any(not child.known for child in children):
@@ -1104,7 +1175,7 @@ def check_sensitive_protocol_deny(
                 "groupes complets."
             ),
         )
-    if not section.entries:
+    if not section.entries and section.certainty is EvidenceCertainty.CERTAIN:
         return _finding(
             control_id=control_id,
             title=title,
@@ -1205,7 +1276,11 @@ def check_sensitive_protocol_deny(
                 "deny explicite."
             ),
         )
-    if unknown_policies or any(not observation.coverage.known for observation in observations):
+    if (
+        section.certainty is not EvidenceCertainty.CERTAIN
+        or unknown_policies
+        or any(not observation.coverage.known for observation in observations)
+    ):
         return _finding(
             control_id=control_id,
             title=title,

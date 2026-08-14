@@ -417,6 +417,65 @@ end
     assert audit(passing)["FW-UTM-PROFILE-BINDING-001"].status is AuditStatus.PASS
 
 
+def test_utm_casefold_profile_collision_is_unknown() -> None:
+    raw = (
+        base_interfaces()
+        + """config firewall webfilter profile
+    edit "Safe"
+    next
+    edit "safe"
+        set feature-set proxy
+    next
+    edit "SAFE"
+        set feature-set flow
+    next
+end
+"""
+        + policy_block(
+            policy_entry(
+                1,
+                logtraffic="utm",
+                utm_status="enable",
+                profiles='        set webfilter-profile "SAFE"\n',
+            )
+        )
+    )
+
+    assert audit(raw)["FW-UTM-PROFILE-BINDING-001"].status is AuditStatus.UNKNOWN
+
+
+def test_utm_casefold_profile_group_collision_is_unknown() -> None:
+    raw = (
+        base_interfaces()
+        + """config firewall webfilter profile
+    edit "web-safe"
+        set feature-set proxy
+    next
+end
+config firewall profile-group
+    edit "Utm-Safe"
+    next
+    edit "utm-safe"
+        set webfilter-profile "web-safe"
+    next
+    edit "UTM-SAFE"
+        set webfilter-profile "web-safe"
+    next
+end
+"""
+        + policy_block(
+            policy_entry(
+                1,
+                logtraffic="utm",
+                utm_status="enable",
+                profiles='        set profile-group "UTM-SAFE"\n',
+            )
+        )
+    )
+
+    assert audit(raw)["FW-UTM-PROFILE-BINDING-001"].status is AuditStatus.UNKNOWN
+
+
 @pytest.mark.parametrize("binding", ["none", "disable"])
 def test_utm_explicitly_disabled_binding_fails(binding: str) -> None:
     raw = (
@@ -683,7 +742,7 @@ end
     assert audit(raw)["FW-SENSITIVE-PROTOCOL-DENY-001"].status is AuditStatus.FAIL
 
 
-def test_m3_parser_rejects_duplicate_sections_and_truncation() -> None:
+def test_m3_parser_merges_repeated_disjoint_sections_and_rejects_truncation() -> None:
     duplicate = """config firewall service custom
     edit "sensitive"
         set tcp-portrange 88
@@ -701,7 +760,11 @@ end
     next
 """
 
-    with pytest.raises(ValueError, match="duplicate projected section"):
-        FortiGateParser().parse(duplicate)
+    configuration = FortiGateParser().parse(duplicate)
+    assert {service.name for service in configuration.service_objects} == {"sensitive", "other"}
+    assert all(
+        service.proof_state is ProofState.PROVEN
+        for service in configuration.service_objects
+    )
     with pytest.raises(ValueError, match="unsupported or incomplete"):
         FortiGateParser().parse(truncated)

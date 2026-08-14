@@ -125,6 +125,29 @@ def isdb_groups(**groups: tuple[str, ...]) -> str:
     return "config firewall internet-service-group\n" + entries + "end\n"
 
 
+def test_m6_isdb_casefold_group_collision_is_unknown() -> None:
+    incoming = (
+        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Tor-Exit.Node", "Spam-Spamming.Server",
+        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
+        "Botnet-C&C.Server",
+    )
+    outgoing = (
+        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Spam-Spamming.Server",
+        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
+        "Botnet-C&C.Server", "Blockchain-Crypto.Mining.Pool",
+    )
+    raw = (
+        wan_interfaces()
+        + isdb_groups(Safe=("incomplete",), safe=incoming)
+        + wan_policies(
+            policy(1, "wan1", "lan", isdb_src_group="SAFE"),
+            policy(2, "lan", "wan1", isdb_dst=outgoing),
+        )
+    )
+
+    assert check_isdb_wan_flows(FortiGateParser().parse(raw)).status is AuditStatus.UNKNOWN
+
+
 def test_m6_cti_complete_resources_and_wan_flows_pass() -> None:
     cti = (
         "IPV4_CTI_SNS",
@@ -150,6 +173,68 @@ def test_m6_cti_complete_resources_and_wan_flows_pass() -> None:
     )
 
     assert check_cti_wan_flows(FortiGateParser().parse(raw)).status is AuditStatus.PASS
+
+
+def test_m6_cti_resource_casefold_collision_is_unknown_but_unique_fold_resolves() -> None:
+    cti = (
+        "IPV4_CTI_SNS", "IPV4_SNS", "HASH_CTI_SNS_SHA1", "HASH_CTI_SNS_SHA256",
+        "HASH_SNS_SHA1", "HASH_SNS_SHA256", "FQDN_SNS", "URL_SNS",
+        "FQDN_CTI_SNS", "URL_CTI_SNS",
+    )
+    ipv4 = ("IPV4_CTI_SNS", "IPV4_SNS")
+    policies = wan_policies(
+        policy(1, "wan1", "lan", srcaddr=ipv4),
+        policy(2, "lan", "wan1", dstaddr=ipv4),
+    )
+    canonical = external_resources(*cti)
+    collision = canonical.replace(
+        "end\n",
+        '    edit "ipv4_cti_sns"\n        set status disable\n    next\nend\n',
+    )
+    unique_fold = external_resources(*(name.lower() for name in cti))
+    prefix = "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n" + wan_interfaces()
+
+    assert (
+        check_cti_wan_flows(FortiGateParser().parse(prefix + collision + policies)).status
+        is AuditStatus.UNKNOWN
+    )
+    assert (
+        check_cti_wan_flows(FortiGateParser().parse(prefix + unique_fold + policies)).status
+        is AuditStatus.PASS
+    )
+
+
+def test_m6_cti_policy_defaulted_status_is_unknown_not_active() -> None:
+    cti = (
+        "IPV4_CTI_SNS",
+        "IPV4_SNS",
+        "HASH_CTI_SNS_SHA1",
+        "HASH_CTI_SNS_SHA256",
+        "HASH_SNS_SHA1",
+        "HASH_SNS_SHA256",
+        "FQDN_SNS",
+        "URL_SNS",
+        "FQDN_CTI_SNS",
+        "URL_CTI_SNS",
+    )
+    raw = (
+        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
+        "#buildno=1\n"
+        "#global_vdom=1\n"
+        "#conf_file_ver=1\n"
+        + wan_interfaces()
+        + external_resources(*cti)
+        + wan_policies(
+            policy(
+                1,
+                "wan1",
+                "lan",
+                srcaddr=("IPV4_CTI_SNS", "IPV4_SNS"),
+            ).replace("        set status enable\n", "")
+        )
+    )
+
+    assert check_cti_wan_flows(FortiGateParser().parse(raw)).status is AuditStatus.UNKNOWN
 
 
 def test_m6_cti_missing_explicit_flow_object_fails_but_unknown_relation_is_unknown() -> None:

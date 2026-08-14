@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from vysion.audit.controls._evidence import (
     directive_for,
+    evidence_for_complete_backup,
     evidence_for_directive,
     evidence_for_section,
 )
@@ -38,7 +39,8 @@ from vysion.audit.rulesets.external_services import (
 def _entry_directive(entry: StructuralEntry, name: str) -> StructuralDirective | None:
     if name in entry.invalidated_keys:
         return None
-    return directive_for(entry.directives, name)
+    directive = directive_for(entry.directives, name)
+    return directive if directive is not None and not directive.defaulted else None
 
 
 def _tokens_for(entry: StructuralEntry, name: str) -> tuple[str, ...] | None:
@@ -50,15 +52,25 @@ def _wan_names(
     configuration: FortiGateConfiguration,
     context: AuditContext | None,
 ) -> tuple[frozenset[str], bool]:
+    section = configuration.document.section("system interface")
+    certain_names = (
+        frozenset(
+            entry.name.casefold()
+            for entry in section.entries
+            if entry.certainty is EvidenceCertainty.CERTAIN
+        )
+        if section is not None and section.certainty is EvidenceCertainty.CERTAIN
+        else frozenset()
+    )
     if context is not None and context.selected_wans is not None:
         selected = frozenset(name.casefold() for name in context.selected_wans)
-        known = {interface.name.casefold() for interface in configuration.interfaces}
-        return selected, bool(selected and selected <= known)
+        return selected, bool(selected and selected <= certain_names)
     inferred = frozenset(
         interface.name.casefold()
         for interface in configuration.interfaces
         if interface.role == "wan"
         and "role" in interface.parsed_keys
+        and interface.name.casefold() in certain_names
     )
     return inferred, bool(inferred)
 
@@ -104,7 +116,12 @@ def _policy_has_unknown_interface(
     configuration: FortiGateConfiguration,
     entry: StructuralEntry,
 ) -> bool:
-    known = {interface.name.casefold() for interface in configuration.interfaces}
+    section = configuration.document.section("system interface")
+    known = {
+        entry.name.casefold()
+        for entry in section.entries
+        if entry.certainty is EvidenceCertainty.CERTAIN
+    } if section is not None and section.certainty is EvidenceCertainty.CERTAIN else set()
     known.update(
         zone.name.casefold()
         for zone in configuration.zones
@@ -124,11 +141,18 @@ def _isdb_group_index(
     if section is None:
         return {}, False
     groups: dict[str, tuple[str, ...]] = {}
+    collisions: set[str] = set()
     ambiguous = section.certainty is not EvidenceCertainty.CERTAIN
     for entry in section.entries:
         members = _tokens_for(entry, "member")
+        key = entry.name.casefold()
         if entry.certainty is EvidenceCertainty.CERTAIN and members:
-            groups[entry.name.casefold()] = members
+            if key in groups or key in collisions:
+                groups.pop(key, None)
+                collisions.add(key)
+                ambiguous = True
+            else:
+                groups[key] = members
         else:
             ambiguous = True
     return groups, ambiguous
@@ -203,12 +227,12 @@ def check_cti_wan_flows(
     expected_resources = frozenset(expected_cti_resources(model))
     entries_by_name: dict[str, list[StructuralEntry]] = {}
     for entry in resources_section.entries:
-        entries_by_name.setdefault(entry.name, []).append(entry)
+        entries_by_name.setdefault(entry.name.casefold(), []).append(entry)
     missing_resources: set[str] = set()
     disabled_resources: set[str] = set()
     unknown_resources: set[str] = set()
     for name in expected_resources:
-        matches = entries_by_name.get(name, [])
+        matches = entries_by_name.get(name.casefold(), [])
         if not matches:
             if resources_section.certainty is EvidenceCertainty.CERTAIN:
                 missing_resources.add(name)
@@ -443,6 +467,16 @@ def _ldaps_finding(
 def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFinding:
     section = configuration.document.section("user ldap")
     if section is None:
+        if configuration.complete_backup:
+            return _ldaps_finding(
+                configuration,
+                status=AuditStatus.PASS,
+                applicability=Applicability.NOT_APPLICABLE,
+                evidence=("Backup complet: namespace user ldap absent.",),
+                evidence_items=(evidence_for_complete_backup(),),
+                affected_objects=(),
+                message="Aucun connecteur LDAP n'est configuré dans le backup complet.",
+            )
         return _ldaps_finding(
             configuration,
             status=AuditStatus.UNKNOWN,

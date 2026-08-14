@@ -28,6 +28,7 @@ def evidence_text(items: tuple[EvidenceItem, ...]) -> str:
                 " ".join(item.tokens) or None,
                 f"ligne {item.line}" if item.line else None,
                 item.certainty.value,
+                "defaulted" if item.defaulted else "explicit",
             )
             if part
         )

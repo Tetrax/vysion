@@ -1,10 +1,15 @@
-from vysion.audit.controls._evidence import evidence_for_directive
+from vysion.audit.controls._evidence import (
+    directive_for,
+    evidence_for_directive,
+    section_for,
+)
 from vysion.audit.models import (
     Applicability,
     AuditFinding,
     AuditPriority,
     AuditSeverity,
     AuditStatus,
+    EvidenceCertainty,
     FortiGateConfiguration,
     RiskAssessment,
 )
@@ -27,7 +32,12 @@ def check_hostname(configuration: FortiGateConfiguration) -> AuditFinding:
         "system global",
         "hostname",
     )
-    if explicit_failure:
+    evidence_is_certain = evidence_item.certainty is EvidenceCertainty.CERTAIN
+    section = section_for(configuration.document, "system global")
+    explicit_failure_is_certain = bool(
+        section is not None and directive_for(section.directives, "hostname") is not None
+    )
+    if explicit_failure and explicit_failure_is_certain:
         return AuditFinding(
             **metadata,
             status=AuditStatus.FAIL,
@@ -47,7 +57,10 @@ def check_hostname(configuration: FortiGateConfiguration) -> AuditFinding:
                 "puis relancer l'audit."
             ),
         )
-    if "system global" not in configuration.parsed_value_sections:
+    if (
+        "system global" not in configuration.parsed_value_sections
+        or not evidence_is_certain
+    ):
         return AuditFinding(
             **metadata,
             status=AuditStatus.UNKNOWN,

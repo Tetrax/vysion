@@ -127,7 +127,7 @@ end
     assert configuration.zones[0].proof_state is ProofState.UNKNOWN
 
 
-def test_duplicate_top_level_projected_sections_are_rejected_fail_closed() -> None:
+def test_repeated_disjoint_top_level_projected_sections_are_merged() -> None:
     raw = """config system zone
     edit "internet"
         set interface "wan1"
@@ -140,8 +140,10 @@ config system zone
 end
 """
 
-    with pytest.raises(ValueError, match="duplicate projected section"):
-        FortiGateParser().parse(raw)
+    configuration = FortiGateParser().parse(raw)
+
+    assert {zone.name for zone in configuration.zones} == {"internet", "trusted"}
+    assert all(zone.proof_state is ProofState.PROVEN for zone in configuration.zones)
 
 
 def test_unknown_generic_directive_does_not_prove_a_projected_local_user() -> None:

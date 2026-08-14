@@ -27,6 +27,12 @@ from vysion.audit.vpn_projection import apply_vpn_projection, project_vpn
 _AUDITED_ENTRY_SECTIONS = {"system interface", "system admin"}
 _AUDITED_SECTIONS = _AUDITED_ENTRY_SECTIONS | {"system global"}
 _ENTRY_ONLY_NAMESPACES = {"system admin", "user local", "user ldap"}
+_CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
+    "user local",
+    "user ldap",
+    "vpn ipsec phase1-interface",
+    "vpn ipsec phase2-interface",
+}
 _ALLOWED_CONTROLS = {"\n", "\r", "\t"}
 _RELEVANT_KEYS = {
     "system global": {"hostname"},
@@ -34,14 +40,82 @@ _RELEVANT_KEYS = {
     "system admin": {"peer-auth", "two-factor"},
 }
 _TOLERATED_NON_PROBATIVE_KEYS = {
-    "system global": {"admin-sport", "admintimeout", "timezone"},
-    "system interface": {"alias", "description", "type", "vdom"},
-    "system admin": {"accprofile", "email-to", "vdom"},
+    "system global": {
+        "admin-server-cert",
+        "admin-sport",
+        "admintimeout",
+        "alias",
+        "allow-traffic-redirect",
+        "cli-audit-log",
+        "fortitoken-cloud-region",
+        "gui-auto-upgrade-setup-warning",
+        "gui-certificates",
+        "gui-display-hostname",
+        "gui-replacement-message-groups",
+        "gui-wireless-opensecurity",
+        "ipv6-allow-traffic-redirect",
+        "ldapconntimeout",
+        "management-ip",
+        "remoteauthtimeout",
+        "reset-sessionless-tcp",
+        "rest-api-key-url-query",
+        "revision-backup-on-logout",
+        "revision-image-auto-backup",
+        "sslvpn-web-mode",
+        "strict-dirty-session-check",
+        "switch-controller",
+        "timezone",
+        "virtual-switch-vlan",
+    },
+    "system interface": {
+        "alias",
+        "broadcast-forward",
+        "color",
+        "defaultgw",
+        "description",
+        "device-identification",
+        "dhcp-relay-ip",
+        "dhcp-relay-service",
+        "estimated-downstream-bandwidth",
+        "estimated-upstream-bandwidth",
+        "explicit-web-proxy",
+        "interface",
+        "ip-managed-by-fortiipam",
+        "member",
+        "mode",
+        "monitor-bandwidth",
+        "mtu",
+        "mtu-override",
+        "netflow-sampler",
+        "remote-ip",
+        "replacemsg-override-group",
+        "secondary-ip",
+        "security-mode",
+        "snmp-index",
+        "src-check",
+        "status",
+        "tcp-mss",
+        "type",
+        "vdom",
+        "vlanforward",
+        "vlanid",
+    },
+    "system admin": {
+        "accprofile",
+        "email-to",
+        "gui-default-dashboard-template",
+        "gui-ignore-release-overview-version",
+        "old-password",
+        "password",
+        "peer-group",
+        "trusthost1",
+        "vdom",
+    },
 }
 _TOLERATED_CHILD_SECTIONS = {
     "system global": frozenset(),
     "system interface": frozenset({"secondaryip"}),
-    "system admin": frozenset({"dashboard"}),
+    "system admin": frozenset({"dashboard", "gui-dashboard"}),
 }
 _MUTATION_DIRECTIVES = {"append", "select", "unselect", "unset"}
 _RESERVED_DIRECTIVES = _MUTATION_DIRECTIVES | {"config", "edit", "end", "next", "set"}
@@ -91,7 +165,13 @@ _PROJECTED_KEYS = {
         "internet-service-src-name", "internet-service-group",
         "internet-service-src-group",
     },
-    "firewall service custom": {"tcp-portrange", "udp-portrange", "member"},
+    "firewall service custom": {
+        "tcp-portrange",
+        "udp-portrange",
+        "member",
+        "protocol",
+        "protocol-number",
+    },
     "firewall service group": {"member"},
     "firewall vip": {"extintf", "extip", "mappedip", "type"},
     "firewall vipgrp": {"member"},
@@ -124,7 +204,122 @@ _PROJECTED_KEYS = {
     "firewall internet-service-group": {"member"},
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
-    "firewall policy": frozenset({"comment"}),
+    "system zone": frozenset({"intrazone"}),
+    "firewall policy": frozenset(
+        {
+            "auto-asic-offload",
+            "comment",
+            "comments",
+            "disclaimer",
+            "dlp-profile",
+            "dstaddr-negate",
+            "emailfilter-profile",
+            "fsso-groups",
+            "global-label",
+            "groups",
+            "inspection-mode",
+            "internet-service-src",
+            "ippool",
+            "label",
+            "logtraffic-start",
+            "match-vip",
+            "nat",
+            "np-acceleration",
+            "per-ip-shaper",
+            "poolname",
+            "profile-protocol-options",
+            "session-ttl",
+            "tcp-mss-receiver",
+            "tcp-mss-sender",
+            "users",
+            "uuid",
+        }
+    ),
+    "firewall service custom": frozenset(
+        {
+            "category",
+            "comment",
+            "icmpcode",
+            "icmptype",
+            "proxy",
+            "uuid",
+        }
+    ),
+    "firewall service group": frozenset({"comment", "uuid"}),
+    "firewall vip": frozenset(
+        {"comment", "extport", "mappedport", "portforward", "protocol", "uuid"}
+    ),
+    "firewall vipgrp": frozenset({"interface", "uuid"}),
+    "user local": frozenset({"passwd", "passwd-time"}),
+    "user ldap": frozenset(
+        {
+            "cnid",
+            "dn",
+            "password",
+            "password-expiry-warning",
+            "password-renewal",
+            "port",
+            "server",
+            "server-identity-check",
+            "source-ip",
+            "type",
+            "username",
+        }
+    ),
+    "vpn ssl settings": frozenset(
+        {
+            "algorithm",
+            "auth-timeout",
+            "banned-cipher",
+            "default-portal",
+            "dns-server1",
+            "dns-server2",
+            "dns-suffix",
+            "idle-timeout",
+            "port",
+            "servercert",
+            "source-address",
+            "source-address6",
+            "ssl-min-proto-ver",
+            "tunnel-ip-pools",
+        }
+    ),
+    "vpn ipsec phase1-interface": frozenset(
+        {
+            "add-route",
+            "comments",
+            "dpd",
+            "dpd-retryinterval",
+            "keylife",
+            "local-gw",
+            "localid",
+            "mode",
+            "nattraversal",
+            "net-device",
+            "npu-offload",
+            "peerid",
+            "peertype",
+            "psksecret",
+            "remote-gw",
+            "remotegw-ddns",
+            "type",
+        }
+    ),
+    "vpn ipsec phase2-interface": frozenset(
+        {
+            "auto-negotiate",
+            "dst-addr-type",
+            "dst-name",
+            "dst-start-ip",
+            "dst-subnet",
+            "keepalive",
+            "keylifeseconds",
+            "route-overlap",
+            "src-addr-type",
+            "src-name",
+            "src-subnet",
+        }
+    ),
 }
 _PROJECTED_CHILD_KEYS = {
     "secondaryip": {"ip", "allowaccess"},
@@ -135,10 +330,12 @@ _PROJECTED_CHILD_KEYS = {
     "ftgd-dns": {"options"},
     "filters": {"category", "action"},
     "entries": {"category", "action"},
+    "authentication-rule": {"groups", "portal"},
 }
 _PROJECTED_CHILDREN = {
     "system interface": frozenset({"secondaryip"}),
-    "system admin": frozenset({"dashboard"}),
+    "system admin": frozenset({"dashboard", "gui-dashboard"}),
+    "vpn ssl settings": frozenset({"authentication-rule"}),
     "firewall vip": frozenset({"realservers"}),
     "webfilter profile": frozenset({"web", "ftgd-wf"}),
     "dnsfilter profile": frozenset({"ftgd-dns"}),
@@ -146,11 +343,14 @@ _PROJECTED_CHILDREN = {
     "ftgd-wf": frozenset({"filters"}),
     "ftgd-dns": frozenset({"filters"}),
     "secondaryip": frozenset(),
-    "dashboard": frozenset(),
+    "dashboard": frozenset({"widget"}),
+    "gui-dashboard": frozenset({"widget"}),
+    "widget": frozenset(),
     "realservers": frozenset(),
     "web": frozenset(),
     "filters": frozenset(),
     "entries": frozenset(),
+    "authentication-rule": frozenset(),
 }
 _SECTION_SEPARATORS = re.compile(r"[\s._/-]+")
 _SUPPORTED_ALLOWACCESS = {
@@ -168,6 +368,20 @@ _SUPPORTED_ALLOWACCESS = {
     "telnet",
 }
 _SUPPORTED_PEER_AUTH = {"enable", "disable"}
+_FORTIOS_CANONICAL_KEY_FORMS = {
+    "system interface": {"secondary-ip": "secondary-IP"},
+}
+_CERTAIN_UNSET_KEYS = {
+    "application list": frozenset({"options"}),
+    "cifs": frozenset({"options"}),
+    "firewall service custom": frozenset(
+        {"icmpcode", "icmptype", "tcp-portrange", "udp-portrange"}
+    ),
+    "ftgd-wf": frozenset({"options"}),
+    "http": frozenset({"options", "post-lang"}),
+    "nntp": frozenset({"options"}),
+    "ssh": frozenset({"options"}),
+}
 _HOSTNAME = re.compile(
     r"(?=.{1,253}\Z)"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
@@ -178,6 +392,11 @@ _CONFIG_VERSION = re.compile(
     r"(?P<version>[0-9]+(?:\.[0-9]+){1,3})"
     r"(?:-FW-build[0-9]+-[0-9]+)?(?::.*)?\Z"
 )
+_BACKUP_MARKERS = {
+    "#buildno=": re.compile(r"#buildno=[0-9]+\Z"),
+    "#global_vdom=": re.compile(r"#global_vdom=[0-9]+\Z"),
+    "#conf_file_ver=": re.compile(r"#conf_file_ver=[0-9]+\Z"),
+}
 
 
 def _reject_dangerous_characters(raw: str) -> None:
@@ -203,9 +422,36 @@ def _payload(line: str, keyword: str, error: str) -> str:
     return payload
 
 
+def _logical_lines(raw: str) -> tuple[tuple[int, str], ...]:
+    """Join FortiOS physical lines while a double-quoted value remains open."""
+
+    logical: list[tuple[int, str]] = []
+    buffer: list[str] = []
+    start_line = 0
+    quoted = False
+    for line_number, physical_line in enumerate(raw.splitlines(), start=1):
+        if not buffer:
+            start_line = line_number
+        buffer.append(physical_line)
+        escaped = False
+        for character in physical_line:
+            if escaped:
+                escaped = False
+                continue
+            if quoted and character == "\\":
+                escaped = True
+                continue
+            if character == '"':
+                quoted = not quoted
+        if not quoted:
+            logical.append((start_line, "\n".join(buffer)))
+            buffer = []
+    if buffer:
+        logical.append((start_line, "\n".join(buffer)))
+    return tuple(logical)
+
+
 def _tokens(payload: str, error: str) -> list[str]:
-    if "'" in payload or "\\" in payload:
-        raise ValueError(error)
     tokens: list[str] = []
     position = 0
     while position < len(payload):
@@ -215,12 +461,24 @@ def _tokens(payload: str, error: str) -> list[str]:
             break
         if payload[position] == '"':
             position += 1
-            start = position
+            token: list[str] = []
             while position < len(payload) and payload[position] != '"':
+                if payload[position] == "\\":
+                    if (
+                        position + 1 < len(payload)
+                        and payload[position + 1] in {'"', "\\"}
+                    ):
+                        token.append(payload[position + 1])
+                        position += 2
+                        continue
+                    token.append("\\")
+                    position += 1
+                    continue
+                token.append(payload[position])
                 position += 1
             if position == len(payload):
                 raise ValueError(error)
-            tokens.append(payload[start:position])
+            tokens.append("".join(token))
             position += 1
             if position < len(payload) and not payload[position].isspace():
                 raise ValueError(error)
@@ -253,6 +511,14 @@ def _key_and_value(payload: str, error: str) -> tuple[str, str | None]:
     if not key or "'" in key or "\\" in key or '"' in key:
         raise ValueError(error)
     return key.lower(), value
+
+
+def _is_canonical_key_form(section: str, raw_key: str, normalized_key: str) -> bool:
+    if raw_key == normalized_key:
+        return True
+    return (
+        _FORTIOS_CANONICAL_KEY_FORMS.get(section, {}).get(normalized_key) == raw_key
+    )
 
 
 def _best_effort_tokens(payload: str | None) -> tuple[str, ...]:
@@ -304,6 +570,14 @@ class _Frame:
             self.certainty = EvidenceCertainty.AMBIGUOUS
         else:
             self.entry_certainty = EvidenceCertainty.AMBIGUOUS
+
+    def record_certain_unset(self, key: str, line: int) -> None:
+        directives = self.directives if self.entry_name is None else self.entry_directives
+        directives[:] = [directive for directive in directives if directive.name != key]
+        self.values.pop(key, None)
+        self.uncertain_keys.discard(key)
+        self.entry_structural_keys.discard(key)
+        directives.append(StructuralDirective(name=key, line=line, mutation=True))
 
     def flush_entry(self) -> None:
         if self.entry_name is None:
@@ -397,12 +671,14 @@ def _structural_section(frame: _Frame) -> StructuralSection:
         else:
             children.append(child)
     entry_counts: dict[str, int] = {}
+    casefold_entries = frame.section in _CASEFOLD_UNIQUE_ENTRY_SECTIONS
     for entry in frame.entries:
-        key = entry.name.casefold()
+        key = entry.name.casefold() if casefold_entries else entry.name
         entry_counts[key] = entry_counts.get(key, 0) + 1
     entries: list[StructuralEntry] = []
     for entry in frame.entries:
-        if entry_counts[entry.name.casefold()] > 1:
+        entry_key = entry.name.casefold() if casefold_entries else entry.name
+        if entry_counts[entry_key] > 1:
             certainty = EvidenceCertainty.AMBIGUOUS
             entries.append(
                 entry.model_copy(
@@ -578,7 +854,11 @@ def _project_generic_sections(
                         ),
                         parsed_keys=frozenset(directives),
                         proof_state=(
-                            ProofState.PROVEN if interface is not None else ProofState.UNKNOWN
+                            ProofState.PROVEN
+                            if interface is not None
+                            and section.certainty is EvidenceCertainty.CERTAIN
+                            and entry.certainty is EvidenceCertainty.CERTAIN
+                            else ProofState.UNKNOWN
                         ),
                     )
                 )
@@ -621,12 +901,17 @@ def _project_generic_sections(
                         ),
                         action=(action.tokens[0] if action and action.tokens else None),
                         parsed_keys=frozenset(directives),
+                        defaulted_keys=frozenset(
+                            name for name, directive in directives.items() if directive.defaulted
+                        ),
                         proof_state=(
                             ProofState.PROVEN
                             if srcintf is not None
                             and dstintf is not None
                             and srcaddr is not None
                             and dstaddr is not None
+                            and section.certainty is EvidenceCertainty.CERTAIN
+                            and entry.certainty is EvidenceCertainty.CERTAIN
                             else ProofState.UNKNOWN
                         ),
                     )
@@ -646,7 +931,16 @@ def _project_generic_sections(
                             else None
                         ),
                         parsed_keys=frozenset(directives),
-                        proof_state=ProofState.PROVEN if directives else ProofState.UNKNOWN,
+                        defaulted_keys=frozenset(
+                            name for name, directive in directives.items() if directive.defaulted
+                        ),
+                        proof_state=(
+                            ProofState.PROVEN
+                            if directives
+                            and section.certainty is EvidenceCertainty.CERTAIN
+                            and entry.certainty is EvidenceCertainty.CERTAIN
+                            else ProofState.UNKNOWN
+                        ),
                     )
                 )
         elif section.name in {"firewall ssl-ssh-profile", "firewall profile-protocol-options"}:
@@ -669,11 +963,202 @@ def _project_generic_sections(
                         proof_state=(
                             ProofState.PROVEN
                             if profile_type is not None
+                            and section.certainty is EvidenceCertainty.CERTAIN
+                            and entry.certainty is EvidenceCertainty.CERTAIN
                             else ProofState.UNKNOWN
                         ),
                     )
                 )
     return tuple(zones), tuple(policies), tuple(local_users), tuple(security_profiles)
+
+
+def _merge_repeated_projected_sections(
+    sections: tuple[StructuralSection, ...],
+) -> tuple[StructuralSection, ...]:
+    """Merge only repeated entry namespaces whose object names are disjoint.
+
+    FortiOS can emit the same projected namespace in separate blocks.  Flat
+    settings and colliding object names cannot be combined without inventing
+    precedence, so those repetitions remain present but explicitly ambiguous.
+    """
+
+    merged: list[StructuralSection] = []
+    positions: dict[str, int] = {}
+    for section in sections:
+        if section.name not in _PROJECTED_SECTIONS or section.name not in positions:
+            positions.setdefault(section.name, len(merged))
+            merged.append(section)
+            continue
+        position = positions[section.name]
+        previous = merged[position]
+        previous_names = {entry.name.casefold() for entry in previous.entries}
+        current_names = {entry.name.casefold() for entry in section.entries}
+        safely_disjoint = bool(previous.entries and section.entries) and previous_names.isdisjoint(
+            current_names
+        )
+        if safely_disjoint:
+            merged[position] = previous.model_copy(
+                update={
+                    "entries": previous.entries + section.entries,
+                    "directives": previous.directives + section.directives,
+                    "children": previous.children + section.children,
+                    "parsed_keys": previous.parsed_keys | section.parsed_keys,
+                    "invalidated_keys": previous.invalidated_keys | section.invalidated_keys,
+                    "certainty": (
+                        EvidenceCertainty.CERTAIN
+                        if previous.certainty is EvidenceCertainty.CERTAIN
+                        and section.certainty is EvidenceCertainty.CERTAIN
+                        else EvidenceCertainty.AMBIGUOUS
+                    ),
+                }
+            )
+            continue
+        ambiguous = EvidenceCertainty.AMBIGUOUS
+        merged[position] = previous.model_copy(
+            update={
+                "directives": previous.directives + section.directives,
+                "entries": tuple(
+                    entry.model_copy(update={"certainty": ambiguous})
+                    for entry in previous.entries + section.entries
+                ),
+                "children": previous.children + section.children,
+                "parsed_keys": previous.parsed_keys | section.parsed_keys,
+                "invalidated_keys": previous.invalidated_keys | section.invalidated_keys,
+                "certainty": ambiguous,
+            }
+        )
+    return tuple(merged)
+
+
+def _project_single_vdom(
+    sections: tuple[StructuralSection, ...],
+) -> tuple[tuple[StructuralSection, ...], bool]:
+    """Project one explicit VDOM; keep multi-VDOM content structural-only.
+
+    The boolean tells the caller whether backup-wide absence/default proofs are
+    still valid.  With several VDOMs no scope was selected, so no child is
+    flattened and controls must remain fail-closed instead of mixing tenants.
+    """
+
+    vdom_sections = tuple(section for section in sections if section.name == "vdom")
+    if not vdom_sections:
+        return sections, True
+    entries = tuple(entry for section in vdom_sections for entry in section.entries)
+    non_vdom = tuple(section for section in sections if section.name != "vdom")
+    if (
+        len(vdom_sections) == 1
+        and len(entries) == 1
+        and vdom_sections[0].certainty is EvidenceCertainty.CERTAIN
+        and entries[0].certainty is EvidenceCertainty.CERTAIN
+    ):
+        return non_vdom + entries[0].children, True
+    ambiguous = EvidenceCertainty.AMBIGUOUS
+    scoped_sections = tuple(
+        section
+        if section.name == "vdom"
+        else section.model_copy(
+            update={
+                "certainty": ambiguous,
+                "entries": tuple(
+                    entry.model_copy(update={"certainty": ambiguous})
+                    for entry in section.entries
+                ),
+            }
+        )
+        for section in sections
+    )
+    return scoped_sections, False
+
+
+_DOCUMENTED_FORTIOS_DEFAULTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "firewall policy": {"status": ("enable",)},
+    "system admin": {"two-factor": ("disable",), "peer-auth": ("disable",)},
+    "user local": {"two-factor": ("disable",)},
+    "vpn ssl settings": {"status": ("enable",)},
+    "vpn ipsec phase1-interface": {"ike-version": ("1",), "dhgrp": ("14",)},
+    "vpn ipsec phase2-interface": {"pfs": ("enable",), "dhgrp": ("14",)},
+}
+_DEFAULTED_ENTRY_SECTIONS = frozenset(
+    {
+        "firewall policy",
+        "system admin",
+        "user local",
+        "vpn ipsec phase1-interface",
+        "vpn ipsec phase2-interface",
+    }
+)
+
+
+def _materialize_documented_defaults(
+    document: StructuralDocument,
+    firmware_version: str | None,
+    complete_backup: bool,
+) -> StructuralDocument:
+    if (
+        not complete_backup
+        or firmware_version is None
+        or not firmware_version.startswith(("7.2.", "7.4."))
+    ):
+        return document
+    sections: list[StructuralSection] = []
+    for section in document.sections:
+        defaults = _DOCUMENTED_FORTIOS_DEFAULTS.get(section.name)
+        if defaults is None or section.certainty is not EvidenceCertainty.CERTAIN:
+            sections.append(section)
+            continue
+        if section.name in _DEFAULTED_ENTRY_SECTIONS:
+            entries: list[StructuralEntry] = []
+            for entry in section.entries:
+                if entry.certainty is not EvidenceCertainty.CERTAIN:
+                    entries.append(entry)
+                    continue
+                directives = list(entry.directives)
+                names = {item.name for item in directives if not item.mutation}
+                effective_keys = set(entry.parsed_keys)
+                for name, tokens in defaults.items():
+                    if name not in names and name not in entry.invalidated_keys:
+                        directives.append(
+                            StructuralDirective(
+                                name=name,
+                                tokens=tokens,
+                                line=entry.line,
+                                defaulted=True,
+                            )
+                        )
+                        effective_keys.add(name)
+                entries.append(
+                    entry.model_copy(
+                        update={
+                            "directives": tuple(directives),
+                            "parsed_keys": frozenset(effective_keys),
+                        }
+                    )
+                )
+            sections.append(section.model_copy(update={"entries": tuple(entries)}))
+            continue
+        directives = list(section.directives)
+        names = {item.name for item in directives if not item.mutation}
+        effective_keys = set(section.parsed_keys)
+        for name, tokens in defaults.items():
+            if name not in names and name not in section.invalidated_keys:
+                directives.append(
+                    StructuralDirective(
+                        name=name,
+                        tokens=tokens,
+                        line=section.line,
+                        defaulted=True,
+                    )
+                )
+                effective_keys.add(name)
+        sections.append(
+            section.model_copy(
+                update={
+                    "directives": tuple(directives),
+                    "parsed_keys": frozenset(effective_keys),
+                }
+            )
+        )
+    return document.model_copy(update={"sections": tuple(sections)})
 
 
 class FortiGateParser:
@@ -686,6 +1171,44 @@ class FortiGateParser:
             for original_line in raw.splitlines()
             if (match := _CONFIG_VERSION.fullmatch(original_line.strip())) is not None
         )
+        physical_lines = raw.splitlines()
+        marker_prefixes = ("#config-version=", *_BACKUP_MARKERS)
+        marker_counts = {
+            prefix: sum(line.strip().startswith(prefix) for line in physical_lines)
+            for prefix in marker_prefixes
+        }
+        first_config_line = next(
+            (
+                index
+                for index, line in enumerate(physical_lines)
+                if line.strip().startswith("config ")
+            ),
+            None,
+        )
+        markers_before_configuration = bool(
+            first_config_line is not None
+            and all(
+                sum(
+                    index < first_config_line and pattern.fullmatch(line.strip()) is not None
+                    for index, line in enumerate(physical_lines)
+                )
+                == 1
+                for pattern in _BACKUP_MARKERS.values()
+            )
+        )
+        nonempty_lines = tuple(line.strip() for line in physical_lines if line.strip())
+        complete_backup = bool(
+            len(config_headers) == 1
+            and nonempty_lines
+            and nonempty_lines[0].startswith("#config-version=")
+            and nonempty_lines[-1] == "end"
+            and all(count == 1 for count in marker_counts.values())
+            and markers_before_configuration
+            and all(
+                sum(pattern.fullmatch(line) is not None for line in nonempty_lines) == 1
+                for pattern in _BACKUP_MARKERS.values()
+            )
+        )
         identity_model: str | None = None
         firmware_version: str | None = None
         identity_keys: set[str] = set()
@@ -693,6 +1216,11 @@ class FortiGateParser:
             identity_model = config_headers[0].group("model")
             firmware_version = config_headers[0].group("version")
             identity_keys.update({"model", "firmware-version"})
+        complete_backup = bool(
+            complete_backup
+            and firmware_version is not None
+            and firmware_version.startswith(("7.2.", "7.4."))
+        )
 
         hostname: str | None = None
         hostname_proven = False
@@ -810,8 +1338,13 @@ class FortiGateParser:
                 frame.section, frozenset()
             )
             if projected_keys is not None and (
-                raw_key != key or key not in projected_keys | tolerated_keys
+                not _is_canonical_key_form(frame.section, raw_key, key)
+                or key not in projected_keys | tolerated_keys
             ):
+                frame.mark_ambiguous()
+            if frame.section in {"gui-dashboard", "widget"} and key in _RELEVANT_KEYS[
+                "system admin"
+            ]:
                 frame.mark_ambiguous()
             frame.record(
                 StructuralDirective(
@@ -824,7 +1357,7 @@ class FortiGateParser:
             if certainty is EvidenceCertainty.AMBIGUOUS:
                 frame.mark_ambiguous()
 
-        for line_number, original_line in enumerate(raw.splitlines(), start=1):
+        for line_number, original_line in _logical_lines(raw):
             line = original_line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -843,14 +1376,21 @@ class FortiGateParser:
             ):
                 raise ValueError("ambiguous directive")
             if keyword == "config":
+                config_payload = _payload(line, "config", "malformed config directive")
                 config_tokens = _tokens(
-                    _payload(line, "config", "malformed config directive"),
+                    config_payload,
                     "malformed config directive",
                 )
                 raw_section = " ".join(" ".join(config_tokens).split())
                 section = raw_section.lower()
                 is_top_level = not stack
-                if not is_top_level and section in _PROJECTED_SECTIONS:
+                nested_in_vdom = bool(
+                    stack
+                    and stack[0].section == "vdom"
+                    and stack[0].entry_name is not None
+                    and len(stack) == 1
+                )
+                if not is_top_level and section in _PROJECTED_SECTIONS and not nested_in_vdom:
                     raise ValueError("nested projected section")
                 compact_section = _SECTION_SEPARATORS.sub("", section)
                 resembles_audited = any(
@@ -872,15 +1412,13 @@ class FortiGateParser:
                 audited_section = section if is_top_level and section in _AUDITED_SECTIONS else None
                 if audited_section is not None and audited_section in parsed_sections:
                     raise ValueError("duplicate audited section")
-                if section in _PROJECTED_SECTIONS and section in parsed_sections:
-                    raise ValueError("duplicate projected section")
                 frame = _Frame(section=section, audited_section=audited_section, line=line_number)
                 is_projected_shape = (
                     section in _AUDITED_SECTIONS
                     or section in _PROJECTED_SECTIONS
                     or section in _PROJECTED_CHILD_KEYS
                 )
-                if is_projected_shape and raw_section != section:
+                if is_projected_shape and config_payload != section:
                     frame.certainty = EvidenceCertainty.AMBIGUOUS
                 if stack:
                     parent_section = stack[-1].section
@@ -972,7 +1510,8 @@ class FortiGateParser:
                 payload = _payload(line, "set", "malformed set directive")
                 key, value_payload = _key_and_value(payload, "malformed set directive")
                 raw_key = payload.split(maxsplit=1)[0]
-                if raw_key != key:
+                canonical_key = _is_canonical_key_form(frame.section, raw_key, key)
+                if not canonical_key:
                     frame.mark_ambiguous()
                 if key not in _RELEVANT_KEYS[frame.audited_section]:
                     if key not in _TOLERATED_NON_PROBATIVE_KEYS[frame.audited_section]:
@@ -1016,7 +1555,9 @@ class FortiGateParser:
                     ):
                         raise ValueError("invalid hostname value")
                     hostname = normalized_hostname
-                    hostname_proven = True
+                    hostname_proven = (
+                        canonical_key and frame.certainty is EvidenceCertainty.CERTAIN
+                    )
                 elif frame.audited_section == "system interface" and key == "allowaccess":
                     lowered = set(map(str.lower, value_tokens))
                     contains_whitespace = any(
@@ -1078,6 +1619,11 @@ class FortiGateParser:
                         name=key,
                         tokens=tuple(value_tokens),
                         line=line_number,
+                        certainty=(
+                            EvidenceCertainty.CERTAIN
+                            if canonical_key
+                            else EvidenceCertainty.AMBIGUOUS
+                        ),
                     )
                 )
                 frame.values[key] = " ".join(value_tokens)
@@ -1104,21 +1650,48 @@ class FortiGateParser:
                             )
                         )
                     else:
-                        frame.invalidate(mutation_name)
-                        frame.record(
-                            StructuralDirective(
-                                name=mutation_name,
-                                tokens=mutation_tokens[1:],
-                                line=line_number,
-                                mutation=True,
+                        if (
+                            keyword == "unset"
+                            and len(mutation_tokens) == 1
+                            and mutation_name in _CERTAIN_UNSET_KEYS.get(
+                                frame.section, frozenset()
                             )
-                        )
+                            and _is_canonical_key_form(
+                                frame.section, mutation_tokens[0], mutation_name
+                            )
+                        ):
+                            frame.record_certain_unset(mutation_name, line_number)
+                        else:
+                            frame.invalidate(mutation_name)
+                            frame.record(
+                                StructuralDirective(
+                                    name=mutation_name,
+                                    tokens=mutation_tokens[1:],
+                                    line=line_number,
+                                    mutation=True,
+                                )
+                            )
                     continue
                 if frame.audited_section in _AUDITED_ENTRY_SECTIONS and frame.entry_name is None:
                     raise ValueError("directive outside audited entry")
                 mutation_payload = _payload(line, keyword, "malformed mutation directive")
                 mutation_tokens = _tokens(mutation_payload, "malformed mutation directive")
                 key = mutation_tokens[0].lower()
+                known_keys = (
+                    _RELEVANT_KEYS[frame.audited_section]
+                    | _TOLERATED_NON_PROBATIVE_KEYS[frame.audited_section]
+                )
+                if (
+                    keyword == "unset"
+                    and len(mutation_tokens) == 1
+                    and key in known_keys
+                    and _is_canonical_key_form(frame.section, mutation_tokens[0], key)
+                ):
+                    frame.record_certain_unset(key, line_number)
+                    if frame.audited_section == "system global" and key == "hostname":
+                        hostname = None
+                        hostname_proven = False
+                    continue
                 frame.record(
                     StructuralDirective(
                         name=key,
@@ -1162,7 +1735,60 @@ class FortiGateParser:
             raise ValueError("unsupported or incomplete FortiGate configuration")
 
         sections = tuple(_structural_section(frame) for frame in top_level_frames)
+        sections, vdom_scope_is_complete = _project_single_vdom(sections)
+        complete_backup = complete_backup and vdom_scope_is_complete
+        sections = _merge_repeated_projected_sections(sections)
         document = StructuralDocument(sections=sections)
+        document = _materialize_documented_defaults(
+            document,
+            firmware_version,
+            complete_backup,
+        )
+        admin_section = document.section("system admin")
+        if admin_section is not None:
+            normalized_administrators: list[Administrator] = []
+            for administrator in administrators:
+                matches = tuple(
+                    entry for entry in admin_section.entries if entry.name == administrator.name
+                )
+                if len(matches) != 1:
+                    normalized_administrators.append(administrator)
+                    continue
+                entry = matches[0]
+                directives = _directive_map(entry)
+                two_factor = directives.get("two-factor")
+                peer_auth = directives.get("peer-auth")
+                normalized_administrators.append(
+                    administrator.model_copy(
+                        update={
+                            "two_factor": (
+                                two_factor.tokens[0].casefold()
+                                if two_factor is not None and len(two_factor.tokens) == 1
+                                else None
+                            ),
+                            "peer_auth": (
+                                peer_auth.tokens[0].casefold() == "enable"
+                                if peer_auth is not None
+                                and len(peer_auth.tokens) == 1
+                                and peer_auth.tokens[0].casefold() in _SUPPORTED_PEER_AUTH
+                                else None
+                            ),
+                            "parsed_keys": frozenset(directives),
+                            "defaulted_keys": frozenset(
+                                name
+                                for name, directive in directives.items()
+                                if directive.defaulted
+                            ),
+                            "proof_state": (
+                                ProofState.PROVEN
+                                if entry.certainty is EvidenceCertainty.CERTAIN
+                                and (two_factor is not None or peer_auth is not None)
+                                else ProofState.UNKNOWN
+                            ),
+                        }
+                    )
+                )
+            administrators = normalized_administrators
         zones, policies, local_users, security_profiles = _project_generic_sections(document)
         firewall_projection = project_firewall(document)
         object_references = tuple(
@@ -1185,6 +1811,7 @@ class FortiGateParser:
         )
         configuration = FortiGateConfiguration(
             hostname=hostname,
+            complete_backup=complete_backup,
             device_identity=device_identity,
             interfaces=tuple(interfaces),
             zones=zones,

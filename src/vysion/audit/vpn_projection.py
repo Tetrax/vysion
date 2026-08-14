@@ -141,6 +141,9 @@ def _project_ssl(section: StructuralSection) -> SslVpnSettings:
         source_addresses=source_addresses,
         default_portal=default_portal,
         parsed_keys=_typed_keys(values, final_invalidated),
+        defaulted_keys=frozenset(
+            name for name, directive in values.items() if directive.defaulted
+        ),
         invalidated_keys=final_invalidated,
         proof_state=_section_proof(section, final_invalidated),
     )
@@ -170,6 +173,9 @@ def _project_phase1(entry: StructuralEntry) -> IpsecPhase1:
         dh_groups=dh_groups,
         proposals=proposals,
         parsed_keys=parsed_keys,
+        defaulted_keys=frozenset(
+            name for name, directive in values.items() if directive.defaulted
+        ),
         invalidated_keys=final_invalidated,
         proof_state=_entry_proof(
             entry,
@@ -203,6 +209,9 @@ def _project_phase2(entry: StructuralEntry) -> IpsecPhase2:
         dh_groups=dh_groups,
         proposals=proposals,
         parsed_keys=parsed_keys,
+        defaulted_keys=frozenset(
+            name for name, directive in values.items() if directive.defaulted
+        ),
         invalidated_keys=final_invalidated,
         proof_state=_entry_proof(
             entry,

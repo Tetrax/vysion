@@ -49,9 +49,8 @@ end
 
 
 def test_duplicate_generic_entries_and_sections_never_become_certain() -> None:
-    with pytest.raises(ValueError, match="duplicate projected section"):
-        FortiGateParser().parse(
-            """config system zone
+    repeated = FortiGateParser().parse(
+        """config system zone
     edit "internet"
         set interface "wan1"
     next
@@ -62,7 +61,9 @@ config system zone
     next
 end
 """
-        )
+    )
+    assert {zone.name for zone in repeated.zones} == {"internet", "private"}
+    assert all(zone.proof_state is ProofState.PROVEN for zone in repeated.zones)
 
     configuration = FortiGateParser().parse(
         """config system zone
@@ -170,12 +171,55 @@ end
     assert _finding(raw, "IAM-ADMIN-MFA-001").status is AuditStatus.UNKNOWN
 
 
+def test_unknown_grandchild_under_gui_dashboard_invalidates_admin_mfa() -> None:
+    raw = """config system admin
+    edit "secops"
+        set two-factor fortitoken
+        config gui-dashboard
+            edit 1
+                set name "safe"
+                config widget
+                    edit 1
+                        set type licinfo
+                        config vendor-extra
+                            set two-factor none
+                        end
+                    next
+                end
+            next
+        end
+    next
+end
+"""
+
+    assert _finding(raw, "IAM-ADMIN-MFA-001").status is AuditStatus.UNKNOWN
+
+
 def test_unknown_nested_global_section_invalidates_hostname_compliance_proof() -> None:
     raw = """config system global
     set hostname safe.example
     config vendor-extra
         set hostname fortigate
     end
+end
+"""
+
+    assert _finding(raw, "SYS-HOSTNAME-001").status is AuditStatus.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "section, directive",
+    [
+        ("system global", "HOSTNAME"),
+        ("system global", '"hostname"'),
+        ("SYSTEM GLOBAL", "hostname"),
+    ],
+)
+def test_ambiguous_hostname_spelling_never_produces_pass(
+    section: str, directive: str
+) -> None:
+    raw = f"""config {section}
+    set {directive} safe.example
 end
 """
 

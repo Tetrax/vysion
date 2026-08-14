@@ -154,10 +154,13 @@ def test_m4_ssl_explicit_usage_or_enable_fails(directives: tuple[str, ...]) -> N
     assert audit(ssl_settings(*directives))["VPN-SSL-001"].status is AuditStatus.FAIL
 
 
-def test_m4_ssl_disabled_with_usage_is_contradictory_unknown() -> None:
+def test_m4_ssl_disabled_with_retained_usage_is_unknown() -> None:
     raw = ssl_settings("set status disable", 'set source-interface "wan1"')
 
-    assert audit(raw)["VPN-SSL-001"].status is AuditStatus.UNKNOWN
+    finding = audit(raw)["VPN-SSL-001"]
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert finding.applicability is Applicability.UNKNOWN
 
 
 @pytest.mark.parametrize("ike", ["1", "3", "0"])

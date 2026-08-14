@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from vysion.audit.controls._evidence import evidence_for_directive, evidence_for_section
+from vysion.audit.controls._evidence import (
+    evidence_for_complete_backup,
+    evidence_for_directive,
+    evidence_for_section,
+)
 from vysion.audit.models import (
     AffectedObject,
     Applicability,
@@ -23,6 +27,7 @@ from vysion.audit.models import (
     IpsecPhase2,
     ProofState,
     RiskAssessment,
+    StructuralSection,
 )
 from vysion.audit.rulesets.vpn_crypto import (
     VPN_CRYPTO_RULESET_ID,
@@ -127,10 +132,14 @@ def _ambiguous_or_invalid_section(
 def _ipsec_sections(
     configuration: FortiGateConfiguration,
 ):
-    return (
-        configuration.document.section(_PHASE1_SECTION),
-        configuration.document.section(_PHASE2_SECTION),
-    )
+    phase1 = configuration.document.section(_PHASE1_SECTION)
+    phase2 = configuration.document.section(_PHASE2_SECTION)
+    if configuration.complete_backup and phase1 is None and phase2 is None:
+        return (
+            StructuralSection(name=_PHASE1_SECTION, line=1),
+            StructuralSection(name=_PHASE2_SECTION, line=1),
+        )
+    return phase1, phase2
 
 
 def _ipsec_namespace(
@@ -161,6 +170,12 @@ def _ipsec_namespace(
 def _ipsec_not_applicable_evidence(
     configuration: FortiGateConfiguration,
 ) -> tuple[EvidenceItem, ...]:
+    if (
+        configuration.complete_backup
+        and configuration.document.section(_PHASE1_SECTION) is None
+        and configuration.document.section(_PHASE2_SECTION) is None
+    ):
+        return (evidence_for_complete_backup(),)
     phases = (
         (_PHASE1_SECTION, configuration.ipsec_phase1),
         (_PHASE2_SECTION, configuration.ipsec_phase2),
@@ -242,42 +257,40 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
 
     usage_keys = {"source-interface", "source-address", "default-portal"}
     certain_usage = usage_keys & set(settings.parsed_keys)
-    uncertain_usage = usage_keys & set(settings.invalidated_keys)
     status_certain = "status" in settings.parsed_keys
     status = settings.status
 
     if status_certain and status == "disable":
-        if certain_usage or uncertain_usage:
+        if certain_usage:
             return _finding(
                 control_id=control_id,
                 title=title,
                 status=AuditStatus.UNKNOWN,
                 applicability=Applicability.UNKNOWN,
                 evidence=(
-                    "SSL-VPN désactivé mais une configuration d'usage est présente ou ambiguë",
+                    "SSL-VPN désactivé mais des directives d'usage explicites subsistent",
                 ),
                 evidence_items=(
-                    _directive(
-                        configuration,
-                        "vpn ssl settings",
-                        "status",
-                        certainty=EvidenceCertainty.CERTAIN,
-                    ),
-                    _directive(
-                        configuration,
-                        "vpn ssl settings",
-                        "source-interface",
-                        certainty=EvidenceCertainty.AMBIGUOUS,
+                    _directive(configuration, "vpn ssl settings", "status"),
+                    *tuple(
+                        _directive(configuration, "vpn ssl settings", key)
+                        for key in sorted(certain_usage)
                     ),
                 ),
-                affected_objects=(),
+                affected_objects=_affected(("ssl-vpn",), "ssl-vpn"),
                 message=(
-                    "Le statut disable contredit une configuration SSL-VPN "
-                    "présente ou ambiguë."
+                    "Le statut disable contredit des directives d'usage conservées; "
+                    "l'absence effective d'exposition n'est pas prouvée."
                 ),
                 risk=_ssl_risk(),
-                recommendation="Réconcilier le statut et les directives d'usage SSL-VPN.",
-                remediation="Supprimer l'usage ou activer/documenter explicitement le service.",
+                recommendation=(
+                    "Retirer les directives d'usage résiduelles ou fournir une preuve "
+                    "autoritaire de l'état effectif."
+                ),
+                remediation=(
+                    "Nettoyer source-interface, source-address et default-portal, "
+                    "puis relancer l'audit."
+                ),
             )
         if (
             settings.proof_state is not ProofState.PROVEN

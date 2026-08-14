@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from vysion.audit.controls._evidence import (
+    evidence_for_complete_backup,
     evidence_for_directive,
     evidence_for_entry,
     evidence_for_section,
@@ -282,6 +283,28 @@ def check_admin_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
 def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
     section = configuration.document.section("user local")
     if section is None:
+        if configuration.complete_backup:
+            return _finding(
+                configuration=configuration,
+                control_id="IAM-LOCAL-USER-MFA-001",
+                title="MFA des utilisateurs locaux",
+                status=AuditStatus.PASS,
+                applicability=Applicability.NOT_APPLICABLE,
+                evidence=("backup complet: namespace user local absent",),
+                section="user local",
+                directive="two-factor",
+                evidence_items=(evidence_for_complete_backup(),),
+                object_type="local-user",
+                message="Aucun utilisateur local n'est déclaré dans le backup complet.",
+                risk=_risk(
+                    "Aucun compte local n'est présent dans le backup complet.",
+                    "Le contrôle MFA local n'est pas applicable.",
+                    "faible",
+                    "Surveiller toute création ultérieure de compte local.",
+                ),
+                recommendation="Conserver l'absence de comptes locaux si elle est attendue.",
+                remediation="Aucune remédiation immédiate.",
+            )
         return _finding(
             configuration=configuration,
             control_id="IAM-LOCAL-USER-MFA-001",
@@ -448,7 +471,7 @@ def _absence_finding(
     incomplete = False
     for namespace, section in zip(namespaces, sections, strict=True):
         if section is None:
-            incomplete = True
+            incomplete = incomplete or not configuration.complete_backup
             continue
         for entry in section.entries:
             if entry.name.casefold() == target.casefold():
@@ -532,13 +555,27 @@ def _absence_finding(
         control_id=control_id,
         title=title,
         status=AuditStatus.PASS,
-        applicability=Applicability.APPLICABLE,
+        applicability=(
+            Applicability.NOT_APPLICABLE
+            if configuration.complete_backup
+            and any(
+                configuration.document.section(namespace) is None
+                for namespace in namespaces
+            )
+            else Applicability.APPLICABLE
+        ),
         evidence=(f"compte {target} absent des namespaces certains",),
         section=namespaces[0],
         directive="account",
         evidence_items=tuple(
             evidence_for_section(configuration.document, namespace)
             for namespace in namespaces
+            if configuration.document.section(namespace) is not None
+        )
+        + (
+            (evidence_for_complete_backup(),)
+            if any(configuration.document.section(namespace) is None for namespace in namespaces)
+            else ()
         ),
         object_type=object_type,
         message=f"Le compte par défaut {target} est absent des sections contrôlées.",

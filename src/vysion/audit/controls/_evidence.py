@@ -76,6 +76,7 @@ def evidence_for_directive(
         tokens=directive.tokens if directive is not None else (),
         line=source_line,
         certainty=certainty or source_certainty,
+        defaulted=directive.defaulted if directive is not None else False,
     )
 
 
@@ -123,4 +124,14 @@ def evidence_for_entry(
         entry=entry_name,
         line=entry.line if entry else section.line if section else None,
         certainty=certainty or source_certainty,
+    )
+
+
+def evidence_for_complete_backup() -> EvidenceItem:
+    return EvidenceItem(
+        section="backup-metadata",
+        directive="complete-backup",
+        tokens=("true",),
+        line=1,
+        certainty=EvidenceCertainty.CERTAIN,
     )

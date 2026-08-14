@@ -83,6 +83,7 @@ class EvidenceItem(BaseModel):
     tokens: tuple[str, ...] = ()
     line: int | None = Field(default=None, ge=1)
     certainty: EvidenceCertainty = EvidenceCertainty.CERTAIN
+    defaulted: bool = False
 
     @property
     def value_tokens(self) -> tuple[str, ...]:
@@ -97,6 +98,7 @@ class StructuralDirective(BaseModel):
     line: int = Field(ge=1)
     certainty: EvidenceCertainty = EvidenceCertainty.CERTAIN
     mutation: bool = False
+    defaulted: bool = False
 
     @property
     def value_tokens(self) -> tuple[str, ...]:
@@ -292,6 +294,7 @@ class Policy(BaseModel):
     internet_service: bool | None = None
     internet_service_names: tuple[ObjectReference, ...] = ()
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
     @property
@@ -320,6 +323,8 @@ class ServiceObject(BaseModel):
     udp_port_ranges: tuple[PortRange, ...] = ()
     members: tuple[ObjectReference, ...] = ()
     service_type: str = "custom"
+    protocol: str | None = None
+    protocol_number: int | None = Field(default=None, ge=0, le=255)
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
@@ -390,6 +395,7 @@ class Administrator(BaseModel):
     two_factor: str | None = None
     peer_auth: bool | None = None
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
 
@@ -400,6 +406,7 @@ class LocalUser(BaseModel):
     type: str | None = None
     two_factor: str | None = None
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
 
@@ -453,6 +460,7 @@ class SslVpnSettings(BaseModel):
     source_addresses: tuple[str, ...] = ()
     default_portal: str | None = None
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     invalidated_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
@@ -469,6 +477,7 @@ class IpsecPhase1(BaseModel):
     proposals: tuple[str, ...] = ()
     dh_groups: tuple[int, ...] = ()
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     invalidated_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
@@ -489,6 +498,7 @@ class IpsecPhase2(BaseModel):
     proposals: tuple[str, ...] = ()
     dh_groups: tuple[int, ...] = ()
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    defaulted_keys: frozenset[str] = Field(default_factory=frozenset)
     invalidated_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
@@ -502,6 +512,7 @@ class FortiGateConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     hostname: str | None = None
+    complete_backup: bool = False
     device_identity: DeviceIdentity = Field(default_factory=DeviceIdentity)
     interfaces: tuple[Interface, ...] = ()
     zones: tuple[Zone, ...] = ()

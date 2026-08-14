@@ -53,7 +53,9 @@ _POLICY_KEYS = frozenset(
         "internet-service-name",
     }
 )
-_SERVICE_KEYS = frozenset({"tcp-portrange", "udp-portrange", "member"})
+_SERVICE_KEYS = frozenset(
+    {"tcp-portrange", "udp-portrange", "member", "protocol", "protocol-number"}
+)
 _VIP_KEYS = frozenset({"extintf", "extip", "mappedip", "type"})
 _PROFILE_GROUP_KEYS = frozenset(
     {
@@ -192,19 +194,27 @@ def _profile_refs(directives: dict[str, StructuralDirective]) -> tuple[ObjectRef
 
 
 def _parse_port_ranges(tokens: tuple[str, ...]) -> tuple[PortRange, ...] | None:
+    def parse_component(value: str) -> tuple[int, int] | None:
+        match = re.fullmatch(r"(\d+)(?:-(\d+))?", value)
+        if match is None:
+            return None
+        start = int(match.group(1))
+        end = int(match.group(2) or match.group(1))
+        return (start, end) if 0 <= start <= end <= 65535 else None
+
     ranges: list[PortRange] = []
     for token in tokens:
         for value in re.split(r"[\s,]+", token.strip()):
             if not value:
                 continue
-            match = re.fullmatch(r"(\d+)(?:[-:](\d+))?", value)
-            if match is None:
+            components = value.split(":")
+            if len(components) > 2:
                 return None
-            start = int(match.group(1))
-            end = int(match.group(2) or match.group(1))
-            if not 0 <= start <= end <= 65535:
+            destination = parse_component(components[0])
+            source = parse_component(components[1]) if len(components) == 2 else None
+            if destination is None or (len(components) == 2 and source is None):
                 return None
-            ranges.append(PortRange(start=start, end=end))
+            ranges.append(PortRange(start=destination[0], end=destination[1]))
     return tuple(ranges)
 
 
@@ -287,6 +297,11 @@ def _project_policy(entry: StructuralEntry) -> Policy:
         parsed_keys=frozenset(directives)
         if entry.certainty is EvidenceCertainty.CERTAIN
         else frozenset(),
+        defaulted_keys=frozenset(
+            name for name, directive in directives.items() if directive.defaulted
+        )
+        if entry.certainty is EvidenceCertainty.CERTAIN
+        else frozenset(),
         proof_state=(
             ProofState.PROVEN
             if entry.certainty is EvidenceCertainty.CERTAIN
@@ -310,15 +325,74 @@ def _project_service(entry: StructuralEntry, service_type: str) -> ServiceObject
         if "udp-portrange" in directives
         else ()
     )
+    port_ranges_valid = (
+        tcp is not None
+        and udp is not None
+        and ("tcp-portrange" not in directives or bool(tcp))
+        and ("udp-portrange" not in directives or bool(udp))
+    )
     members = _references(_tokens(directives, "member"), "service-member", "service")
-    valid = tcp is not None and udp is not None
-    has_definition = bool(tcp or udp or members)
+    protocol = _single(directives, "protocol")
+    normalized_protocol = protocol.casefold() if protocol is not None else None
+    protocol_cardinality_valid = (
+        "protocol" not in directives or len(_tokens(directives, "protocol")) == 1
+    )
+    protocol_number_token = _single(directives, "protocol-number")
+    protocol_number_cardinality_valid = (
+        "protocol-number" not in directives
+        or len(_tokens(directives, "protocol-number")) == 1
+    )
+    protocol_number = None
+    protocol_number_valid = protocol_number_token is None
+    if protocol_number_token is not None:
+        try:
+            protocol_number = int(protocol_number_token)
+            protocol_number_valid = 0 <= protocol_number <= 255
+        except ValueError:
+            protocol_number_valid = False
+
+    protocol_valid = protocol_number_token is None
+    protocol_shape_valid = True
+    has_explicit_port_ranges = bool(tcp or udp)
+    if normalized_protocol == "all":
+        protocol_shape_valid = not has_explicit_port_ranges
+        tcp = (PortRange(start=0, end=65535),)
+        udp = (PortRange(start=0, end=65535),)
+    elif normalized_protocol in {"icmp", "icmp6"}:
+        protocol_shape_valid = not has_explicit_port_ranges
+    elif normalized_protocol == "ip":
+        protocol_valid = protocol_number_valid and protocol_number is not None
+        protocol_shape_valid = not has_explicit_port_ranges
+        if protocol_number == 6:
+            tcp = (PortRange(start=0, end=65535),)
+        elif protocol_number == 17:
+            udp = (PortRange(start=0, end=65535),)
+    elif normalized_protocol == "tcp/udp/sctp" or normalized_protocol is None:
+        pass
+    else:
+        protocol_valid = False
+
+    valid = (
+        port_ranges_valid
+        and protocol_valid
+        and protocol_shape_valid
+        and protocol_cardinality_valid
+        and protocol_number_cardinality_valid
+    )
+    has_definition = bool(tcp or udp or members) or normalized_protocol in {
+        "all",
+        "icmp",
+        "icmp6",
+        "ip",
+    }
     return ServiceObject(
         name=entry.name,
         tcp_port_ranges=tcp or (),
         udp_port_ranges=udp or (),
         members=members,
         service_type=service_type,
+        protocol=normalized_protocol,
+        protocol_number=protocol_number if protocol_number_valid else None,
         parsed_keys=frozenset(directives)
         if entry.certainty is EvidenceCertainty.CERTAIN
         else frozenset(),
