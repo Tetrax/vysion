@@ -1,0 +1,26 @@
+{
+  "id": "fortigate-vpn-crypto",
+  "version": "2026-08-13",
+  "allowed_tokens": [
+    "aes256-sha256",
+    "aes256-sha384",
+    "aes256-sha512",
+    "aes256gcm",
+    "aes256gcm-prfsha256",
+    "aes256gcm-prfsha384",
+    "aes256gcm-prfsha512",
+    "chacha20poly1305",
+    "chacha20poly1305-prfsha256",
+    "chacha20poly1305-prfsha384",
+    "chacha20poly1305-prfsha512"
+  ],
+  "denied_tokens": [
+    "3des-md5",
+    "aes128-sha256",
+    "aes256-md5",
+    "aes256-sha1",
+    "aes256gcm-prfmd5"
+  ],
+  "allowed_dh_groups": [14, 15, 16, 17, 18, 19, 20, 21],
+  "denied_dh_groups": [1, 2, 5, 13]
+}

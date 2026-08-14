@@ -1,0 +1,61 @@
+{
+  "id": "vysion-external-services",
+  "version": "2026-08-13",
+  "cti": {
+    "30E,50E": [
+      "IPV4_SNS",
+      "HASH_SNS_SHA1",
+      "HASH_SNS_SHA256",
+      "FQDN_SNS",
+      "URL_SNS"
+    ],
+    "60E,80E,40F": [
+      "IPV4_CTI_SNS",
+      "IPV4_SNS",
+      "HASH_CTI_SNS_SHA1",
+      "HASH_CTI_SNS_SHA256",
+      "HASH_SNS_SHA1",
+      "HASH_SNS_SHA256",
+      "FQDN_SNS",
+      "URL_SNS",
+      "FQDN_CTI_SNS",
+      "URL_CTI_SNS"
+    ],
+    "default": [
+      "IPV4_CTI_SNS",
+      "IPV4_CTI_SNS2",
+      "IPV4_CTI_SNS3",
+      "IPV4_SNS",
+      "HASH_CTI_SNS_SHA1",
+      "HASH_CTI_SNS_SHA256",
+      "HASH_SNS_SHA1",
+      "HASH_SNS_SHA256",
+      "FQDN_SNS",
+      "URL_SNS",
+      "FQDN_CTI_SNS",
+      "URL_CTI_SNS"
+    ]
+  },
+  "isdb": {
+    "incoming": [
+      "VPN-Anonymous.VPN",
+      "Tor-Relay.Node",
+      "Tor-Exit.Node",
+      "Spam-Spamming.Server",
+      "Proxy-Proxy.Server",
+      "Phishing-Phishing.Server",
+      "Malicious-Malicious.Server",
+      "Botnet-C&C.Server"
+    ],
+    "outgoing": [
+      "VPN-Anonymous.VPN",
+      "Tor-Relay.Node",
+      "Spam-Spamming.Server",
+      "Proxy-Proxy.Server",
+      "Phishing-Phishing.Server",
+      "Malicious-Malicious.Server",
+      "Botnet-C&C.Server",
+      "Blockchain-Crypto.Mining.Pool"
+    ]
+  }
+}

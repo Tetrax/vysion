@@ -3,26 +3,47 @@ from pathlib import Path
 import pytest
 
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditStatus
+from vysion.audit.models import AuditContext, AuditStatus, ContextProvenance
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 
 _FIXTURE = Path(__file__).parents[1] / "fixtures" / "anonymized_fortigate_export.conf"
 
 
+def _finding(findings, control_id: str):
+    return next(finding for finding in findings if finding.control_id == control_id)
+
+
 def test_anonymized_realistic_fortigate_export_is_audited() -> None:
     configuration = FortiGateParser().parse(_FIXTURE.read_text(encoding="utf-8"))
 
-    findings = AuditEngine(default_registry()).run(configuration)
+    findings = AuditEngine(default_registry()).run(
+        configuration,
+        context=AuditContext(
+            utm_license=True,
+            operator_provenance=ContextProvenance(
+                source="anonymized-fixture",
+                method="explicit-test-context",
+            ),
+        ),
+    )
 
     assert configuration.hostname == "edge-lab.example"
     assert [interface.name for interface in configuration.interfaces] == ["wan1", "port1"]
     assert configuration.administrators[0].two_factor == "fortitoken"
-    assert [finding.status for finding in findings] == [
-        AuditStatus.PASS,
-        AuditStatus.PASS,
-        AuditStatus.PASS,
-    ]
+    assert configuration.zones[0].name == "trusted"
+    assert configuration.zones[0].interfaces[0].name == "port1"
+    assert configuration.local_users[0].name == "vpn-demo-user"
+    assert configuration.local_users[0].two_factor == "fortitoken"
+    assert configuration.security_profiles[0].name == "certificate-inspection-demo"
+    assert configuration.policies[0].source_interfaces[0].name == "trusted"
+    assert any(
+        reference.name == "example-documentation-net" and reference.relation == "source-address"
+        for reference in configuration.policies[0].object_references
+    )
+    statuses = {finding.control_id: finding.status for finding in findings}
+    assert len(statuses) == 24
+    assert all(status is AuditStatus.PASS for status in statuses.values())
 
 
 def test_utf8_bom_is_accepted() -> None:
@@ -97,7 +118,7 @@ end
 
     findings = AuditEngine(default_registry()).run(FortiGateParser().parse(raw))
 
-    assert findings[1].status is AuditStatus.UNKNOWN
+    assert _finding(findings, "NET-WAN-MGMT-001").status is AuditStatus.UNKNOWN
 
 
 def test_missing_admin_mfa_directive_is_unknown() -> None:
@@ -110,7 +131,7 @@ end
 
     findings = AuditEngine(default_registry()).run(FortiGateParser().parse(raw))
 
-    assert findings[2].status is AuditStatus.UNKNOWN
+    assert _finding(findings, "IAM-ADMIN-MFA-001").status is AuditStatus.UNKNOWN
 
 
 def test_nested_subsection_does_not_become_parent_evidence() -> None:
@@ -127,7 +148,7 @@ end
 
     findings = AuditEngine(default_registry()).run(FortiGateParser().parse(raw))
 
-    assert findings[1].status is AuditStatus.UNKNOWN
+    assert _finding(findings, "NET-WAN-MGMT-001").status is AuditStatus.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -169,14 +190,14 @@ def test_interface_role_wan_is_used_as_identification_evidence() -> None:
     raw = """config system interface
     edit "port1"
         set role wan
-        set allowaccess ping https
+        set allowaccess ping
     next
 end
 """
 
     findings = AuditEngine(default_registry()).run(FortiGateParser().parse(raw))
 
-    assert findings[1].status is AuditStatus.PASS
+    assert _finding(findings, "NET-WAN-MGMT-001").status is AuditStatus.PASS
 
 
 @pytest.mark.parametrize(
@@ -202,6 +223,21 @@ end
 """
 
     with pytest.raises(ValueError, match="duplicate audited section"):
+        FortiGateParser().parse(raw)
+
+
+def test_duplicate_audited_entry_is_rejected_fail_closed() -> None:
+    raw = """config system interface
+    edit "wan1"
+        set allowaccess ping https
+    next
+    edit "wan1"
+        set allowaccess ping https
+    next
+end
+"""
+
+    with pytest.raises(ValueError, match="duplicate audited entry"):
         FortiGateParser().parse(raw)
 
 
@@ -239,8 +275,10 @@ end
 
     findings = AuditEngine(default_registry()).run(FortiGateParser().parse(raw))
 
-    assert findings[2].status is AuditStatus.FAIL
-    assert findings[2].evidence == ("administrateur sans MFA: known-failure",)
+    assert _finding(findings, "IAM-ADMIN-MFA-001").status is AuditStatus.FAIL
+    assert _finding(findings, "IAM-ADMIN-MFA-001").evidence == (
+        "administrateur sans MFA: known-failure",
+    )
 
 
 def test_non_audited_entry_names_are_not_lexically_interpreted() -> None:

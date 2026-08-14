@@ -1,0 +1,12 @@
+{
+  "id": "fortigate-dnsfilter-blocklists",
+  "version": "2026-08-13",
+  "models": {
+    "30E": ["IPV4_SNS"],
+    "50E": ["IPV4_SNS"],
+    "60E": ["IPV4_CTI_SNS", "IPV4_SNS"],
+    "80E": ["IPV4_CTI_SNS", "IPV4_SNS"],
+    "40F": ["IPV4_CTI_SNS", "IPV4_SNS"]
+  },
+  "default": ["IPV4_CTI_SNS", "IPV4_CTI_SNS2", "IPV4_CTI_SNS3", "IPV4_SNS"]
+}

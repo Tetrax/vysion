@@ -25,8 +25,17 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .results { margin-top: 1.5rem; }
 .results-header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
 .download-links { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .75rem; }
+.context-summary { margin: 1rem 0 1.5rem; border: 1px solid #29425d; border-radius: .8rem; padding: 1rem; background: rgba(7, 16, 29, .55); }
+.context-summary h3 { margin-bottom: .75rem; }
+.context-summary dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .75rem; margin: 0; }
+.context-summary dl div { display: grid; gap: .2rem; }
+.context-summary dt { color: #91a7c0; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
+.context-summary dd { margin: 0; font-weight: 700; }
 .finding-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
 article { border: 1px solid #29425d; border-radius: .8rem; padding: 1rem; background: #0b192a; }
+.finding-metadata { display: flex; flex-wrap: wrap; gap: .4rem .75rem; margin-bottom: .8rem; color: #b9c8da; font-size: .82rem; }
+.finding-metadata span { border-radius: .35rem; background: #132941; padding: .25rem .4rem; }
+.risk-details { padding-left: 1.2rem; color: #b9c8da; font-size: .9rem; }
 .status { display: inline-block; margin-bottom: .8rem; border-radius: 999px; padding: .25rem .6rem; font-size: .75rem; font-weight: 900; }
 .status-pass { background: #163f35; color: #91f1d8; }
 .status-fail { background: #4c2028; color: #ffb0b9; }

@@ -1,0 +1,12 @@
+{
+  "id": "fortigate-sensitive-protocols",
+  "version": "2026-08-13",
+  "protocols": [
+    {"id": "kerberos", "transports": [{"protocol": "tcp", "ranges": [[88, 88]]}, {"protocol": "udp", "ranges": [[88, 88]]}]},
+    {"id": "ldap", "transports": [{"protocol": "tcp", "ranges": [[389, 389]]}, {"protocol": "udp", "ranges": [[389, 389]]}]},
+    {"id": "ldaps", "transports": [{"protocol": "tcp", "ranges": [[636, 636]]}]},
+    {"id": "radius", "transports": [{"protocol": "udp", "ranges": [[1812, 1813]]}]},
+    {"id": "smb", "transports": [{"protocol": "tcp", "ranges": [[445, 445]]}]},
+    {"id": "netbios", "transports": [{"protocol": "tcp", "ranges": [[137, 139]]}, {"protocol": "udp", "ranges": [[137, 139]]}]}
+  ]
+}

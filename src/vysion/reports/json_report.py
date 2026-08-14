@@ -1,20 +1,23 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from vysion.adapters.fortiguard import FortiGuardResult
-from vysion.audit.models import AuditFinding
+from vysion.audit.models import AuditContext, AuditFinding
 
 
 class JsonAuditReport(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    """Versioned canonical report; every other renderer consumes this model."""
 
-    schema_version: int = 1
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: int = Field(default=2, frozen=True)
     report_id: UUID
     created_at: AwareDatetime
     expires_at: AwareDatetime
     source_name: str
+    context: AuditContext = Field(default_factory=AuditContext)
     fortiguard: FortiGuardResult
     findings: tuple[AuditFinding, ...]
 
