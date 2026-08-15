@@ -323,7 +323,7 @@ def test_admin_certain_peer_auth_is_not_applicable() -> None:
         )
     )["IAM-ADMIN-MFA-001"]
 
-    assert finding.status is AuditStatus.PASS
+    assert finding.status is AuditStatus.NOT_APPLICABLE
     assert finding.applicability is Applicability.NOT_APPLICABLE
 
 
@@ -430,7 +430,7 @@ def test_local_user_mfa_mutation_invalidates_explicit_disabled_value(mutation: s
 def test_empty_certain_local_user_section_is_not_applicable() -> None:
     finding = audit("config user local\nend\n")["IAM-LOCAL-USER-MFA-001"]
 
-    assert finding.status is AuditStatus.PASS
+    assert finding.status is AuditStatus.NOT_APPLICABLE
     assert finding.applicability is Applicability.NOT_APPLICABLE
 
 

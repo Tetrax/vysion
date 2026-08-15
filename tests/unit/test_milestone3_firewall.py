@@ -365,7 +365,7 @@ def test_all_service_ignores_explicit_deny_policy_as_not_applicable() -> None:
     raw = base_interfaces() + policy_block(policy_entry(1, action="deny", services=("ALL",)))
 
     finding = audit(raw)["FW-INTERNET-ALL-SERVICE-001"]
-    assert finding.status is AuditStatus.PASS
+    assert finding.status is AuditStatus.NOT_APPLICABLE
     assert finding.applicability is Applicability.NOT_APPLICABLE
 
 

@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 
 from vysion.adapters.fortiguard import FortiGuardClient, FortiGuardService
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditContext, ContextProvenance
+from vysion.audit.models import AuditContext, ContextProvenance, EvidenceCertainty
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.config import Settings
@@ -165,6 +165,72 @@ def _audit_context(
     )
 
 
+async def _read_parsed_configuration(
+    configuration: UploadFile,
+    *,
+    max_upload_bytes: int,
+    parser: FortiGateParser,
+):
+    content = await configuration.read(max_upload_bytes + 1)
+    if len(content) > max_upload_bytes:
+        raise HTTPException(status_code=413, detail="configuration exceeds upload limit")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="configuration must be UTF-8") from exc
+    try:
+        return parser.parse(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _preview_sdwan_zones(configuration) -> list[dict[str, object]]:
+    section = configuration.document.section("system sdwan")
+    if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
+        return []
+    zones: list[dict[str, object]] = []
+    for entry in section.entries:
+        if entry.certainty is not EvidenceCertainty.CERTAIN:
+            continue
+        interfaces = sorted(
+            {
+                token
+                for directive in entry.directives
+                if directive.name in {"interface", "member"}
+                and directive.certainty is EvidenceCertainty.CERTAIN
+                and not directive.mutation
+                for token in directive.tokens
+            }
+        )
+        zones.append({"name": entry.name, "interfaces": interfaces})
+    return zones
+
+
+def _preview_payload(configuration) -> dict[str, object]:
+    identity = configuration.device_identity
+    return {
+        "hostname": identity.hostname,
+        "model": identity.model,
+        "firmware_version": identity.firmware_version,
+        "serial_number": identity.serial_number,
+        "interfaces": [
+            {
+                "name": interface.name,
+                "role": interface.role,
+            }
+            for interface in configuration.interfaces
+        ],
+        "zones": [
+            {
+                "name": zone.name,
+                "interfaces": [reference.name for reference in zone.interfaces],
+            }
+            for zone in configuration.zones
+        ],
+        "sdwan_zones": _preview_sdwan_zones(configuration),
+    }
+
+
 def create_app(
     settings: Settings | None = None,
     fortiguard: FortiGuardService | None = None,
@@ -195,6 +261,18 @@ def create_app(
     async def health() -> dict[str, str]:
         return {"status": "ok", "service": "vysion", "version": "2"}
 
+    @app.post("/api/audits/preview")
+    async def preview_audit(configuration: Annotated[UploadFile, File()]) -> JSONResponse:
+        parsed = await _read_parsed_configuration(
+            configuration,
+            max_upload_bytes=resolved_settings.max_upload_bytes,
+            parser=parser,
+        )
+        return JSONResponse(
+            content=_preview_payload(parsed),
+            headers={"Cache-Control": "no-store, private"},
+        )
+
     @app.post("/api/audits", status_code=status.HTTP_201_CREATED)
     async def create_audit(
         configuration: Annotated[UploadFile, File()],
@@ -219,17 +297,11 @@ def create_app(
             form.getlist("context_operator"), "context_operator"
         )
         context_method = _optional_form_value(form.getlist("context_method"), "context_method")
-        content = await configuration.read(resolved_settings.max_upload_bytes + 1)
-        if len(content) > resolved_settings.max_upload_bytes:
-            raise HTTPException(status_code=413, detail="configuration exceeds upload limit")
-        try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise HTTPException(status_code=400, detail="configuration must be UTF-8") from exc
-        try:
-            parsed = parser.parse(text)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        parsed = await _read_parsed_configuration(
+            configuration,
+            max_upload_bytes=resolved_settings.max_upload_bytes,
+            parser=parser,
+        )
 
         context = _audit_context(
             selected_wans=selected_wans,

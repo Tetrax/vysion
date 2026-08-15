@@ -9,6 +9,7 @@ class AuditStatus(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
     UNKNOWN = "UNKNOWN"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
     ERROR = "ERROR"
 
 
@@ -576,6 +577,35 @@ class AuditFinding(BaseModel):
         if isinstance(value, str):
             return RiskAssessment(summary=value)
         return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def canonicalize_not_applicable(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        applicability = value.get("applicability")
+        applicability_is_not_applicable = applicability in {
+            Applicability.NOT_APPLICABLE,
+            Applicability.NOT_APPLICABLE.value,
+        }
+        status = value.get("status")
+        if applicability_is_not_applicable and status in {
+            AuditStatus.FAIL,
+            AuditStatus.FAIL.value,
+            AuditStatus.ERROR,
+            AuditStatus.ERROR.value,
+        }:
+            raise ValueError("FAIL or ERROR cannot be marked not applicable")
+        status_is_not_applicable = status in {
+            AuditStatus.NOT_APPLICABLE,
+            AuditStatus.NOT_APPLICABLE.value,
+        }
+        if not applicability_is_not_applicable and not status_is_not_applicable:
+            return value
+        canonical = dict(value)
+        canonical["status"] = AuditStatus.NOT_APPLICABLE
+        canonical["applicability"] = Applicability.NOT_APPLICABLE
+        return canonical
 
     @property
     def structured_evidence(self) -> tuple[EvidenceItem, ...]:

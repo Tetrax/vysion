@@ -119,7 +119,12 @@ def test_m4_registry_vpn_findings_have_p0_metadata() -> None:
 def test_m4_strong_configuration_passes_all_vpn_controls() -> None:
     findings = audit(strong())
 
-    assert [findings[control_id].status for control_id in VPN_IDS] == [AuditStatus.PASS] * 4
+    assert [findings[control_id].status for control_id in VPN_IDS] == [
+        AuditStatus.NOT_APPLICABLE,
+        AuditStatus.PASS,
+        AuditStatus.PASS,
+        AuditStatus.PASS,
+    ]
     assert findings["VPN-SSL-001"].applicability is Applicability.NOT_APPLICABLE
     assert all(
         item.certainty.value == "certain"
@@ -227,7 +232,7 @@ def test_m4_dh_both_explicitly_empty_is_not_applicable() -> None:
     raw = ssl_settings("set status disable") + ipsec(phase1="", phase2="")
     finding = audit(raw)["VPN-DH-001"]
 
-    assert finding.status is AuditStatus.PASS
+    assert finding.status is AuditStatus.NOT_APPLICABLE
     assert finding.applicability is Applicability.NOT_APPLICABLE
 
 
@@ -248,7 +253,7 @@ def test_m4_all_explicitly_disabled_ipsec_phases_are_not_applicable_with_proof()
 
     for control_id in ("VPN-IKEV2-001", "VPN-DH-001", "VPN-CRYPTO-001"):
         finding = findings[control_id]
-        assert finding.status is AuditStatus.PASS
+        assert finding.status is AuditStatus.NOT_APPLICABLE
         assert finding.applicability is Applicability.NOT_APPLICABLE
         assert finding.evidence_items
         assert all(item.certainty.value == "certain" for item in finding.evidence_items)

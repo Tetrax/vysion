@@ -39,7 +39,7 @@ def observation(
         source="https://www.fortiguard.com/psirt",
         ruleset_id="fortiguard-psirt-critical-high",
         ruleset_version="2026-08-13",
-        observed_at=datetime(2026, 8, 13, 20, 0, tzinfo=UTC),
+        observed_at=datetime.now(UTC) - timedelta(minutes=1),
         complete=True,
     )
 
@@ -416,7 +416,7 @@ def test_m6_ldaps_absent_namespace_is_unknown_but_explicit_empty_is_not_applicab
     empty = check_ldaps_connectors(FortiGateParser().parse(ldap()))
 
     assert missing.status is AuditStatus.UNKNOWN
-    assert empty.status is AuditStatus.PASS
+    assert empty.status is AuditStatus.NOT_APPLICABLE
     assert empty.applicability.value == "not_applicable"
 
 

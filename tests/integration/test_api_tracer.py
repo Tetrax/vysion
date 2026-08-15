@@ -212,7 +212,9 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
 
     assert response.status_code == 201
     findings = response.json()["findings"]
-    assert [finding["status"] for finding in findings] == ["PASS"] * len(CONTROL_IDS)
+    expected_statuses = ["PASS"] * len(CONTROL_IDS)
+    expected_statuses[CONTROL_IDS.index("VPN-SSL-001")] = "NOT_APPLICABLE"
+    assert [finding["status"] for finding in findings] == expected_statuses
     assert all(
         finding["evidence_items"]
         and all(item["certainty"] == "certain" for item in finding["evidence_items"])
@@ -321,10 +323,11 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
             "SYS-HOSTNAME-001",
             "NET-WAN-MGMT-001",
             "IAM-ADMIN-MFA-001",
-            "IAM-LOCAL-USER-MFA-001",
             "IAM-DEFAULT-ADMIN-001",
             "IAM-GUEST-ACCOUNT-001",
         }
+        assert statuses["IAM-LOCAL-USER-MFA-001"] == "NOT_APPLICABLE"
+        assert payload["findings"][3]["applicability"] == "not_applicable"
         assert all(
             finding["applicability"] == "unknown"
             for finding in payload["findings"]

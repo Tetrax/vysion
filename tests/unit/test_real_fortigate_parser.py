@@ -48,7 +48,14 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
     )
     statuses = {finding.control_id: finding.status for finding in findings}
     assert len(statuses) == 24
-    assert all(status is AuditStatus.PASS for status in statuses.values())
+    assert statuses == {
+        finding.control_id: (
+            AuditStatus.NOT_APPLICABLE
+            if finding.control_id == "VPN-SSL-001"
+            else AuditStatus.PASS
+        )
+        for finding in findings
+    }
 
 
 def test_utf8_bom_is_accepted() -> None:
@@ -1013,7 +1020,7 @@ end
 
     for control_id in expected_not_applicable:
         finding = findings[control_id]
-        assert finding.status is AuditStatus.PASS
+        assert finding.status is AuditStatus.NOT_APPLICABLE
         assert finding.applicability.value == "not_applicable"
         assert finding.evidence_items
         assert all(item.certainty.value == "certain" for item in finding.evidence_items)
