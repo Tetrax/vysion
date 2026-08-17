@@ -643,15 +643,19 @@ def create_app(
         )
         firmware_version = parsed.device_identity.firmware_version
         if firmware_version is not None:
+            # External adapter trust boundary: ordinary provider/injection
+            # failures become a typed ERROR observation and never abort the
+            # audit.  BaseException is intentionally not caught here.
             try:
-                psirt = PsirtObservation.model_validate(
-                    await fortiguard.check_psirt(firmware_version)
-                )
+                candidate = await fortiguard.check_psirt(firmware_version)
             except Exception:
                 psirt = error_psirt_observation(firmware_version)
-            context = context.model_copy(
-                update={"psirt": psirt}
-            )
+            else:
+                try:
+                    psirt = PsirtObservation.model_validate(candidate)
+                except Exception:
+                    psirt = error_psirt_observation(firmware_version)
+            context = context.model_copy(update={"psirt": psirt})
 
         created_at = clock()
         report = JsonAuditReport(

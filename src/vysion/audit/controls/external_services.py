@@ -770,13 +770,20 @@ def check_fortiguard_psirt(
 ) -> AuditFinding:
     observation = context.psirt if context is not None else None
     if not _complete_correlated_observation(configuration, observation):
+        if observation is not None and observation.status is ExternalObservationStatus.ERROR:
+            evidence = (
+                "Vérification externe PSIRT impossible : l'adaptateur a rencontré "
+                "une erreur d'exécution ; aucune vulnérabilité ne peut être établie.",
+            )
+        else:
+            evidence = (
+                "Observation PSIRT absente, incomplète ou non corrélée à la version FortiOS.",
+            )
         return _psirt_finding(
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
             observation=observation,
-            evidence=(
-                "Observation PSIRT absente, incomplète ou non corrélée à la version FortiOS.",
-            ),
+            evidence=evidence,
             affected_objects=(),
             message=(
                 "La vulnérabilité de la version FortiOS ne peut pas être établie "

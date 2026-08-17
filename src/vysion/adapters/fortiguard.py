@@ -59,6 +59,15 @@ class FortiGuardClient:
                 status=FortiGuardStatus.UNKNOWN,
                 detail=f"FortiGuard unavailable: {type(exc).__name__}",
             )
+        except Exception as exc:
+            # External adapter boundary: retain execution failures as typed
+            # service state so the audit can still produce a report.  Do not
+            # catch BaseException; cancellation and process-control signals
+            # must remain visible to the caller.
+            return FortiGuardResult(
+                status=FortiGuardStatus.ERROR,
+                detail=f"FortiGuard check failed: {type(exc).__name__}",
+            )
         if response.status_code != 200:
             return FortiGuardResult(
                 status=FortiGuardStatus.ERROR,
@@ -94,6 +103,9 @@ class FortiGuardClient:
                 **common,
             )
         except Exception:
+            # Unexpected provider execution failures stay typed and
+            # incomplete; the API/control boundary turns them into UNKNOWN.
+            # BaseException is intentionally allowed to propagate.
             return error_psirt_observation(fortios_version)
         if response.status_code != 200:
             return PsirtObservation(
