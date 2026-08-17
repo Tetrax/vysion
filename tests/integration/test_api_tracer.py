@@ -82,6 +82,7 @@ CONTROL_IDS = (
     "FW-BY-SEQUENCE-USAGE-001",
     "UTM-MAIL-FILTER-USAGE-001",
     "FW-SSL-SSH-PROFILE-001",
+    "CFG-UNUSED-SERVICE-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -334,6 +335,7 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "NET-SDWAN-USAGE-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
+    expected_statuses[CONTROL_IDS.index("CFG-UNUSED-SERVICE-001")] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("FW-BY-SEQUENCE-USAGE-001")] = "FAIL"
     assert [finding["status"] for finding in findings] == expected_statuses
     assert all(
@@ -477,6 +479,7 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "FW-BY-SEQUENCE-USAGE-001",
                     "UTM-MAIL-FILTER-USAGE-001",
                     "FW-SSL-SSH-PROFILE-001",
+                    "CFG-UNUSED-SERVICE-001",
                 }
                 else "P0"
             )

@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **42 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **43 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -36,7 +36,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 1 | Réseau / firewall | `verifier_vips_extintf_any` | A | `FW-VIP-EXTINTF-ANY-001` | Même détection d’exposition `extintf any`, à rejouer sur fixture V1. |
 | 2 | Réseau / firewall | `verifier_vs_extintf_any` | A | `FW-VSERVER-EXTINTF-ANY-001` | Même détection pour virtual servers. |
 | 3 | Réseau / firewall | `verifier_usage_by_sequence` | C | Nouveau contrôle de séquence/règle | Comptage/ordre historique absent du registre V2. |
-| 4 | Réseau / objets | `detecter_objets_non_utilises` | C | Projection objets + contrôle orphelins | V2 possède des résolutions de références, pas la restitution legacy complète des objets inutilisés. |
+| 4 | Réseau / objets | `detecter_objets_non_utilises` | A | `CFG-UNUSED-SERVICE-001` | Restitution typed des services réellement orphelins ; la portée est volontairement bornée à la famille service custom/groupe/policy complète. |
 | 5 | Système / administration | `verifier_compte_guest` | A | `IAM-GUEST-ACCOUNT-001` | Absence du compte guest. |
 | 6 | Système / administration | `verifier_compte_admin` | A | `IAM-DEFAULT-ADMIN-001` | Absence du compte administrateur par défaut. |
 | 7 | VPN | `verifier_vpn_ssl_utilisation` | A | `VPN-SSL-001` | État/usage SSL-VPN typé. |
@@ -95,11 +95,11 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 33**
+- **A — équivalents identifiés : 34**
 - **B — partiels identifiés : 1**
-- **C — absents identifiés : 25**
+- **C — absents identifiés : 24**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **37 / 59** (62,7 %)
+- Disposition réellement `MIGRATED` : **38 / 59** (64,4 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -185,7 +185,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | # | Capacité | Disposition | Justification |
 |---:|---|---|---|
 | 3 | Usage par séquence | `MIGRATED` | `FW-BY-SEQUENCE-USAGE-001` reproduit les trois critères legacy sur le document structurel : `global-label`, plusieurs interfaces, ou `any` dans `srcintf`/`dstintf`. L’absence ou l’ambiguïté reste UNKNOWN. |
-| 4 | Objets inutilisés | `LEGACY_REVIEW_REQUIRED` | La résolution de références existe, mais la restitution exhaustive legacy doit encore être définie. |
+| 4 | Objets inutilisés | `MIGRATED` | `CFG-UNUSED-SERVICE-001` restitue uniquement les services custom/groupes certainement orphelins depuis le graphe typed. Namespace absent/incomplet, collision, mutation, cycle ou résolution incomplète restent UNKNOWN ; famille certaine vide NOT_APPLICABLE. |
 | 8 | Service ALL dans les règles | `LEGACY_REVIEW_REQUIRED` | La portée exacte de la règle legacy doit être comparée aux services/groupes résolus. |
 | 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
 | 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |

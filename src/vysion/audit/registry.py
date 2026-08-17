@@ -29,6 +29,7 @@ from vysion.audit.controls.network_parity import (
     check_sip_alg,
     check_ssl_ssh_profiles,
 )
+from vysion.audit.controls.object_usage import check_unused_service_objects
 from vysion.audit.controls.references import check_reference_integrity
 from vysion.audit.controls.system import check_automatic_revision_backups, check_hostname
 from vysion.audit.controls.system_parity import (
@@ -104,4 +105,5 @@ def default_registry() -> tuple[Control, ...]:
         check_by_sequence_usage,
         check_mail_filter_usage,
         check_ssl_ssh_profiles,
+        check_unused_service_objects,
     )
