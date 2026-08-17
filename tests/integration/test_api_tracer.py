@@ -71,6 +71,7 @@ CONTROL_IDS = (
     "SYS-FORTIMANAGER-SYNC-001",
     "SYS-FORTIANALYZER-SYNC-001",
     "SYS-ADMIN-HTTPS-PORT-001",
+    "NET-SIP-ALG-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -312,6 +313,7 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "SYS-FORTIMANAGER-SYNC-001",
         "SYS-FORTIANALYZER-SYNC-001",
         "SYS-ADMIN-HTTPS-PORT-001",
+        "NET-SIP-ALG-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     assert [finding["status"] for finding in findings] == expected_statuses
@@ -445,6 +447,7 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "SYS-FORTIMANAGER-SYNC-001",
                     "SYS-FORTIANALYZER-SYNC-001",
                     "SYS-ADMIN-HTTPS-PORT-001",
+                    "NET-SIP-ALG-001",
                 }
                 else "P0"
             )

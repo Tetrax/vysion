@@ -43,6 +43,7 @@ _RELEVANT_KEYS = {
         "hostname",
         "revision-backup-on-logout",
         "revision-image-auto-backup",
+        "default-voip-alg-mode",
     },
     "system interface": {"ip", "allowaccess", "role"},
     "system admin": {"peer-auth", "two-factor"},

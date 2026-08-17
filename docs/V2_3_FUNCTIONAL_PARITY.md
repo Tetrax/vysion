@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **31 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **32 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -59,7 +59,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 24 | Système | `verifier_sauvegardes_automatiques` | A | `SYS-BACKUP-AUTO-001` | `revision-backup-on-logout` + `revision-image-auto-backup`. |
 | 25 | Administration / réseau | `verifier_acces_admin_[REDACTED]_via_loopback` | C | Projection loopback/FQDN/VIP + contrôle historique | Règle métier historique absente. |
 | 26 | Système / réseau | `verifier_dns_database` | C | Projection `system dns-database` | Entrée FQDN historique absente de V2. |
-| 27 | Réseau / firewall | `verifier_sip_alg` | C | Projection session-helper/VoIP | Règle SIP ALG historique absente ; projection VoIP V2 à compléter. |
+| 27 | Réseau / firewall | `verifier_sip_alg` | A | `NET-SIP-ALG-001` | Migré ; helper SIP certain ou mode ALG explicite FAIL, preuve incomplète UNKNOWN. |
 | 28 | UTM / external services | `verifier_fortisandbox_cloud` | C | Contrôle FortiSandbox Cloud | Dépend licence et région ; besoin d’AuditContext si non présent dans backup. |
 | 29 | UTM / external services | `verifier_anycast_fortiguard` | C | Contrôle Anycast FortiGuard | Aucun équivalent V2 identifié. |
 | 30 | UTM / external services | `verifier_mises_a_jour_fortiguard` | B | `UTM-AUTOUPDATE-001` | Proche des mises à jour AV/IPS, mais la portée FortiGuard legacy doit être comparée. |
@@ -95,9 +95,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 22**
+- **A — équivalents identifiés : 23**
 - **B — partiels identifiés : 3**
-- **C — absents identifiés : 34**
+- **C — absents identifiés : 33**
 - Total : **59 / 59**
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
@@ -115,6 +115,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 19 | Synchronisation FortiManager | `MIGRATED` | `SYS-FORTIMANAGER-SYNC-001`, mode et serveur typés. |
 | 25 | Accès admin historique via loopback | `LEGACY_REVIEW_REQUIRED` | Domaine/FQDN/VIP historique spécifique ; cible opérateur requise. |
 | 26 | DNS database historique | `LEGACY_REVIEW_REQUIRED` | FQDN historique spécifique ; cible opérateur requise. |
+| 27 | SIP ALG | `MIGRATED` | `NET-SIP-ALG-001`, absence du helper SIP et mode kernel-helper-based prouvés séparément. |
 | 45 | Port HTTPS admin | `MIGRATED` | `SYS-ADMIN-HTTPS-PORT-001`, 443 FAIL, port personnalisé PASS, preuve absente UNKNOWN. |
 
 ## Ordre de migration accélérée

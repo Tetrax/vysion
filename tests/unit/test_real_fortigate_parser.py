@@ -47,7 +47,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 31
+    assert len(statuses) == 32
     assert statuses == {
         finding.control_id: (
             AuditStatus.NOT_APPLICABLE
@@ -61,6 +61,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
                 "SYS-FORTIMANAGER-SYNC-001",
                 "SYS-FORTIANALYZER-SYNC-001",
                 "SYS-ADMIN-HTTPS-PORT-001",
+                "NET-SIP-ALG-001",
             }
             else AuditStatus.PASS
         )
