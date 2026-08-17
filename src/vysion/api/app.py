@@ -475,6 +475,30 @@ def _equipment_metadata(configuration: FortiGateConfiguration) -> EquipmentMetad
             for interface in configuration.interfaces
             if interface.zone is not None
         ),
+        policy_count=len(configuration.policies),
+        policy_enabled_count=sum(
+            policy.status == "enable" for policy in configuration.policies
+        ),
+        policy_disabled_count=sum(
+            policy.status == "disable" for policy in configuration.policies
+        ),
+        policy_status_unknown_count=sum(
+            policy.status not in {"enable", "disable"} for policy in configuration.policies
+        ),
+        service_object_count=(
+            len(configuration.service_objects) + len(configuration.service_groups)
+        ),
+        vip_count=(
+            len(configuration.vips)
+            + len(configuration.vip_groups)
+            + len(configuration.virtual_servers)
+        ),
+        security_profile_count=(
+            len(configuration.security_profiles) + len(configuration.utm_profiles)
+        ),
+        ipsec_tunnel_count=len(configuration.ipsec_phase1),
+        ssl_vpn_configured=configuration.ssl_vpn_settings is not None,
+        ha_configured=configuration.ha_settings is not None,
     )
 
 

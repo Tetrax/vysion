@@ -85,8 +85,8 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 50 | Wi-Fi | `verifier_frequency_handoff` | C | Projection Wi-Fi/handoff | Aucun support Wi-Fi V2. |
 | 51 | Wi-Fi | `verifier_tim_enable` | C | Projection Wi-Fi/TIM | Aucun support Wi-Fi V2. |
 | 52 | Reporting / statistiques | `verifier_logs_par_regle` | C | Statistiques de logs par règle | Nécessite données de configuration/runtime séparées. |
-| 53 | Reporting / inventaire | `exporter_utilisateurs_admins` | C | Inventaire administrateurs typé | V2 expose les findings mais pas encore cet inventaire dédié. |
-| 54 | Reporting / statistiques | `compter_regles_activ_ou_desactiv` | C | Statistiques policies | Aucun équivalent V2. |
+| 53 | Reporting / inventaire | `exporter_utilisateurs_admins` | A | Inventaire administrateurs typé | Feuille Comptes XLSX et JSON canonique, sans secret d'authentification. |
+| 54 | Reporting / statistiques | `compter_regles_activ_ou_desactiv` | A | Statistiques policies | Comptages total/enable/disable/inconnu depuis les policies typées. |
 | 55 | Reporting / statistiques | `collect_schedule_data` | C | Statistiques schedules | Aucun équivalent V2. |
 | 56 | Réseau / firewall | `verifier_ssl_ssh_profiles` | C | Projection SSL/SSH profiles | Aucun contrôle V2 dédié. |
 | 57 | Wi-Fi | `verifier_band_conformite` | C | Projection Wi-Fi/bande | Aucun support Wi-Fi V2. |
@@ -95,9 +95,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 31**
+- **A — équivalents identifiés : 33**
 - **B — partiels identifiés : 1**
-- **C — absents identifiés : 27**
+- **C — absents identifiés : 25**
 - Total : **59 / 59**
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
@@ -144,6 +144,16 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 43 | IPS | `MIGRATED` | Profils utilisés et statut sont projetés et contrôlés. |
 | 44 | Application Control | `MIGRATED` | Profils utilisés, entrées et options sont projetés et contrôlés. |
 | 46-51, 57-59 | Wi-Fi/FortiAP | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne contient les namespaces wireless-controller ; le format legacy est observable mais aucun contrôle spéculatif n’est enregistré. |
+
+## Dispositions explicites du Lot reporting / inventaires / exports
+
+| # | Capacité | Disposition | Justification |
+|---:|---|---|---|
+| 52 | Logs par règle | `BLOCKED_EXTERNAL_SOURCE` | Les compteurs de logs sont runtime et absents des backups ; ils restent explicitement non renseignés. |
+| 53 | Inventaire administrateurs | `MIGRATED` | Les comptes typés sont exposés dans le JSON canonique et la feuille XLSX Comptes, sans credential. |
+| 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
+| 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | Les références de policy existent mais les objets schedule ne sont pas encore projetés complètement. |
+| 56 | Profils SSL/SSH | `LEGACY_REVIEW_REQUIRED` | La projection générique ne permet pas encore de reproduire la règle legacy dédiée sans ambiguïté. |
 
 ## Ordre de migration accélérée
 

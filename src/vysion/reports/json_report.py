@@ -20,6 +20,16 @@ class EquipmentMetadata(BaseModel):
     zone_names: tuple[str, ...] = ()
     sdwan_zone_names: tuple[str, ...] = ()
     interface_zone_relations: tuple[str, ...] = ()
+    policy_count: int = 0
+    policy_enabled_count: int = 0
+    policy_disabled_count: int = 0
+    policy_status_unknown_count: int = 0
+    service_object_count: int = 0
+    vip_count: int = 0
+    security_profile_count: int = 0
+    ipsec_tunnel_count: int = 0
+    ssl_vpn_configured: bool = False
+    ha_configured: bool = False
 
 
 class AccountMetadata(BaseModel):

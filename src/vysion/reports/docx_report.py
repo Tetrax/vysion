@@ -185,6 +185,31 @@ def _add_summary(document: DocumentType, report: JsonAuditReport) -> None:
     )
 
 
+def _add_inventory(document: DocumentType, report: JsonAuditReport) -> None:
+    equipment = report.equipment
+    document.add_heading("Inventaire de configuration", level=1)
+    document.add_paragraph(
+        "Ces volumes proviennent uniquement des objets effectivement projetés depuis "
+        "la configuration ; aucune métrique runtime n'est estimée."
+    )
+    _table(
+        document,
+        ("Élément", "Volume / état"),
+        (
+            ("Règles firewall", equipment.policy_count),
+            ("Règles firewall actives (explicites)", equipment.policy_enabled_count),
+            ("Règles firewall désactivées (explicites)", equipment.policy_disabled_count),
+            ("Règles firewall statut inconnu", equipment.policy_status_unknown_count),
+            ("Objets service", equipment.service_object_count),
+            ("VIP / groupes VIP / virtual servers", equipment.vip_count),
+            ("Profils de sécurité", equipment.security_profile_count),
+            ("Tunnels IPsec phase 1", equipment.ipsec_tunnel_count),
+            ("SSL-VPN configuré", "Oui" if equipment.ssl_vpn_configured else "Non"),
+            ("HA configuré", "Oui" if equipment.ha_configured else "Non"),
+        ),
+    )
+
+
 def _add_risk_table(document: DocumentType, report: JsonAuditReport) -> None:
     document.add_heading("Tableau récapitulatif final des risques", level=1)
     risk_views = [view for view in finding_views(report) if view.finding.status is AuditStatus.FAIL]
@@ -251,6 +276,8 @@ def render_docx(report: JsonAuditReport) -> bytes:
     _add_context(document, report)
     document.add_page_break()
     _add_summary(document, report)
+    document.add_page_break()
+    _add_inventory(document, report)
     document.add_page_break()
     document.add_heading("Détail des contrôles", level=1)
     last_domain = None

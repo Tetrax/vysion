@@ -325,6 +325,29 @@ def _append_equipment_sheet(workbook: Workbook, report: JsonAuditReport) -> None
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
 
+def _append_inventory_sheet(workbook: Workbook, report: JsonAuditReport) -> None:
+    sheet = workbook.create_sheet("Inventaire configuration")
+    equipment = report.equipment
+    rows = (
+        ("Règles firewall", equipment.policy_count),
+        ("Règles firewall actives (explicites)", equipment.policy_enabled_count),
+        ("Règles firewall désactivées (explicites)", equipment.policy_disabled_count),
+        ("Règles firewall statut inconnu", equipment.policy_status_unknown_count),
+        ("Objets service", equipment.service_object_count),
+        ("VIP / groupes VIP / virtual servers", equipment.vip_count),
+        ("Profils de sécurité", equipment.security_profile_count),
+        ("Tunnels IPsec phase 1", equipment.ipsec_tunnel_count),
+        ("SSL-VPN configuré", "Oui" if equipment.ssl_vpn_configured else "Non"),
+        ("HA configuré", "Oui" if equipment.ha_configured else "Non"),
+    )
+    for row in rows:
+        sheet.append(row)
+    sheet.column_dimensions["A"].width = 42
+    sheet.column_dimensions["B"].width = 18
+    for cell in sheet["A"]:
+        cell.font = Font(bold=True)
+
+
 def render_xlsx(report: JsonAuditReport) -> bytes:
     workbook = Workbook()
     _append_context_sheet(workbook, report)
@@ -335,6 +358,7 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
     _append_statistics_sheet(workbook, report)
     _append_accounts_sheet(workbook, report)
     _append_equipment_sheet(workbook, report)
+    _append_inventory_sheet(workbook, report)
 
     output = BytesIO()
     workbook.save(output)

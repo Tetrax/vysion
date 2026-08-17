@@ -22,7 +22,12 @@ type AuditContext = {
   ha?: boolean | null; mpls?: boolean | null; utm_license?: boolean | null; utm_license_details?: UtmLicenseDetails | null
   operator_provenance?: { source: string; operator?: string | null; method?: string | null } | null
 }
-type AuditReport = { schema_version?: number; report_id: string; expires_at: string; context?: AuditContext; fortiguard: { status: string; detail: string }; findings: Finding[] }
+type EquipmentInventory = {
+  policy_count: number; policy_enabled_count: number; policy_disabled_count: number; policy_status_unknown_count: number
+  service_object_count: number; vip_count: number; security_profile_count: number; ipsec_tunnel_count: number
+  ssl_vpn_configured: boolean; ha_configured: boolean
+}
+type AuditReport = { schema_version?: number; report_id: string; expires_at: string; context?: AuditContext; equipment?: EquipmentInventory; fortiguard: { status: string; detail: string }; findings: Finding[] }
 type PreviewInterface = { name: string; role?: string | null; zone?: string | null }
 type PreviewZone = { name: string; interfaces: string[] }
 type Preview = { hostname?: string | null; model?: string | null; firmware_version?: string | null; serial_number?: string | null; interfaces: PreviewInterface[]; zones: PreviewZone[]; wan_relations?: { interface: string; zone: string }[]; sdwan_zones: PreviewZone[] }
@@ -103,6 +108,17 @@ function ContextSummary({ context }: { context: AuditContext }) {
     <div><dt>Provenance audit</dt><dd>{display(context.operator_provenance?.source)}</dd></div><div><dt>Analyste</dt><dd>{display(context.operator_provenance?.operator)}</dd></div><div><dt>Méthode</dt><dd>{display(context.operator_provenance?.method)}</dd></div>
   </dl></section>
 }
+
+function EquipmentInventorySummary({ equipment }: { equipment: EquipmentInventory }) {
+  return <section className="context-summary" aria-label="Inventaire de configuration"><h3>Inventaire de configuration</h3><dl>
+    <div><dt>Règles firewall</dt><dd>{equipment.policy_count}</dd></div><div><dt>Actives explicites</dt><dd>{equipment.policy_enabled_count}</dd></div>
+    <div><dt>Désactivées explicites</dt><dd>{equipment.policy_disabled_count}</dd></div><div><dt>Statut inconnu</dt><dd>{equipment.policy_status_unknown_count}</dd></div>
+    <div><dt>Objets service</dt><dd>{equipment.service_object_count}</dd></div><div><dt>VIP et virtual servers</dt><dd>{equipment.vip_count}</dd></div>
+    <div><dt>Profils de sécurité</dt><dd>{equipment.security_profile_count}</dd></div><div><dt>Tunnels IPsec</dt><dd>{equipment.ipsec_tunnel_count}</dd></div>
+    <div><dt>SSL-VPN configuré</dt><dd>{display(equipment.ssl_vpn_configured)}</dd></div><div><dt>HA configuré</dt><dd>{display(equipment.ha_configured)}</dd></div>
+  </dl><p className="intro">Volumes issus de la configuration projetée ; aucune métrique runtime n'est inventée.</p></section>
+}
+
 function formatEvidence(item: EvidenceValue): string {
   if (typeof item === 'string') return item
   const details = [
@@ -300,6 +316,7 @@ function App() {
       {preview && step === 'audit' && <section className="panel audit-panel" aria-live="polite"><p className="section-kicker">Étape 5</p><h2>Audit en cours</h2><p role="status">Audit en cours : analyse de la configuration et génération du rapport…</p><div className="progress-container"><div className="progress-track" role="progressbar" aria-label="Progression de l’audit" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={`${progress}%`}><span className="progress-fill" style={{ width: `${progress}%` }} /></div><p className="progress-text" aria-live="polite">{progress}%</p></div></section>}
       {report && step === 'results' && <section className="results" aria-live="polite"><div className="results-header"><div><p className="section-kicker">Étape 6 · Rapport {report.report_id.slice(0, 8)}</p><h2>Synthèse et résultats</h2><p>FortiGuard : <strong>{report.fortiguard.status}</strong>{report.schema_version ? ` · Schéma ${report.schema_version}` : ''}</p></div><div className="download-links" aria-label="Téléchargements du rapport"><a href={`/api/reports/${report.report_id}.json`}>JSON</a><a href={`/api/reports/${report.report_id}.docx`}>DOCX</a><a href={`/api/reports/${report.report_id}.xlsx`}>XLSX</a></div></div>
         {report.context && <ContextSummary context={report.context} />}
+        {report.equipment && <EquipmentInventorySummary equipment={report.equipment} />}
         <div className="summary-layout"><div className="stats" aria-label="Synthèse des statuts"><Stat label="TOTAL" value={ordered.length} /><Stat label="FAIL" value={count('FAIL')} tone="fail" /><Stat label="ERROR" value={count('ERROR')} tone="fail" /><Stat label="UNKNOWN" value={count('UNKNOWN')} tone="unknown" /><Stat label="PASS" value={count('PASS')} tone="pass" /><Stat label="NOT_APPLICABLE" value={count('NOT_APPLICABLE')} tone="na" /></div><div className="stats severity-stats" aria-label="Synthèse des sévérités"><Stat label="Critical" value={severityCount('critical')} /><Stat label="High" value={severityCount('high')} /><Stat label="Medium" value={severityCount('medium')} /><Stat label="Low" value={severityCount('low')} /><Stat label="Info" value={severityCount('info')} /></div></div>
         <div className="domain-summary" aria-label="Synthèse par domaine">{DOMAIN_ORDER.map((domain) => { const items = ordered.filter((finding) => domainOf(finding) === domain); return <div key={domain}><strong>{domain}</strong><span>{items.length} contrôle{items.length > 1 ? 's' : ''}</span><small>{items.length ? items.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])[0].status : '—'}</small></div> })}</div>
         <div className="filters" aria-label="Filtres des résultats">{(['ALL', 'FAIL', 'ERROR', 'UNKNOWN', 'PASS', 'NOT_APPLICABLE'] as Filter[]).map((item) => <button type="button" key={item} className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === 'ALL' ? 'Tous' : item}</button>)}</div>
