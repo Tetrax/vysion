@@ -100,27 +100,71 @@ def _entry_name(entry: StructuralEntry) -> tuple[str, StructuralDirective] | Non
     return directive.tokens[0].casefold(), directive
 
 
+def _session_sections(configuration: FortiGateConfiguration) -> tuple[StructuralSection, ...]:
+    return tuple(
+        section
+        for section in configuration.document.sections
+        if section.name == _SESSION_HELPER
+    )
+
+
 def _session_state(
     configuration: FortiGateConfiguration,
 ) -> tuple[bool, bool, tuple[EvidenceItem, ...]]:
     """Return (certain, sip_found, evidence) for the helper namespace."""
-    section = section_for(configuration.document, _SESSION_HELPER)
-    if section is None:
-        return False, False, (evidence_for_section(configuration.document, _SESSION_HELPER),)
-    if section.certainty is not EvidenceCertainty.CERTAIN or section.children:
-        return False, False, (evidence_for_section(configuration.document, _SESSION_HELPER),)
+    sections = _session_sections(configuration)
+    if len(sections) != 1:
+        return False, False, tuple(
+            evidence_for_section(
+                configuration.document,
+                _SESSION_HELPER,
+                certainty=EvidenceCertainty.AMBIGUOUS,
+            )
+            for _ in sections or (None,)
+        )
+
+    section = sections[0]
+    if (
+        section.certainty is not EvidenceCertainty.CERTAIN
+        or section.children
+        or section.directives
+    ):
+        return False, False, (
+            evidence_for_section(
+                configuration.document,
+                _SESSION_HELPER,
+                certainty=EvidenceCertainty.AMBIGUOUS,
+            ),
+        )
 
     evidence: list[EvidenceItem] = []
     uncertain = False
     sip_found = False
     for entry in section.entries:
-        if entry.certainty is not EvidenceCertainty.CERTAIN or entry.children:
+        if (
+            entry.certainty is not EvidenceCertainty.CERTAIN
+            or entry.children
+            or len(entry.directives) != 1
+        ):
             uncertain = True
+            evidence.append(
+                evidence_for_section(
+                    configuration.document,
+                    _SESSION_HELPER,
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                )
+            )
             continue
         named = _entry_name(entry)
         if named is None:
             uncertain = True
-            evidence.append(evidence_for_section(configuration.document, _SESSION_HELPER))
+            evidence.append(
+                evidence_for_section(
+                    configuration.document,
+                    _SESSION_HELPER,
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                )
+            )
             continue
         value, _ = named
         item = evidence_for_directive(
@@ -135,7 +179,11 @@ def _session_state(
 
     if uncertain:
         return False, sip_found, tuple(evidence) or (
-            evidence_for_section(configuration.document, _SESSION_HELPER),
+            evidence_for_section(
+                configuration.document,
+                _SESSION_HELPER,
+                certainty=EvidenceCertainty.AMBIGUOUS,
+            ),
         )
     return True, sip_found, tuple(evidence) or (
         evidence_for_section(configuration.document, _SESSION_HELPER),

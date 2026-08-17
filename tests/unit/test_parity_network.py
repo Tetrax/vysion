@@ -81,3 +81,37 @@ end
 """
 
     assert _finding(raw).status is AuditStatus.PASS
+
+
+def test_sip_section_level_directive_is_unknown_not_absence() -> None:
+    raw = """config system global
+    set default-voip-alg-mode kernel-helper-based
+end
+config system session-helper
+    set name sip
+end
+"""
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert all(item.certainty is not EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_sip_repeated_session_helper_sections_are_unknown_not_absence() -> None:
+    raw = """config system global
+    set default-voip-alg-mode kernel-helper-based
+end
+config system session-helper
+end
+config system session-helper
+    edit 1
+        set name sip
+    next
+end
+"""
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert all(item.certainty is not EvidenceCertainty.CERTAIN for item in finding.evidence_items)
