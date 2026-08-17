@@ -399,6 +399,7 @@ _PROJECTED_CHILD_KEYS = {
     "filters": {"category", "action"},
     "entries": {"category", "action"},
     "authentication-rule": {"groups", "portal"},
+    "https": {"cert-probe-failure", "sni-server-cert-check"},
 }
 _PROJECTED_CHILDREN = {
     "system sdwan": frozenset({"zone", "members", "health-check", "service"}),
@@ -406,6 +407,7 @@ _PROJECTED_CHILDREN = {
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
     "vpn ssl settings": frozenset({"authentication-rule"}),
     "firewall vip": frozenset({"realservers"}),
+    "firewall ssl-ssh-profile": frozenset({"https"}),
     "webfilter profile": frozenset({"web", "ftgd-wf"}),
     "dnsfilter profile": frozenset({"ftgd-dns"}),
     "application list": frozenset({"entries"}),
@@ -420,6 +422,7 @@ _PROJECTED_CHILDREN = {
     "filters": frozenset(),
     "entries": frozenset(),
     "authentication-rule": frozenset(),
+    "https": frozenset(),
 }
 _SECTION_SEPARATORS = re.compile(r"[\s._/-]+")
 _SUPPORTED_ALLOWACCESS = {

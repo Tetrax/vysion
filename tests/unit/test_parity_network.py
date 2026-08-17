@@ -271,3 +271,111 @@ end
     )
 
     assert finding.status is AuditStatus.UNKNOWN
+
+
+def test_ssl_ssh_used_profile_is_proven_through_nested_https() -> None:
+    raw = """#config-version=FGT60F-7.4.5-FW-build0000-240101:opmode=0:vdom=0:user=admin
+config firewall policy
+    edit 10
+        set ssl-ssh-profile "deep-inspection"
+    next
+end
+config firewall ssl-ssh-profile
+    edit "deep-inspection"
+        config https
+            set cert-probe-failure allow
+        end
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-SSL-SSH-PROFILE-001"
+    )
+
+    assert finding.status is AuditStatus.PASS
+    assert finding.affected_objects[0].name == "deep-inspection"
+    assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_ssl_ssh_used_nonconforming_profile_is_a_certain_failure() -> None:
+    raw = """#config-version=FGT60F-7.4.5-FW-build0000-240101:opmode=0:vdom=0:user=admin
+config firewall policy
+    edit 10
+        set ssl-ssh-profile "deep-inspection"
+    next
+end
+config firewall ssl-ssh-profile
+    edit "deep-inspection"
+        config https
+            set cert-probe-failure block
+            set sni-server-cert-check enable
+        end
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-SSL-SSH-PROFILE-001"
+    )
+
+    assert finding.status is AuditStatus.FAIL
+
+
+def test_ssl_ssh_unresolved_or_mutated_profile_is_unknown() -> None:
+    undefined_raw = """#config-version=FGT60F-7.4.5-FW-build0000-240101:opmode=0:vdom=0:user=admin
+config firewall policy
+    edit 10
+        set ssl-ssh-profile "missing"
+    next
+end
+config firewall ssl-ssh-profile
+end
+"""
+    mutated_raw = """#config-version=FGT60F-7.4.5-FW-build0000-240101:opmode=0:vdom=0:user=admin
+config firewall policy
+    edit 10
+        set ssl-ssh-profile "deep-inspection"
+    next
+end
+config firewall ssl-ssh-profile
+    edit "deep-inspection"
+        config https
+            set cert-probe-failure allow
+            unset cert-probe-failure
+        end
+    next
+end
+"""
+
+    for raw in (undefined_raw, mutated_raw):
+        configuration = FortiGateParser().parse(raw)
+        finding = next(
+            item
+            for item in AuditEngine(default_registry()).run(configuration)
+            if item.control_id == "FW-SSL-SSH-PROFILE-001"
+        )
+        assert finding.status is AuditStatus.UNKNOWN
+
+
+def test_ssl_ssh_control_is_not_applicable_before_legacy_version_threshold() -> None:
+    raw = """#config-version=FGT60F-7.4.4-FW-build0000-240101:opmode=0:vdom=0:user=admin
+config firewall policy
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-SSL-SSH-PROFILE-001"
+    )
+
+    assert finding.status is AuditStatus.NOT_APPLICABLE
+    assert finding.applicability.value == "not_applicable"

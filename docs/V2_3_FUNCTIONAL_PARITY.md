@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **41 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **42 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -99,7 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 1**
 - **C — absents identifiés : 25**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **36 / 59** (61,0 %)
+- Disposition réellement `MIGRATED` : **37 / 59** (62,7 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -178,7 +178,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 53 | Inventaire administrateurs | `MIGRATED` | Les comptes typés sont exposés dans le JSON canonique et la feuille XLSX Comptes, sans credential. |
 | 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
 | 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | Les références de policy existent mais les objets schedule ne sont pas encore projetés complètement. |
-| 56 | Profils SSL/SSH | `LEGACY_REVIEW_REQUIRED` | La projection générique ne permet pas encore de reproduire la règle legacy dédiée sans ambiguïté. |
+| 56 | Profils SSL/SSH | `MIGRATED` | `FW-SSL-SSH-PROFILE-001` résout les profils utilisés et valide le sous-bloc typed `https` aux seuils FortiOS exacts de V1 ; mutation/collision/résolution incomplète UNKNOWN. |
 
 ## Dispositions explicites du lot réseau
 

@@ -81,6 +81,7 @@ CONTROL_IDS = (
     "NET-SDWAN-USAGE-001",
     "FW-BY-SEQUENCE-USAGE-001",
     "UTM-MAIL-FILTER-USAGE-001",
+    "FW-SSL-SSH-PROFILE-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -315,6 +316,7 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
     findings = response.json()["findings"]
     expected_statuses = ["PASS"] * len(CONTROL_IDS)
     expected_statuses[CONTROL_IDS.index("VPN-SSL-001")] = "NOT_APPLICABLE"
+    expected_statuses[CONTROL_IDS.index("FW-SSL-SSH-PROFILE-001")] = "NOT_APPLICABLE"
     expected_statuses[CONTROL_IDS.index("SYS-BACKUP-AUTO-001")] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-REF-INTEGRITY-001")] = "UNKNOWN"
     for control_id in (
@@ -474,6 +476,7 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "NET-SDWAN-USAGE-001",
                     "FW-BY-SEQUENCE-USAGE-001",
                     "UTM-MAIL-FILTER-USAGE-001",
+                    "FW-SSL-SSH-PROFILE-001",
                 }
                 else "P0"
             )

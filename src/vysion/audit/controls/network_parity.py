@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from vysion.audit.controls._evidence import (
     evidence_for_directive,
     evidence_for_sdwan_member,
@@ -412,6 +414,317 @@ def check_by_sequence_usage(configuration: FortiGateConfiguration) -> AuditFindi
         evidence_items=(evidence_for_section(configuration.document, "firewall policy"),),
         affected=tuple(entry.name for entry in section.entries),
         message="Aucun critère legacy d’usage par séquence n’est présent.",
+    )
+
+
+def _ssl_ssh_finding(
+    *,
+    status: AuditStatus,
+    applicability: Applicability,
+    evidence: tuple[str, ...],
+    evidence_items: tuple[EvidenceItem, ...],
+    affected: tuple[str, ...],
+    message: str,
+) -> AuditFinding:
+    return AuditFinding(
+        control_id="FW-SSL-SSH-PROFILE-001",
+        title="Conformité des profils SSL/SSH utilisés",
+        status=status,
+        category="firewall",
+        priority=AuditPriority.P1,
+        severity=AuditSeverity.MEDIUM,
+        applicability=applicability,
+        evidence=evidence,
+        evidence_items=evidence_items,
+        affected_objects=tuple(
+            AffectedObject(name=name, object_type="ssl-ssh-profile") for name in affected
+        ),
+        message=message,
+        risk=RiskAssessment(
+            summary=(
+                "Un profil SSL/SSH utilisé peut appliquer un comportement de certificat "
+                "inattendu."
+            ),
+            impact=(
+                "L’inspection HTTPS peut bloquer ou traiter différemment des certificats "
+                "non vérifiables."
+            ),
+            likelihood="moyenne",
+            treatment="Aligner le sous-bloc https sur la règle legacy validée.",
+        ),
+        recommendation=(
+            "Configurer cert-probe-failure allow ou sni-server-cert-check disable "
+            "dans chaque profil utilisé."
+        ),
+        remediation=(
+            "Corriger les profils SSL/SSH concernés puis relancer l’audit."
+            if status is AuditStatus.FAIL
+            else "Aucune remédiation immédiate."
+        ),
+    )
+
+
+def _ssl_ssh_version_state(configuration: FortiGateConfiguration) -> bool | None:
+    version = configuration.device_identity.firmware_version
+    if version is None:
+        return None
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        return None
+    major, minor, patch = (int(part) for part in match.groups())
+    return major == 7 and ((minor == 2 and patch >= 11) or (minor == 4 and patch >= 5))
+
+
+def _nested_evidence(
+    *,
+    entry: StructuralEntry,
+    child: StructuralSection | None,
+    directive: StructuralDirective | None,
+    certainty: EvidenceCertainty,
+) -> EvidenceItem:
+    return EvidenceItem(
+        section="firewall ssl-ssh-profile -> https",
+        entry=entry.name,
+        directive=directive.name if directive is not None else None,
+        tokens=directive.tokens if directive is not None else (),
+        line=(
+            directive.line
+            if directive is not None
+            else child.line
+            if child is not None
+            else entry.line
+        ),
+        certainty=certainty,
+        defaulted=directive.defaulted if directive is not None else False,
+    )
+
+
+def check_ssl_ssh_profiles(configuration: FortiGateConfiguration) -> AuditFinding:
+    version_state = _ssl_ssh_version_state(configuration)
+    if version_state is False:
+        return _ssl_ssh_finding(
+            status=AuditStatus.PASS,
+            applicability=Applicability.NOT_APPLICABLE,
+            evidence=(
+                "FortiOS "
+                f"{configuration.device_identity.firmware_version}: contrôle non applicable",
+            ),
+            evidence_items=(
+                EvidenceItem(
+                    section="config-version",
+                    tokens=(configuration.device_identity.firmware_version or "",),
+                    certainty=EvidenceCertainty.CERTAIN,
+                ),
+            ),
+            affected=(),
+            message="La version FortiOS est hors du périmètre exact de la règle legacy.",
+        )
+    if version_state is None:
+        return _ssl_ssh_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("Version FortiOS absente ou non interprétable",),
+            evidence_items=(
+                EvidenceItem(
+                    section="config-version",
+                    certainty=EvidenceCertainty.INVALID,
+                ),
+            ),
+            affected=(),
+            message="L’applicabilité du contrôle SSL/SSH ne peut pas être déterminée.",
+        )
+
+    policy_section = section_for(configuration.document, "firewall policy")
+    used: dict[str, str] = {}
+    uncertainty = policy_section is None or (
+        policy_section is not None
+        and (
+            policy_section.certainty is not EvidenceCertainty.CERTAIN
+            or bool(policy_section.directives)
+            or bool(policy_section.children)
+        )
+    )
+    policy_evidence: list[EvidenceItem] = []
+    if policy_section is not None:
+        for entry in policy_section.entries:
+            matches = tuple(
+                directive
+                for directive in entry.directives
+                if directive.name == "ssl-ssh-profile"
+            )
+            if entry.certainty is not EvidenceCertainty.CERTAIN or entry.children:
+                uncertainty = True
+            if not matches:
+                continue
+            if (
+                len(matches) != 1
+                or matches[0].mutation
+                or matches[0].certainty is not EvidenceCertainty.CERTAIN
+                or len(matches[0].tokens) != 1
+                or not matches[0].tokens[0]
+            ):
+                uncertainty = True
+                continue
+            name = matches[0].tokens[0]
+            key = name.casefold()
+            if key in used and used[key] != name:
+                uncertainty = True
+            used[key] = name
+            policy_evidence.append(
+                evidence_for_directive(
+                    configuration.document,
+                    "firewall policy",
+                    "ssl-ssh-profile",
+                    entry_name=entry.name,
+                )
+            )
+
+    if not used:
+        if uncertainty:
+            return _ssl_ssh_finding(
+                status=AuditStatus.UNKNOWN,
+                applicability=Applicability.UNKNOWN,
+                evidence=("Usage des profils SSL/SSH absent ou ambigu",),
+                evidence_items=(
+                    evidence_for_section(
+                        configuration.document,
+                        "firewall policy",
+                        certainty=EvidenceCertainty.AMBIGUOUS,
+                    ),
+                ),
+                affected=(),
+                message="L’absence de profil SSL/SSH utilisé n’est pas certaine.",
+            )
+        return _ssl_ssh_finding(
+            status=AuditStatus.PASS,
+            applicability=Applicability.NOT_APPLICABLE,
+            evidence=("Aucun ssl-ssh-profile dans les politiques certaines",),
+            evidence_items=(evidence_for_section(configuration.document, "firewall policy"),),
+            affected=(),
+            message="Aucun profil SSL/SSH n’est utilisé par les politiques.",
+        )
+
+    profile_section = section_for(configuration.document, "firewall ssl-ssh-profile")
+    if profile_section is None or profile_section.certainty is not EvidenceCertainty.CERTAIN:
+        return _ssl_ssh_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("Définitions firewall ssl-ssh-profile absentes ou ambiguës",),
+            evidence_items=tuple(policy_evidence),
+            affected=tuple(used.values()),
+            message="Les profils utilisés ne peuvent pas être résolus avec certitude.",
+        )
+
+    profiles: dict[str, StructuralEntry] = {}
+    collisions: set[str] = set()
+    for entry in profile_section.entries:
+        key = entry.name.casefold()
+        if key in profiles or key in collisions:
+            profiles.pop(key, None)
+            collisions.add(key)
+            uncertainty = True
+        else:
+            profiles[key] = entry
+
+    violations: list[str] = []
+    compliant: list[str] = []
+    nested_items: list[EvidenceItem] = []
+    for key, display_name in used.items():
+        entry = profiles.get(key)
+        if entry is None or entry.certainty is not EvidenceCertainty.CERTAIN:
+            uncertainty = True
+            continue
+        https_children = tuple(child for child in entry.children if child.name == "https")
+        if len(https_children) > 1 or any(child.name != "https" for child in entry.children):
+            uncertainty = True
+            continue
+        if not https_children:
+            violations.append(display_name)
+            nested_items.append(
+                _nested_evidence(
+                    entry=entry,
+                    child=None,
+                    directive=None,
+                    certainty=EvidenceCertainty.CERTAIN,
+                )
+            )
+            continue
+        child = https_children[0]
+        if (
+            child.certainty is not EvidenceCertainty.CERTAIN
+            or child.entries
+            or child.children
+        ):
+            uncertainty = True
+            continue
+        directives = {
+            name: tuple(item for item in child.directives if item.name == name)
+            for name in ("cert-probe-failure", "sni-server-cert-check")
+        }
+        accepted: StructuralDirective | None = None
+        malformed = False
+        for name, matches in directives.items():
+            if not matches:
+                continue
+            if (
+                len(matches) != 1
+                or matches[0].mutation
+                or matches[0].certainty is not EvidenceCertainty.CERTAIN
+                or len(matches[0].tokens) != 1
+            ):
+                malformed = True
+                continue
+            expected = "allow" if name == "cert-probe-failure" else "disable"
+            if matches[0].tokens[0] == expected:
+                accepted = matches[0]
+        if accepted is not None:
+            compliant.append(display_name)
+            nested_items.append(
+                _nested_evidence(
+                    entry=entry,
+                    child=child,
+                    directive=accepted,
+                    certainty=EvidenceCertainty.CERTAIN,
+                )
+            )
+        elif malformed:
+            uncertainty = True
+        else:
+            violations.append(display_name)
+            nested_items.append(
+                _nested_evidence(
+                    entry=entry,
+                    child=child,
+                    directive=None,
+                    certainty=EvidenceCertainty.CERTAIN,
+                )
+            )
+
+    if violations:
+        return _ssl_ssh_finding(
+            status=AuditStatus.FAIL,
+            applicability=Applicability.APPLICABLE,
+            evidence=tuple(f"profil SSL/SSH non conforme: {name}" for name in violations),
+            evidence_items=tuple(nested_items),
+            affected=tuple(violations),
+            message="Des profils SSL/SSH utilisés ne satisfont pas la règle legacy.",
+        )
+    if uncertainty or len(compliant) != len(used):
+        return _ssl_ssh_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("Résolution ou structure des profils SSL/SSH incomplète",),
+            evidence_items=tuple(policy_evidence + nested_items),
+            affected=tuple(used.values()),
+            message="La conformité de tous les profils SSL/SSH utilisés n’est pas certaine.",
+        )
+    return _ssl_ssh_finding(
+        status=AuditStatus.PASS,
+        applicability=Applicability.APPLICABLE,
+        evidence=tuple(f"profil SSL/SSH conforme: {name}" for name in compliant),
+        evidence_items=tuple(nested_items),
+        affected=tuple(compliant),
+        message="Tous les profils SSL/SSH utilisés satisfont la règle legacy.",
     )
 
 
