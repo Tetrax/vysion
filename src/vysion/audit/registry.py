@@ -16,6 +16,12 @@ from vysion.audit.controls.firewall import (
     check_vip_extintf_any,
     check_vserver_extintf_any,
 )
+from vysion.audit.controls.ha import (
+    check_ha_cabling_redundancy,
+    check_ha_heartbeat_redundancy,
+    check_ha_override,
+    check_ha_session_pickup,
+)
 from vysion.audit.controls.network import check_wan_management_access
 from vysion.audit.controls.network_parity import check_sip_alg
 from vysion.audit.controls.references import check_reference_integrity
@@ -78,4 +84,8 @@ def default_registry() -> tuple[Control, ...]:
         check_fortianalyzer_sync,
         check_admin_https_port,
         check_sip_alg,
+        check_ha_session_pickup,
+        check_ha_heartbeat_redundancy,
+        check_ha_override,
+        check_ha_cabling_redundancy,
     )

@@ -339,6 +339,7 @@ def _audit_context(
     operator_comment: str | None,
     operator: str | None,
     ha: str | None,
+    ha_cabling_redundancy: str | None,
     mpls: str | None,
     utm_license: str | None,
     utm_license_status: str | None,
@@ -364,6 +365,9 @@ def _audit_context(
         selected = typed_names
     booleans = {
         "ha": _optional_bool(ha, "ha"),
+        "ha_cabling_redundancy": _optional_bool(
+            ha_cabling_redundancy, "ha_cabling_redundancy"
+        ),
         "mpls": _optional_bool(mpls, "mpls"),
         "utm_license": _optional_bool(utm_license, "utm_license"),
     }
@@ -591,6 +595,9 @@ def create_app(
         ha = _optional_form_value(
             form.getlist("ha_context") or form.getlist("ha"), "ha_context"
         )
+        ha_cabling_redundancy = _optional_form_value(
+            form.getlist("ha_cabling_redundancy"), "ha_cabling_redundancy"
+        )
         mpls = _optional_form_value(
             form.getlist("mpls_context") or form.getlist("mpls"), "mpls_context"
         )
@@ -630,6 +637,7 @@ def create_app(
             operator_comment=operator_comment,
             operator=operator,
             ha=ha,
+            ha_cabling_redundancy=ha_cabling_redundancy,
             mpls=mpls,
             utm_license=utm_license,
             utm_license_status=utm_license_status,

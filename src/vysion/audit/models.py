@@ -298,6 +298,7 @@ class AuditContext(BaseModel):
         validation_alias=AliasChoices("operator", "network_operator", "operator_name"),
     )
     ha: bool | None = Field(default=None, validation_alias=AliasChoices("ha", "ha_enabled"))
+    ha_cabling_redundancy: bool | None = None
     mpls: bool | None = Field(default=None, validation_alias=AliasChoices("mpls", "mpls_enabled"))
     utm_license: bool | None = Field(
         default=None,
@@ -396,6 +397,7 @@ class AuditContext(BaseModel):
             "uptime",
             "rule_match_statistics",
             "operator",
+            "ha_cabling_redundancy",
         ):
             if getattr(self, field_name) is None:
                 serialized.pop(field_name, None)
@@ -710,6 +712,23 @@ class IpsecPhase2(BaseModel):
         return self.phase1_name
 
 
+class HaSettings(BaseModel):
+    """Typed singleton projection of ``config system ha``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    group_name: str | None = None
+    session_pickup: str | None = None
+    session_pickup_connectionless: str | None = None
+    session_pickup_expectation: str | None = None
+    heartbeat_interfaces: tuple[str, ...] = ()
+    override: str | None = None
+    override_wait_time: int | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    invalidated_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
 class FortiGateConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -736,6 +755,7 @@ class FortiGateConfiguration(BaseModel):
     ssl_vpn_settings: SslVpnSettings | None = None
     ipsec_phase1: tuple[IpsecPhase1, ...] = ()
     ipsec_phase2: tuple[IpsecPhase2, ...] = ()
+    ha_settings: HaSettings | None = None
     document: StructuralDocument = Field(default_factory=StructuralDocument)
     parsed_sections: frozenset[str] = Field(default_factory=frozenset)
     parsed_entry_sections: frozenset[str] = Field(default_factory=frozenset)

@@ -72,6 +72,10 @@ CONTROL_IDS = (
     "SYS-FORTIANALYZER-SYNC-001",
     "SYS-ADMIN-HTTPS-PORT-001",
     "NET-SIP-ALG-001",
+    "HA-SESSION-PICKUP-001",
+    "HA-HEARTBEAT-REDUNDANCY-001",
+    "HA-OVERRIDE-001",
+    "HA-CABLING-REDUNDANCY-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -314,6 +318,10 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "SYS-FORTIANALYZER-SYNC-001",
         "SYS-ADMIN-HTTPS-PORT-001",
         "NET-SIP-ALG-001",
+        "HA-SESSION-PICKUP-001",
+        "HA-HEARTBEAT-REDUNDANCY-001",
+        "HA-OVERRIDE-001",
+        "HA-CABLING-REDUNDANCY-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     assert [finding["status"] for finding in findings] == expected_statuses
@@ -448,6 +456,10 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "SYS-FORTIANALYZER-SYNC-001",
                     "SYS-ADMIN-HTTPS-PORT-001",
                     "NET-SIP-ALG-001",
+                    "HA-SESSION-PICKUP-001",
+                    "HA-HEARTBEAT-REDUNDANCY-001",
+                    "HA-OVERRIDE-001",
+                    "HA-CABLING-REDUNDANCY-001",
                 }
                 else "P0"
             )
@@ -551,6 +563,7 @@ async def test_api_round_trips_explicit_operator_context_without_false_defaults(
                 "client": "Client synthétique",
                 "site": "Paris-lab",
                 "ha": "true",
+                "ha_cabling_redundancy": "true",
                 "utm_license": "false",
                 "context_source": "operator-form",
                 "context_operator": "analyst@example.invalid",
@@ -573,6 +586,7 @@ async def test_api_round_trips_explicit_operator_context_without_false_defaults(
             "site": "Paris-lab",
             "operator_comment": None,
             "ha": True,
+            "ha_cabling_redundancy": True,
             "mpls": None,
             "utm_license": False,
             "psirt": None,

@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **32 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **36 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -53,7 +53,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 18 | Administration | `verifier_sync_fortianalyzer` | A | `SYS-FORTIANALYZER-SYNC-001` | Migré ; enable + serveur certain, disable explicite FAIL, absence UNKNOWN. |
 | 19 | Administration | `verifier_sync_fortimanager` | A | `SYS-FORTIMANAGER-SYNC-001` | Migré ; type FortiManager + fmg certain, ou FortiGuard explicite. |
 | 20 | Administration / identité | `verifier_mfa_utilisateurs_admins` | A | `IAM-ADMIN-MFA-001` + `IAM-LOCAL-USER-MFA-001` | Le chemin V2 sépare administrateurs et utilisateurs locaux. |
-| 21 | VPN | `verifier_durcissement_vpn_ipsec_split` | B | `VPN-IKEV2-001`, `VPN-DH-001`, `VPN-CRYPTO-001` | Les trois contrôles V2 couvrent les branches principales ; comparer exactement les listes/messages legacy. |
+| 21 | VPN | `verifier_durcissement_vpn_ipsec_split` | A | `VPN-IKEV2-001`, `VPN-DH-001`, `VPN-CRYPTO-001` | Les trois branches legacy sont couvertes par des projections IPsec typées et un ruleset versionné. |
 | 22 | Réseau / external services | `verifier_presence_cti` | A | `NET-CTI-WAN-001` | Présence CTI sur les flux WAN. |
 | 23 | Administration / identité | `verifier_ldaps` | A | `IAM-LDAPS-001` | LDAPS + certificat CA, avec statut absent/ambigu à aligner. |
 | 24 | Système | `verifier_sauvegardes_automatiques` | A | `SYS-BACKUP-AUTO-001` | `revision-backup-on-logout` + `revision-image-auto-backup`. |
@@ -64,10 +64,10 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 29 | UTM / external services | `verifier_anycast_fortiguard` | C | Contrôle Anycast FortiGuard | Aucun équivalent V2 identifié. |
 | 30 | UTM / external services | `verifier_mises_a_jour_fortiguard` | B | `UTM-AUTOUPDATE-001` | Proche des mises à jour AV/IPS, mais la portée FortiGuard legacy doit être comparée. |
 | 31 | Réseau / firewall | `verifier_route_blackhole` | C | Projection routes + contexte MPLS/L2L | Dépend de `mpls_l2l`, aucun contrôle V2. |
-| 32 | HA | `verifier_ha_redundance_cablage` | C | Projection HA + AuditContext | Nécessite l’observation opérateur `ha_cabling_redundancy`. |
-| 33 | HA | `verifier_ha_session_pickup` | C | Projection HA/session-pickup | Aucun contrôle V2. |
-| 34 | HA | `verifier_ha_redundance_interfaces` | C | Projection HA/heartbeat | Aucun contrôle V2. |
-| 35 | HA | `verifier_ha_override` | C | Projection HA/override | Aucun contrôle V2. |
+| 32 | HA | `verifier_ha_redundance_cablage` | A | `HA-CABLING-REDUNDANCY-001` + AuditContext | Observation opérateur sourcée ; reste UNKNOWN quand le backup seul ne peut pas prouver le physique. |
+| 33 | HA | `verifier_ha_session_pickup` | A | `HA-SESSION-PICKUP-001` | Les trois options legacy sont projetées et contrôlées sans raw-text. |
+| 34 | HA | `verifier_ha_redundance_interfaces` | A | `HA-HEARTBEAT-REDUNDANCY-001` | `hbdev` est projeté avec validation des paires interface/priorité. |
+| 35 | HA | `verifier_ha_override` | A | `HA-OVERRIDE-001` | `disable` ou `enable` avec attente exacte de 30 secondes reproduisent la règle legacy. |
 | 36 | Réseau / firewall | `verifier_ports_deny` | B | `FW-SENSITIVE-PROTOCOL-DENY-001` | Proximité sur les protocoles sensibles, mais couverture et portée des ports legacy à comparer. |
 | 37 | Réseau | `verifier_utilisation_sdwan` | C | Projection SD-WAN + contrôle d’utilisation | Le parser/projection existe, aucun contrôle V2 enregistré. |
 | 38 | Réseau / UTM | `verifier_profils_securite_sur_regles` | A | `FW-UTM-PROFILE-BINDING-001` | Liaison des profils utilisés sur les règles. |
@@ -95,9 +95,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 23**
-- **B — partiels identifiés : 3**
-- **C — absents identifiés : 33**
+- **A — équivalents identifiés : 28**
+- **B — partiels identifiés : 2**
+- **C — absents identifiés : 29**
 - Total : **59 / 59**
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
@@ -117,6 +117,17 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 26 | DNS database historique | `LEGACY_REVIEW_REQUIRED` | FQDN historique spécifique ; cible opérateur requise. |
 | 27 | SIP ALG | `MIGRATED` | `NET-SIP-ALG-001`, absence du helper SIP et mode kernel-helper-based prouvés séparément. |
 | 45 | Port HTTPS admin | `MIGRATED` | `SYS-ADMIN-HTTPS-PORT-001`, 443 FAIL, port personnalisé PASS, preuve absente UNKNOWN. |
+
+## Dispositions explicites du Lot HA / VPN
+
+| # | Capacité | Disposition | Justification |
+|---:|---|---|---|
+| 7 | Usage SSL-VPN | `MIGRATED` | `VPN-SSL-001` sépare désactivation certaine, usage explicite et preuve incomplète. |
+| 21 | Durcissement IPsec | `MIGRATED` | IKEv2, DH et propositions sont projetés par phase et restitués dans trois findings stables. |
+| 32 | Redondance du câblage HA | `MIGRATED` | `HA-CABLING-REDUNDANCY-001` consomme uniquement une observation opérateur sourcée ; sinon UNKNOWN. |
+| 33 | Session pickup HA | `MIGRATED` | Les trois directives requises sont certaines pour PASS ; disable explicite produit FAIL. |
+| 34 | Redondance heartbeat HA | `MIGRATED` | Deux interfaces certaines sont requises ; une interface certaine produit FAIL. |
+| 35 | Override HA | `MIGRATED` | Règle legacy reproduite avec override désactivé ou attente exacte de 30 secondes. |
 
 ## Ordre de migration accélérée
 

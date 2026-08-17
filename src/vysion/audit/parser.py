@@ -3,6 +3,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from vysion.audit.firewall_projection import apply_firewall_projection, project_firewall
+from vysion.audit.ha_projection import apply_ha_projection, project_ha
 from vysion.audit.models import (
     Administrator,
     DeviceIdentity,
@@ -162,6 +163,7 @@ _PROJECTED_SECTIONS = {
     "system autoupdate schedule",
     "system external-resource",
     "firewall internet-service-group",
+    "system ha",
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
@@ -213,6 +215,15 @@ _PROJECTED_KEYS = {
     "system autoupdate schedule": {"status", "frequency"},
     "system external-resource": {"status"},
     "firewall internet-service-group": {"member"},
+    "system ha": {
+        "group-name",
+        "session-pickup",
+        "session-pickup-connectionless",
+        "session-pickup-expectation",
+        "hbdev",
+        "override",
+        "override-wait-time",
+    },
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),
@@ -330,6 +341,23 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
             "src-addr-type",
             "src-name",
             "src-subnet",
+        }
+    ),
+    "system ha": frozenset(
+        {
+            "group-id",
+            "hb-interval",
+            "hb-lost-threshold",
+            "mode",
+            "monitor",
+            "password",
+            "priority",
+            "route-hold",
+            "route-ttl",
+            "route-wait",
+            "sync-config",
+            "unicast-hb",
+            "unicast-hb-peerip",
         }
     ),
 }
@@ -2067,4 +2095,5 @@ class FortiGateParser:
         )
         configuration = apply_firewall_projection(configuration, firewall_projection)
         configuration = apply_vpn_projection(configuration, project_vpn(document))
+        configuration = apply_ha_projection(configuration, project_ha(document))
         return apply_utm_projection(configuration, project_utm(document))
