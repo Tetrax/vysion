@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from vysion.audit.controls._evidence import (
     evidence_for_directive,
+    evidence_for_sdwan_member,
     evidence_for_section,
     section_for,
 )
 from vysion.audit.models import (
+    AffectedObject,
     Applicability,
+    AuditContext,
     AuditFinding,
     AuditPriority,
     AuditSeverity,
@@ -14,10 +17,13 @@ from vysion.audit.models import (
     EvidenceCertainty,
     EvidenceItem,
     FortiGateConfiguration,
+    ProofState,
     RiskAssessment,
     StructuralDirective,
     StructuralEntry,
     StructuralSection,
+    WanSelectionKind,
+    Zone,
 )
 
 _SESSION_HELPER = "system session-helper"
@@ -272,4 +278,186 @@ def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
         recommendation="Conserver le mode kernel-helper-based et l’absence de helper SIP.",
         remediation="Aucune remédiation de configuration immédiate.",
         risk_summary="Aucun helper SIP ni mode ALG proxy n’est prouvé.",
+    )
+
+
+def _sdwan_finding(
+    *,
+    status: AuditStatus,
+    applicability: Applicability,
+    evidence: tuple[str, ...],
+    evidence_items: tuple[EvidenceItem, ...],
+    affected: tuple[str, ...],
+    message: str,
+    recommendation: str,
+) -> AuditFinding:
+    return AuditFinding(
+        control_id="NET-SDWAN-USAGE-001",
+        title="Utilisation du SD-WAN pour les WAN sélectionnées",
+        status=status,
+        category="network",
+        priority=AuditPriority.P1,
+        severity=AuditSeverity.MEDIUM,
+        applicability=applicability,
+        evidence=evidence,
+        evidence_items=evidence_items,
+        affected_objects=tuple(
+            AffectedObject(name=name, object_type="interface") for name in affected
+        ),
+        message=message,
+        risk=RiskAssessment(
+            summary="Les interfaces WAN sélectionnées peuvent contourner le SD-WAN.",
+            impact=(
+                "Une sortie directe peut échapper aux politiques et mécanismes "
+                "de résilience SD-WAN."
+            ),
+            likelihood="moyenne",
+            treatment=recommendation,
+        ),
+        recommendation=recommendation,
+        remediation=(
+            "Ajouter les interfaces WAN manquantes comme membres SD-WAN, puis relancer l’audit."
+            if status is AuditStatus.FAIL
+            else "Aucune remédiation immédiate."
+        ),
+    )
+
+
+def check_sdwan_usage(
+    configuration: FortiGateConfiguration,
+    context: AuditContext | None = None,
+) -> AuditFinding:
+    section = section_for(configuration.document, "system sdwan")
+    if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
+        return _sdwan_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("system sdwan: section absente ou ambiguë",),
+            evidence_items=(
+                evidence_for_section(
+                    configuration.document,
+                    "system sdwan",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                ),
+            ),
+            affected=(),
+            message="La configuration SD-WAN ne peut pas être établie avec certitude.",
+            recommendation="Fournir le namespace system sdwan complet.",
+        )
+
+    zones: dict[str, Zone] = {}
+    collisions: set[str] = set()
+    uncertainty = bool(section.directives and not section.children)
+    for zone in configuration.sdwan_zones:
+        key = zone.name.casefold()
+        if key in zones or key in collisions:
+            zones.pop(key, None)
+            collisions.add(key)
+            uncertainty = True
+            continue
+        zones[key] = zone
+        if zone.proof_state is not ProofState.PROVEN:
+            uncertainty = True
+
+    members: dict[str, tuple[str, str]] = {}
+    for zone in zones.values():
+        for interface in zone.interfaces:
+            key = interface.name.casefold()
+            if key in members:
+                uncertainty = True
+            else:
+                members[key] = (zone.name, interface.name)
+
+    if context is None or context.wan_selections is None:
+        return _sdwan_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("WAN sélectionnées: contexte opérateur absent",),
+            evidence_items=(
+                evidence_for_section(
+                    configuration.document,
+                    "system sdwan",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                ),
+            ),
+            affected=(),
+            message="Les WAN à couvrir par le SD-WAN ne sont pas connues.",
+            recommendation="Sélectionner les WAN via le contexte typé.",
+        )
+
+    required: dict[str, str] = {}
+    for selection in context.wan_selections:
+        if selection.kind is WanSelectionKind.SDWAN:
+            continue
+        selected_interfaces = selection.interfaces or (selection.name,)
+        for interface in selected_interfaces:
+            required[interface.casefold()] = interface
+
+    missing = tuple(sorted(required[key] for key in required.keys() - members.keys()))
+    member_evidence = tuple(
+        item
+        for key in sorted(required.keys() & members.keys())
+        for item in (
+            evidence_for_sdwan_member(
+                configuration.document,
+                members[key][0],
+                members[key][1],
+            ),
+        )
+        if item is not None
+    )
+
+    if missing:
+        return _sdwan_finding(
+            status=AuditStatus.FAIL,
+            applicability=Applicability.APPLICABLE,
+            evidence=tuple(f"interface WAN hors SD-WAN: {name}" for name in missing),
+            evidence_items=member_evidence
+            or (evidence_for_section(configuration.document, "system sdwan"),),
+            affected=missing,
+            message="Des interfaces WAN sélectionnées ne sont pas membres du SD-WAN.",
+            recommendation="Intégrer chaque WAN sélectionnée au SD-WAN.",
+        )
+
+    if uncertainty or (required and len(member_evidence) != len(required)):
+        return _sdwan_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("Relations SD-WAN ambiguës, dupliquées ou incomplètes",),
+            evidence_items=member_evidence
+            or (
+                evidence_for_section(
+                    configuration.document,
+                    "system sdwan",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                ),
+            ),
+            affected=tuple(required.values()),
+            message="L’appartenance de toutes les WAN au SD-WAN n’est pas certaine.",
+            recommendation="Corriger les collisions ou mutations du namespace SD-WAN.",
+        )
+
+    if not members:
+        return _sdwan_finding(
+            status=AuditStatus.FAIL,
+            applicability=Applicability.APPLICABLE,
+            evidence=("system sdwan: aucun membre certain",),
+            evidence_items=(evidence_for_section(configuration.document, "system sdwan"),),
+            affected=(),
+            message="Le SD-WAN n’est pas configuré avec un membre certain.",
+            recommendation="Configurer au moins un membre SD-WAN.",
+        )
+
+    return _sdwan_finding(
+        status=AuditStatus.PASS,
+        applicability=Applicability.APPLICABLE,
+        evidence=tuple(
+            f"interface WAN membre SD-WAN: {required[key]}" for key in sorted(required)
+        )
+        or ("Zone SD-WAN sélectionnée et membres certains",),
+        evidence_items=member_evidence
+        or (evidence_for_section(configuration.document, "system sdwan"),),
+        affected=tuple(required.values()),
+        message="Toutes les interfaces WAN sélectionnées sont membres du SD-WAN.",
+        recommendation="Conserver cette couverture SD-WAN.",
     )

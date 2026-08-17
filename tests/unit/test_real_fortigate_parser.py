@@ -47,7 +47,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 38
+    assert len(statuses) == 39
     assert statuses == {
         finding.control_id: (
             AuditStatus.NOT_APPLICABLE
@@ -68,6 +68,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
                 "HA-CABLING-REDUNDANCY-001",
                 "UTM-FORTISANDBOX-CLOUD-001",
                 "UTM-FORTIGUARD-ANYCAST-001",
+                "NET-SDWAN-USAGE-001",
             }
             else AuditStatus.PASS
         )

@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **38 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **39 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -99,7 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 1**
 - **C — absents identifiés : 25**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **33 / 59** (55,9 %)
+- Disposition réellement `MIGRATED` : **34 / 59** (57,6 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -190,7 +190,12 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
 | 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |
 | 36 | Ports sensibles interdits | `LEGACY_REVIEW_REQUIRED` | Le contrôle V2 est partiel ; couverture et portée legacy ne sont pas encore équivalentes. |
-| 37 | Utilisation SD-WAN | `LEGACY_REVIEW_REQUIRED` | La projection SD-WAN existe, mais aucun finding de parité n'est encore enregistré. |
+
+## Disposition du tracer réseau SD-WAN
+
+| # | Capacité | Disposition | Justification |
+|---:|---|---|---|
+| 37 | Utilisation SD-WAN | `MIGRATED` | `NET-SDWAN-USAGE-001` vérifie via le contexte WAN typé que chaque interface sélectionnée est un membre SD-WAN certain ; section/contexte absent ou relation ambiguë restent UNKNOWN. Replay parser → moteur → registre sur fixture FortiOS zone/members. |
 
 ## Ordre de migration accélérée
 

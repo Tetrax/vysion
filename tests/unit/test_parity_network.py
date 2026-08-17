@@ -1,5 +1,11 @@
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditStatus, EvidenceCertainty
+from vysion.audit.models import (
+    AuditContext,
+    AuditStatus,
+    EvidenceCertainty,
+    WanSelection,
+    WanSelectionKind,
+)
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 
@@ -115,3 +121,70 @@ end
 
     assert finding.status is AuditStatus.UNKNOWN
     assert all(item.certainty is not EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_sdwan_selected_interface_membership_is_proven_through_registry() -> None:
+    raw = """config system interface
+    edit "wan1"
+        set role wan
+    next
+end
+config system sdwan
+    set status enable
+    config zone
+        edit "virtual-wan-link"
+        next
+    end
+    config members
+        edit 1
+            set interface "wan1"
+            set zone "virtual-wan-link"
+        next
+    end
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+    context = AuditContext(
+        wan_selections=(
+            WanSelection(name="wan1", kind=WanSelectionKind.INTERFACE, interfaces=("wan1",)),
+        )
+    )
+
+    findings = AuditEngine(default_registry()).run(configuration, context=context)
+    finding = next(item for item in findings if item.control_id == "NET-SDWAN-USAGE-001")
+
+    assert finding.status is AuditStatus.PASS
+    assert finding.evidence_items
+    assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_sdwan_missing_selected_interface_is_a_certain_failure() -> None:
+    raw = """config system sdwan
+    set status enable
+    config zone
+        edit "virtual-wan-link"
+        next
+    end
+    config members
+        edit 1
+            set interface "wan1"
+            set zone "virtual-wan-link"
+        next
+    end
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+    context = AuditContext(
+        wan_selections=(
+            WanSelection(name="wan2", kind=WanSelectionKind.INTERFACE, interfaces=("wan2",)),
+        )
+    )
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration, context=context)
+        if item.control_id == "NET-SDWAN-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.FAIL
+    assert [item.name for item in finding.affected_objects] == ["wan2"]
