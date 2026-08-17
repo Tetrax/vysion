@@ -80,6 +80,7 @@ CONTROL_IDS = (
     "UTM-FORTIGUARD-ANYCAST-001",
     "NET-SDWAN-USAGE-001",
     "FW-BY-SEQUENCE-USAGE-001",
+    "UTM-MAIL-FILTER-USAGE-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -472,6 +473,7 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "UTM-FORTIGUARD-ANYCAST-001",
                     "NET-SDWAN-USAGE-001",
                     "FW-BY-SEQUENCE-USAGE-001",
+                    "UTM-MAIL-FILTER-USAGE-001",
                 }
                 else "P0"
             )

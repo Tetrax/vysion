@@ -52,3 +52,46 @@ def test_utm_external_missing_or_unlicensed_evidence_never_passes() -> None:
     for findings in (missing, unlicensed):
         assert findings["UTM-FORTISANDBOX-CLOUD-001"].status is not AuditStatus.PASS
         assert findings["UTM-FORTIGUARD-ANYCAST-001"].status is not AuditStatus.PASS
+
+
+def test_mail_filter_usage_is_a_certain_failure_through_registry() -> None:
+    raw = """config firewall policy
+    edit 10
+        set emailfilter-profile "mail-filter"
+    next
+end
+"""
+
+    finding = _findings(raw)["UTM-MAIL-FILTER-USAGE-001"]
+
+    assert finding.status is AuditStatus.FAIL
+    assert finding.affected_objects[0].name == "10"
+    assert finding.evidence_items[0].directive == "emailfilter-profile"
+
+
+def test_mail_filter_absence_in_certain_policies_passes() -> None:
+    raw = """config firewall policy
+    edit 10
+        set srcintf "lan"
+        set dstintf "wan1"
+    next
+end
+"""
+
+    assert _findings(raw)["UTM-MAIL-FILTER-USAGE-001"].status is AuditStatus.PASS
+
+
+def test_mail_filter_absent_or_mutated_policy_evidence_is_unknown() -> None:
+    missing = _findings("config system global\nend\n")["UTM-MAIL-FILTER-USAGE-001"]
+    mutated = _findings(
+        """config firewall policy
+    edit 10
+        set emailfilter-profile "mail-filter"
+        unset emailfilter-profile
+    next
+end
+"""
+    )["UTM-MAIL-FILTER-USAGE-001"]
+
+    assert missing.status is AuditStatus.UNKNOWN
+    assert mutated.status is AuditStatus.UNKNOWN

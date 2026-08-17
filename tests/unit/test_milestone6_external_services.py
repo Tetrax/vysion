@@ -462,6 +462,7 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "UTM-FORTIGUARD-ANYCAST-001",
         "NET-SDWAN-USAGE-001",
         "FW-BY-SEQUENCE-USAGE-001",
+        "UTM-MAIL-FILTER-USAGE-001",
     )
     configuration = FortiGateParser().parse("config system global\nend\n")
 
@@ -470,8 +471,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
     )
 
     assert registered_ids == expected_ids
-    assert len(registered_ids) == 40
-    assert registered_ids[-13:] == (
+    assert len(registered_ids) == 41
+    assert registered_ids[-14:] == (
         "SYS-AUTO-INSTALL-USB-001",
         "SYS-FORTIMANAGER-SYNC-001",
         "SYS-FORTIANALYZER-SYNC-001",
@@ -485,6 +486,7 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "UTM-FORTIGUARD-ANYCAST-001",
         "NET-SDWAN-USAGE-001",
         "FW-BY-SEQUENCE-USAGE-001",
+        "UTM-MAIL-FILTER-USAGE-001",
     )
 
 

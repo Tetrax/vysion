@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **40 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **41 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -99,7 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 1**
 - **C — absents identifiés : 25**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **35 / 59** (59,3 %)
+- Disposition réellement `MIGRATED` : **36 / 59** (61,0 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -154,7 +154,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 29 | FortiGuard Anycast | `MIGRATED` | Valeur structurée explicite ; absence et valeur non canonique restent UNKNOWN. |
 | 30 | Mises à jour FortiGuard | `MIGRATED` | Le contrôle autoupdate existant couvre statut et fréquence sans scanner le raw-text. |
 | 38 | Profils UTM sur règles | `MIGRATED` | Relations policy → profil direct/groupe typées et contrôle enregistré. |
-| 39 | Mail Filter | `LEGACY_REVIEW_REQUIRED` | La règle legacy interdit tout usage ; une décision produit et une projection emailfilter dédiées restent nécessaires. |
+| 39 | Mail Filter | `MIGRATED` | `UTM-MAIL-FILTER-USAGE-001` reproduit la règle legacy : toute directive certaine `emailfilter-profile` dans une policy produit FAIL ; absence certaine PASS, namespace absent ou mutation UNKNOWN. |
 | 40 | WebFilter | `MIGRATED` | Profils utilisés, catégories et relations de groupe sont projetés et contrôlés. |
 | 41 | Antivirus | `MIGRATED` | Profils utilisés et réglages nécessaires sont projetés et contrôlés. |
 | 42 | DNS Filter | `MIGRATED` | Profils utilisés, catégories et options sont projetés et contrôlés. |

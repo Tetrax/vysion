@@ -48,6 +48,7 @@ from vysion.audit.controls.utm import (
 from vysion.audit.controls.utm_parity import (
     check_fortiguard_anycast,
     check_fortisandbox_cloud,
+    check_mail_filter_usage,
 )
 from vysion.audit.controls.vpn import (
     check_dh_groups,
@@ -100,4 +101,5 @@ def default_registry() -> tuple[Control, ...]:
         check_fortiguard_anycast,
         check_sdwan_usage,
         check_by_sequence_usage,
+        check_mail_filter_usage,
     )

@@ -47,7 +47,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 40
+    assert len(statuses) == 41
     assert statuses == {
         finding.control_id: (
             AuditStatus.FAIL
