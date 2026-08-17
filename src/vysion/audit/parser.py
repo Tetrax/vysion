@@ -39,7 +39,11 @@ _CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
 }
 _ALLOWED_CONTROLS = {"\n", "\r", "\t"}
 _RELEVANT_KEYS = {
-    "system global": {"hostname"},
+    "system global": {
+        "hostname",
+        "revision-backup-on-logout",
+        "revision-image-auto-backup",
+    },
     "system interface": {"ip", "allowaccess", "role"},
     "system admin": {"peer-auth", "two-factor"},
 }

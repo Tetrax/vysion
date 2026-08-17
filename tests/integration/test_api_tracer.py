@@ -65,6 +65,7 @@ CONTROL_IDS = (
     "UTM-APPCONTROL-001",
     "IAM-LDAPS-001",
     "EXT-PSIRT-001",
+    "SYS-BACKUP-AUTO-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -261,7 +262,9 @@ async def test_api_rejects_malformed_psirt_observation_without_breaking_registry
     assert response.status_code == 201
     payload = response.json()
     assert payload["context"]["psirt"]["status"] == "ERROR"
-    assert [item["control_id"] for item in payload["findings"]][-1] == "EXT-PSIRT-001"
+    psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
+    assert psirt["status"] == "UNKNOWN"
+    assert payload["findings"][-1]["control_id"] == "SYS-BACKUP-AUTO-001"
     assert payload["findings"][-1]["status"] == "UNKNOWN"
 
 
@@ -293,11 +296,13 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
     findings = response.json()["findings"]
     expected_statuses = ["PASS"] * len(CONTROL_IDS)
     expected_statuses[CONTROL_IDS.index("VPN-SSL-001")] = "NOT_APPLICABLE"
+    expected_statuses[CONTROL_IDS.index("SYS-BACKUP-AUTO-001")] = "UNKNOWN"
     assert [finding["status"] for finding in findings] == expected_statuses
     assert all(
         finding["evidence_items"]
         and all(item["certainty"] == "certain" for item in finding["evidence_items"])
         for finding in findings
+        if finding["status"] != "UNKNOWN"
     )
     assert tuple(finding["control_id"] for finding in findings) == CONTROL_IDS
 
@@ -412,7 +417,15 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
             for finding in payload["findings"]
             if finding["status"] == "UNKNOWN"
         )
-        assert all(finding["priority"] == "P0" for finding in payload["findings"][1:])
+        assert all(
+            finding["priority"]
+            == (
+                "P1"
+                if finding["control_id"] == "SYS-BACKUP-AUTO-001"
+                else "P0"
+            )
+            for finding in payload["findings"][1:]
+        )
         assert (tmp_path / f"{report_id}.json").is_file()
 
         stored = await client.get(f"/api/reports/{report_id}.json")

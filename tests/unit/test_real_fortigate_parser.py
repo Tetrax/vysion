@@ -47,13 +47,15 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 25
+    assert len(statuses) == 26
     assert statuses == {
         finding.control_id: (
             AuditStatus.NOT_APPLICABLE
             if finding.control_id == "VPN-SSL-001"
             else AuditStatus.UNKNOWN
             if finding.control_id == "EXT-PSIRT-001"
+            else AuditStatus.UNKNOWN
+            if finding.control_id == "SYS-BACKUP-AUTO-001"
             else AuditStatus.PASS
         )
         for finding in findings
