@@ -164,6 +164,8 @@ _PROJECTED_SECTIONS = {
     "system external-resource",
     "firewall internet-service-group",
     "system ha",
+    "system fortisandbox",
+    "system fortiguard",
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
@@ -224,6 +226,8 @@ _PROJECTED_KEYS = {
         "override",
         "override-wait-time",
     },
+    "system fortisandbox": {"sandbox-region"},
+    "system fortiguard": {"fortiguard-anycast"},
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),

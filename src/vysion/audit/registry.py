@@ -41,6 +41,10 @@ from vysion.audit.controls.utm import (
     check_utm_license,
     check_webfilter_profiles,
 )
+from vysion.audit.controls.utm_parity import (
+    check_fortiguard_anycast,
+    check_fortisandbox_cloud,
+)
 from vysion.audit.controls.vpn import (
     check_dh_groups,
     check_ikev2,
@@ -88,4 +92,6 @@ def default_registry() -> tuple[Control, ...]:
         check_ha_heartbeat_redundancy,
         check_ha_override,
         check_ha_cabling_redundancy,
+        check_fortisandbox_cloud,
+        check_fortiguard_anycast,
     )

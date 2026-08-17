@@ -458,6 +458,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "HA-HEARTBEAT-REDUNDANCY-001",
         "HA-OVERRIDE-001",
         "HA-CABLING-REDUNDANCY-001",
+        "UTM-FORTISANDBOX-CLOUD-001",
+        "UTM-FORTIGUARD-ANYCAST-001",
     )
     configuration = FortiGateParser().parse("config system global\nend\n")
 
@@ -466,8 +468,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
     )
 
     assert registered_ids == expected_ids
-    assert len(registered_ids) == 36
-    assert registered_ids[-9:] == (
+    assert len(registered_ids) == 38
+    assert registered_ids[-11:] == (
         "SYS-AUTO-INSTALL-USB-001",
         "SYS-FORTIMANAGER-SYNC-001",
         "SYS-FORTIANALYZER-SYNC-001",
@@ -477,6 +479,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "HA-HEARTBEAT-REDUNDANCY-001",
         "HA-OVERRIDE-001",
         "HA-CABLING-REDUNDANCY-001",
+        "UTM-FORTISANDBOX-CLOUD-001",
+        "UTM-FORTIGUARD-ANYCAST-001",
     )
 
 

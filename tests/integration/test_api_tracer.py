@@ -76,6 +76,8 @@ CONTROL_IDS = (
     "HA-HEARTBEAT-REDUNDANCY-001",
     "HA-OVERRIDE-001",
     "HA-CABLING-REDUNDANCY-001",
+    "UTM-FORTISANDBOX-CLOUD-001",
+    "UTM-FORTIGUARD-ANYCAST-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -322,6 +324,8 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "HA-HEARTBEAT-REDUNDANCY-001",
         "HA-OVERRIDE-001",
         "HA-CABLING-REDUNDANCY-001",
+        "UTM-FORTISANDBOX-CLOUD-001",
+        "UTM-FORTIGUARD-ANYCAST-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     assert [finding["status"] for finding in findings] == expected_statuses
@@ -460,6 +464,8 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "HA-HEARTBEAT-REDUNDANCY-001",
                     "HA-OVERRIDE-001",
                     "HA-CABLING-REDUNDANCY-001",
+                    "UTM-FORTISANDBOX-CLOUD-001",
+                    "UTM-FORTIGUARD-ANYCAST-001",
                 }
                 else "P0"
             )

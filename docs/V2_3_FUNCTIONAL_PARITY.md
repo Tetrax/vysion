@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **36 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **38 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -60,9 +60,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 25 | Administration / réseau | `verifier_acces_admin_[REDACTED]_via_loopback` | C | Projection loopback/FQDN/VIP + contrôle historique | Règle métier historique absente. |
 | 26 | Système / réseau | `verifier_dns_database` | C | Projection `system dns-database` | Entrée FQDN historique absente de V2. |
 | 27 | Réseau / firewall | `verifier_sip_alg` | A | `NET-SIP-ALG-001` | Migré ; helper SIP certain ou mode ALG explicite FAIL, preuve incomplète UNKNOWN. |
-| 28 | UTM / external services | `verifier_fortisandbox_cloud` | C | Contrôle FortiSandbox Cloud | Dépend licence et région ; besoin d’AuditContext si non présent dans backup. |
-| 29 | UTM / external services | `verifier_anycast_fortiguard` | C | Contrôle Anycast FortiGuard | Aucun équivalent V2 identifié. |
-| 30 | UTM / external services | `verifier_mises_a_jour_fortiguard` | B | `UTM-AUTOUPDATE-001` | Proche des mises à jour AV/IPS, mais la portée FortiGuard legacy doit être comparée. |
+| 28 | UTM / external services | `verifier_fortisandbox_cloud` | A | `UTM-FORTISANDBOX-CLOUD-001` | Région Europe explicite + licence UTM opérateur sourcée ; absence UNKNOWN. |
+| 29 | UTM / external services | `verifier_anycast_fortiguard` | A | `UTM-FORTIGUARD-ANYCAST-001` | `fortiguard-anycast disable` explicite, sans supposer le défaut. |
+| 30 | UTM / external services | `verifier_mises_a_jour_fortiguard` | A | `UTM-AUTOUPDATE-001` | Statut/fréquence typés ; aucune conformité n’est déduite d’une section absente. |
 | 31 | Réseau / firewall | `verifier_route_blackhole` | C | Projection routes + contexte MPLS/L2L | Dépend de `mpls_l2l`, aucun contrôle V2. |
 | 32 | HA | `verifier_ha_redundance_cablage` | A | `HA-CABLING-REDUNDANCY-001` + AuditContext | Observation opérateur sourcée ; reste UNKNOWN quand le backup seul ne peut pas prouver le physique. |
 | 33 | HA | `verifier_ha_session_pickup` | A | `HA-SESSION-PICKUP-001` | Les trois options legacy sont projetées et contrôlées sans raw-text. |
@@ -95,9 +95,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 28**
-- **B — partiels identifiés : 2**
-- **C — absents identifiés : 29**
+- **A — équivalents identifiés : 31**
+- **B — partiels identifiés : 1**
+- **C — absents identifiés : 27**
 - Total : **59 / 59**
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
@@ -128,6 +128,22 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 33 | Session pickup HA | `MIGRATED` | Les trois directives requises sont certaines pour PASS ; disable explicite produit FAIL. |
 | 34 | Redondance heartbeat HA | `MIGRATED` | Deux interfaces certaines sont requises ; une interface certaine produit FAIL. |
 | 35 | Override HA | `MIGRATED` | Règle legacy reproduite avec override désactivé ou attente exacte de 30 secondes. |
+
+## Dispositions explicites du Lot UTM / Wi-Fi
+
+| # | Capacité | Disposition | Justification |
+|---:|---|---|---|
+| 28 | FortiSandbox Cloud | `MIGRATED` | Région structurée, licence UTM et provenance opérateur sont requises pour PASS. |
+| 29 | FortiGuard Anycast | `MIGRATED` | Valeur structurée explicite ; absence et valeur non canonique restent UNKNOWN. |
+| 30 | Mises à jour FortiGuard | `MIGRATED` | Le contrôle autoupdate existant couvre statut et fréquence sans scanner le raw-text. |
+| 38 | Profils UTM sur règles | `MIGRATED` | Relations policy → profil direct/groupe typées et contrôle enregistré. |
+| 39 | Mail Filter | `LEGACY_REVIEW_REQUIRED` | La règle legacy interdit tout usage ; une décision produit et une projection emailfilter dédiées restent nécessaires. |
+| 40 | WebFilter | `MIGRATED` | Profils utilisés, catégories et relations de groupe sont projetés et contrôlés. |
+| 41 | Antivirus | `MIGRATED` | Profils utilisés et réglages nécessaires sont projetés et contrôlés. |
+| 42 | DNS Filter | `MIGRATED` | Profils utilisés, catégories et options sont projetés et contrôlés. |
+| 43 | IPS | `MIGRATED` | Profils utilisés et statut sont projetés et contrôlés. |
+| 44 | Application Control | `MIGRATED` | Profils utilisés, entrées et options sont projetés et contrôlés. |
+| 46-51, 57-59 | Wi-Fi/FortiAP | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne contient les namespaces wireless-controller ; le format legacy est observable mais aucun contrôle spéculatif n’est enregistré. |
 
 ## Ordre de migration accélérée
 
