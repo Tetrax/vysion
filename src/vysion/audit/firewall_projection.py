@@ -262,9 +262,12 @@ def _project_policy(entry: StructuralEntry) -> Policy:
     services = _tokens(directives, "service")
     refs = _references(srcaddr, "source-address") + _references(dstaddr, "destination-address")
     refs += _references(services, "policy-service", "service")
-    profile_group_values = _tokens(directives, "profile-group")
     profile_group = _single(directives, "profile-group")
-    profile_group_is_valid = "profile-group" not in directives or len(profile_group_values) == 1
+    profile_reference_cardinality_valid = all(
+        len(_tokens(directives, key)) == 1
+        for key in (*_PROFILE_GROUP_KEYS, "profile-group")
+        if key in directives
+    )
     internet_service = _single(directives, "internet-service")
     action = _single(directives, "action")
     direct_profiles = _profile_refs(directives)
@@ -307,7 +310,7 @@ def _project_policy(entry: StructuralEntry) -> Policy:
         proof_state=(
             ProofState.PROVEN
             if entry.certainty is EvidenceCertainty.CERTAIN
-            and profile_group_is_valid
+            and profile_reference_cardinality_valid
             and all(
                 key in directives for key in ("srcintf", "dstintf", "srcaddr", "dstaddr", "action")
             )
@@ -450,6 +453,9 @@ def _project_vip(entry: StructuralEntry) -> Vip | VirtualServer:
 
 def _project_profile_group(entry: StructuralEntry) -> ProfileGroup:
     directives = _certain_directives(entry, _PROFILE_GROUP_KEYS)
+    profile_reference_cardinality_valid = all(
+        len(_tokens(directives, key)) == 1 for key in directives
+    )
     return ProfileGroup(
         name=entry.name,
         profile_references=_profile_refs(directives),
@@ -458,7 +464,9 @@ def _project_profile_group(entry: StructuralEntry) -> ProfileGroup:
         else frozenset(),
         proof_state=(
             ProofState.PROVEN
-            if entry.certainty is EvidenceCertainty.CERTAIN and bool(directives)
+            if entry.certainty is EvidenceCertainty.CERTAIN
+            and profile_reference_cardinality_valid
+            and bool(directives)
             else ProofState.UNKNOWN
         ),
     )

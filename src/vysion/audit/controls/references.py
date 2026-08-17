@@ -214,7 +214,13 @@ def _reference_graph_is_explicitly_empty(configuration: FortiGateConfiguration) 
     if not _section_is_complete(configuration, _REFERENCE_GRAPH_SECTIONS):
         return False
     sections = tuple(configuration.document.section(name) for name in _REFERENCE_GRAPH_SECTIONS)
-    return all(section is not None and not section.entries for section in sections)
+    return all(
+        section is not None
+        and not section.entries
+        and not section.directives
+        and not section.children
+        for section in sections
+    )
 
 
 def _entry_is_certain(
@@ -240,6 +246,8 @@ def _policy_directive_is_proven(
     configuration: FortiGateConfiguration,
     policy_id: str,
     directive_name: str,
+    *,
+    require_single_token: bool = False,
 ) -> bool:
     document = configuration.document
     if not document.valid or document.certainty is not EvidenceCertainty.CERTAIN:
@@ -258,6 +266,7 @@ def _policy_directive_is_proven(
         and directives[0].certainty is EvidenceCertainty.CERTAIN
         and not directives[0].mutation
         and bool(directives[0].tokens)
+        and (not require_single_token or len(directives[0].tokens) == 1)
     )
 
 
@@ -353,7 +362,10 @@ def _policy_observations(
             source_entry=policy.policy_id,
             source_directive="profile-group",
             source_proven=_policy_directive_is_proven(
-                configuration, policy.policy_id, "profile-group"
+                configuration,
+                policy.policy_id,
+                "profile-group",
+                require_single_token=True,
             ),
             label=f"policy {policy.policy_id} profile group",
         )
@@ -370,7 +382,12 @@ def _policy_observations(
             source_entry=policy.policy_id,
             source_directive=profile_directive,
             source_proven=(
-                _policy_directive_is_proven(configuration, policy.policy_id, profile_directive)
+                _policy_directive_is_proven(
+                    configuration,
+                    policy.policy_id,
+                    profile_directive,
+                    require_single_token=True,
+                )
                 if profile_directive is not None
                 else False
             ),

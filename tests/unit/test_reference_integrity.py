@@ -527,3 +527,71 @@ end
         for server in configuration.virtual_servers[0].realservers
     )
     assert finding.status is AuditStatus.UNKNOWN
+
+
+def test_section_directive_without_entries_is_not_explicitly_empty() -> None:
+    raw = EMPTY_REFERENCE_GRAPH_CONFIG.replace(
+        "config firewall policy\nend\n",
+        "config firewall policy\n    set status enable\nend\n",
+    )
+
+    finding, findings = _finding(raw)
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert finding.applicability is Applicability.UNKNOWN
+    assert not any(item.control_id.startswith("ENGINE-") for item in findings)
+
+
+def test_policy_multi_token_profile_reference_is_unknown() -> None:
+    raw = (
+        RESOLVED_REFERENCES_CONFIG.replace(
+            '        set service "WEB"\n',
+            '        set service "WEB"\n        set ips-sensor "A" "B"\n',
+        )
+        + """config ips sensor
+    edit "A"
+        set block-malicious-url enable
+        set scan-botnet-connections enable
+    next
+    edit "B"
+        set block-malicious-url enable
+        set scan-botnet-connections enable
+    next
+end
+"""
+    )
+
+    finding, findings = _finding(raw)
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert not any(item.control_id.startswith("ENGINE-") for item in findings)
+
+
+def test_profile_group_multi_token_reference_is_unknown() -> None:
+    raw = (
+        RESOLVED_REFERENCES_CONFIG.replace(
+            '        set service "WEB"\n',
+            '        set service "WEB"\n        set profile-group "GROUP"\n',
+        )
+        + """config firewall profile-group
+    edit "GROUP"
+        set ips-sensor "A" "B"
+    next
+end
+config ips sensor
+    edit "A"
+        set block-malicious-url enable
+        set scan-botnet-connections enable
+    next
+    edit "B"
+        set block-malicious-url enable
+        set scan-botnet-connections enable
+    next
+end
+"""
+    )
+
+    finding, findings = _finding(raw)
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert not any(item.control_id.startswith("ENGINE-") for item in findings)
