@@ -99,6 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 1**
 - **C — absents identifiés : 25**
 - Total : **59 / 59**
+- Disposition réellement `MIGRATED` : **33 / 59** (55,9 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -117,6 +118,22 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 26 | DNS database historique | `LEGACY_REVIEW_REQUIRED` | FQDN historique spécifique ; cible opérateur requise. |
 | 27 | SIP ALG | `MIGRATED` | `NET-SIP-ALG-001`, absence du helper SIP et mode kernel-helper-based prouvés séparément. |
 | 45 | Port HTTPS admin | `MIGRATED` | `SYS-ADMIN-HTTPS-PORT-001`, 443 FAIL, port personnalisé PASS, preuve absente UNKNOWN. |
+
+### Capacités A héritées rejouées par la suite d'intégration
+
+| # | Capacité | Disposition | Preuve V2 |
+|---:|---|---|---|
+| 1 | VIP exposée sur any | `MIGRATED` | `FW-VIP-EXTINTF-ANY-001`, projection VIP et tests PASS/FAIL/UNKNOWN. |
+| 2 | Virtual server exposé sur any | `MIGRATED` | `FW-VSERVER-EXTINTF-ANY-001`, projection virtual server et replay moteur. |
+| 5 | Compte guest | `MIGRATED` | `IAM-GUEST-ACCOUNT-001`, comptes locaux typés. |
+| 6 | Compte admin par défaut | `MIGRATED` | `IAM-DEFAULT-ADMIN-001`, administrateurs typés. |
+| 10 | Logs du deny implicite | `MIGRATED` | `FW-IMPLICIT-DENY-LOG-001`, directive structurée. |
+| 13 | ISDB sur flux WAN | `MIGRATED` | `NET-ISDB-WAN-001`, relations policy/WAN typées. |
+| 14 | Administration sur WAN | `MIGRATED` | `NET-WAN-MGMT-001`, sélection WAN et allowaccess structurés. |
+| 20 | MFA administrateurs/utilisateurs | `MIGRATED` | `IAM-ADMIN-MFA-001` et `IAM-LOCAL-USER-MFA-001`. |
+| 22 | CTI sur flux WAN | `MIGRATED` | `NET-CTI-WAN-001`, relations external-resource/WAN typées. |
+| 23 | LDAPS | `MIGRATED` | `IAM-LDAPS-001`, statut et certificat CA structurés. |
+| 24 | Sauvegardes automatiques | `MIGRATED` | `SYS-BACKUP-AUTO-001`, deux directives requises et fail-closed. |
 
 ## Dispositions explicites du Lot HA / VPN
 
@@ -143,7 +160,15 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 42 | DNS Filter | `MIGRATED` | Profils utilisés, catégories et options sont projetés et contrôlés. |
 | 43 | IPS | `MIGRATED` | Profils utilisés et statut sont projetés et contrôlés. |
 | 44 | Application Control | `MIGRATED` | Profils utilisés, entrées et options sont projetés et contrôlés. |
-| 46-51, 57-59 | Wi-Fi/FortiAP | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne contient les namespaces wireless-controller ; le format legacy est observable mais aucun contrôle spéculatif n’est enregistré. |
+| 46 | FortiAP obsolète | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne contient le namespace wireless-controller WTP. |
+| 47 | Nombre de SSID par profil | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne permet un replay sans contrôle spéculatif. |
+| 48 | Utilisation 5 GHz | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 49 | DARRP | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 50 | Frequency handoff | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 51 | TIM | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 57 | Bandes Wi-Fi | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 58 | Canaux Wi-Fi | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 59 | Short guard interval | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
 
 ## Dispositions explicites du Lot reporting / inventaires / exports
 
@@ -154,6 +179,18 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
 | 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | Les références de policy existent mais les objets schedule ne sont pas encore projetés complètement. |
 | 56 | Profils SSL/SSH | `LEGACY_REVIEW_REQUIRED` | La projection générique ne permet pas encore de reproduire la règle legacy dédiée sans ambiguïté. |
+
+## Dispositions explicites restantes
+
+| # | Capacité | Disposition | Justification |
+|---:|---|---|---|
+| 3 | Usage par séquence | `LEGACY_REVIEW_REQUIRED` | L'ordre et les compteurs legacy n'ont pas encore de contrat typé stable. |
+| 4 | Objets inutilisés | `LEGACY_REVIEW_REQUIRED` | La résolution de références existe, mais la restitution exhaustive legacy doit encore être définie. |
+| 8 | Service ALL dans les règles | `LEGACY_REVIEW_REQUIRED` | La portée exacte de la règle legacy doit être comparée aux services/groupes résolus. |
+| 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
+| 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |
+| 36 | Ports sensibles interdits | `LEGACY_REVIEW_REQUIRED` | Le contrôle V2 est partiel ; couverture et portée legacy ne sont pas encore équivalentes. |
+| 37 | Utilisation SD-WAN | `LEGACY_REVIEW_REQUIRED` | La projection SD-WAN existe, mais aucun finding de parité n'est encore enregistré. |
 
 ## Ordre de migration accélérée
 
