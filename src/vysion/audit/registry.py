@@ -23,7 +23,11 @@ from vysion.audit.controls.ha import (
     check_ha_session_pickup,
 )
 from vysion.audit.controls.network import check_wan_management_access
-from vysion.audit.controls.network_parity import check_sdwan_usage, check_sip_alg
+from vysion.audit.controls.network_parity import (
+    check_by_sequence_usage,
+    check_sdwan_usage,
+    check_sip_alg,
+)
 from vysion.audit.controls.references import check_reference_integrity
 from vysion.audit.controls.system import check_automatic_revision_backups, check_hostname
 from vysion.audit.controls.system_parity import (
@@ -95,4 +99,5 @@ def default_registry() -> tuple[Control, ...]:
         check_fortisandbox_cloud,
         check_fortiguard_anycast,
         check_sdwan_usage,
+        check_by_sequence_usage,
     )

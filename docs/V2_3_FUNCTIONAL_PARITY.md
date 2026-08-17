@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **39 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **40 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -99,7 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 1**
 - **C — absents identifiés : 25**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **34 / 59** (57,6 %)
+- Disposition réellement `MIGRATED` : **35 / 59** (59,3 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -180,11 +180,11 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | Les références de policy existent mais les objets schedule ne sont pas encore projetés complètement. |
 | 56 | Profils SSL/SSH | `LEGACY_REVIEW_REQUIRED` | La projection générique ne permet pas encore de reproduire la règle legacy dédiée sans ambiguïté. |
 
-## Dispositions explicites restantes
+## Dispositions explicites du lot réseau
 
 | # | Capacité | Disposition | Justification |
 |---:|---|---|---|
-| 3 | Usage par séquence | `LEGACY_REVIEW_REQUIRED` | L'ordre et les compteurs legacy n'ont pas encore de contrat typé stable. |
+| 3 | Usage par séquence | `MIGRATED` | `FW-BY-SEQUENCE-USAGE-001` reproduit les trois critères legacy sur le document structurel : `global-label`, plusieurs interfaces, ou `any` dans `srcintf`/`dstintf`. L’absence ou l’ambiguïté reste UNKNOWN. |
 | 4 | Objets inutilisés | `LEGACY_REVIEW_REQUIRED` | La résolution de références existe, mais la restitution exhaustive legacy doit encore être définie. |
 | 8 | Service ALL dans les règles | `LEGACY_REVIEW_REQUIRED` | La portée exacte de la règle legacy doit être comparée aux services/groupes résolus. |
 | 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |

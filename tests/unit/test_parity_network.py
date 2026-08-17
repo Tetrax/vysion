@@ -188,3 +188,86 @@ end
 
     assert finding.status is AuditStatus.FAIL
     assert [item.name for item in finding.affected_objects] == ["wan2"]
+
+
+def test_by_sequence_global_label_is_proven_through_registry() -> None:
+    raw = """config firewall policy
+    edit 10
+        set global-label "Internet"
+        set srcintf "lan"
+        set dstintf "wan1"
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-BY-SEQUENCE-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.PASS
+    assert finding.affected_objects[0].name == "10"
+    assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_by_sequence_multi_interface_or_any_is_detected() -> None:
+    raw = """config firewall policy
+    edit 10
+        set srcintf "lan" "dmz"
+        set dstintf "wan1"
+    next
+    edit 20
+        set srcintf "lan"
+        set dstintf "any"
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-BY-SEQUENCE-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.PASS
+    assert {item.name for item in finding.affected_objects} == {"10", "20"}
+
+
+def test_by_sequence_complete_single_interface_policies_are_a_certain_failure() -> None:
+    raw = """config firewall policy
+    edit 10
+        set srcintf "lan"
+        set dstintf "wan1"
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-BY-SEQUENCE-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.FAIL
+
+
+def test_by_sequence_missing_interface_evidence_is_unknown() -> None:
+    raw = """config firewall policy
+    edit 10
+        set srcintf "lan"
+    next
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration)
+        if item.control_id == "FW-BY-SEQUENCE-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.UNKNOWN

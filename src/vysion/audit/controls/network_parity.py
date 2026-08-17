@@ -281,6 +281,140 @@ def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
     )
 
 
+def _by_sequence_finding(
+    *,
+    status: AuditStatus,
+    applicability: Applicability,
+    evidence: tuple[str, ...],
+    evidence_items: tuple[EvidenceItem, ...],
+    affected: tuple[str, ...],
+    message: str,
+) -> AuditFinding:
+    return AuditFinding(
+        control_id="FW-BY-SEQUENCE-USAGE-001",
+        title="Usage des politiques par séquence",
+        status=status,
+        category="firewall",
+        priority=AuditPriority.P1,
+        severity=AuditSeverity.LOW,
+        applicability=applicability,
+        evidence=evidence,
+        evidence_items=evidence_items,
+        affected_objects=tuple(
+            AffectedObject(name=name, object_type="firewall-policy") for name in affected
+        ),
+        message=message,
+        risk=RiskAssessment(
+            summary="Le mode d’organisation des politiques influence leur lisibilité.",
+            impact="Une organisation non identifiée peut compliquer la revue et l’exploitation.",
+            likelihood="faible",
+            treatment="Documenter et conserver le mode d’organisation retenu.",
+        ),
+        recommendation="Documenter l’usage par séquence et vérifier l’ordre des politiques.",
+        remediation="Aucune remédiation automatique ; valider l’organisation avec l’opérateur.",
+    )
+
+
+def check_by_sequence_usage(configuration: FortiGateConfiguration) -> AuditFinding:
+    section = section_for(configuration.document, "firewall policy")
+    if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
+        return _by_sequence_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("firewall policy: section absente ou ambiguë",),
+            evidence_items=(
+                evidence_for_section(
+                    configuration.document,
+                    "firewall policy",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                ),
+            ),
+            affected=(),
+            message="Le mode d’organisation des politiques ne peut pas être déterminé.",
+        )
+    if not section.entries and not section.directives and not section.children:
+        return _by_sequence_finding(
+            status=AuditStatus.PASS,
+            applicability=Applicability.NOT_APPLICABLE,
+            evidence=("firewall policy: namespace explicitement vide",),
+            evidence_items=(evidence_for_section(configuration.document, "firewall policy"),),
+            affected=(),
+            message="Aucune politique n’est présente ; le contrôle n’est pas applicable.",
+        )
+
+    detections: list[tuple[StructuralEntry, str]] = []
+    uncertainty = bool(section.directives or section.children)
+    for entry in section.entries:
+        if entry.certainty is not EvidenceCertainty.CERTAIN or entry.children:
+            uncertainty = True
+            continue
+        directives = {
+            name: tuple(directive for directive in entry.directives if directive.name == name)
+            for name in ("global-label", "srcintf", "dstintf")
+        }
+        if entry.invalidated_keys & directives.keys():
+            uncertainty = True
+        for name, matches in directives.items():
+            if not matches:
+                if name in {"srcintf", "dstintf"}:
+                    uncertainty = True
+                continue
+            if (
+                len(matches) != 1
+                or matches[0].mutation
+                or matches[0].certainty is not EvidenceCertainty.CERTAIN
+                or not matches[0].tokens
+            ):
+                uncertainty = True
+                continue
+            tokens = tuple(token.casefold() for token in matches[0].tokens)
+            if name == "global-label" or len(tokens) > 1 or "any" in tokens:
+                detections.append((entry, name))
+
+    if detections:
+        return _by_sequence_finding(
+            status=AuditStatus.PASS,
+            applicability=Applicability.APPLICABLE,
+            evidence=tuple(
+                f"policy {entry.name}: critère by-sequence {name}" for entry, name in detections
+            ),
+            evidence_items=tuple(
+                evidence_for_directive(
+                    configuration.document,
+                    "firewall policy",
+                    name,
+                    entry_name=entry.name,
+                )
+                for entry, name in detections
+            ),
+            affected=tuple(dict.fromkeys(entry.name for entry, _ in detections)),
+            message="Un usage par séquence est prouvé par une politique structurée.",
+        )
+    if uncertainty:
+        return _by_sequence_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("Critères global-label/srcintf/dstintf incomplets ou ambigus",),
+            evidence_items=(
+                evidence_for_section(
+                    configuration.document,
+                    "firewall policy",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
+                ),
+            ),
+            affected=tuple(entry.name for entry in section.entries),
+            message="L’absence d’usage par séquence ne peut pas être prouvée.",
+        )
+    return _by_sequence_finding(
+        status=AuditStatus.FAIL,
+        applicability=Applicability.APPLICABLE,
+        evidence=("Aucun global-label, multi-interface ou any certain",),
+        evidence_items=(evidence_for_section(configuration.document, "firewall policy"),),
+        affected=tuple(entry.name for entry in section.entries),
+        message="Aucun critère legacy d’usage par séquence n’est présent.",
+    )
+
+
 def _sdwan_finding(
     *,
     status: AuditStatus,
