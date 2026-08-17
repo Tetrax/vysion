@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 
 from vysion.adapters.fortiguard import FortiGuardResult, FortiGuardStatus
 from vysion.api.app import create_app
-from vysion.audit.models import PsirtObservation
+from vysion.audit.models import ExternalObservationStatus, PsirtObservation
 from vysion.config import Settings
 
 SYNTHETIC_CONFIG = b"""\
@@ -64,6 +64,7 @@ CONTROL_IDS = (
     "UTM-IPS-001",
     "UTM-APPCONTROL-001",
     "IAM-LDAPS-001",
+    "EXT-PSIRT-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -146,10 +147,43 @@ class AvailableFortiGuard:
     async def check(self) -> FortiGuardResult:
         return FortiGuardResult(status=FortiGuardStatus.AVAILABLE, detail="fixture")
 
+    async def check_psirt(self, version: str) -> PsirtObservation:
+        return PsirtObservation(
+            status=ExternalObservationStatus.UNKNOWN,
+            fortios_version=version,
+            source="https://www.fortiguard.com/psirt",
+            ruleset_id="fortiguard-psirt-critical-high",
+            ruleset_version="2026-08-13",
+            observed_at=datetime.now(UTC),
+            complete=False,
+        )
+
 
 class ForbiddenPsirtFortiGuard(AvailableFortiGuard):
     async def check_psirt(self, version: str) -> PsirtObservation:
         raise AssertionError(f"unexpected PSIRT collection for {version}")
+
+
+class CorrelatedPsirtFortiGuard(AvailableFortiGuard):
+    def __init__(self) -> None:
+        self.versions: list[str] = []
+
+    async def check_psirt(self, version: str) -> PsirtObservation:
+        self.versions.append(version)
+        return PsirtObservation(
+            status=ExternalObservationStatus.PASS,
+            fortios_version=version,
+            source="https://www.fortiguard.com/psirt",
+            ruleset_id="fortiguard-psirt-critical-high",
+            ruleset_version="2026-08-13",
+            observed_at=datetime.now(UTC),
+            complete=True,
+        )
+
+
+class MalformedPsirtFortiGuard(AvailableFortiGuard):
+    async def check_psirt(self, version: str) -> PsirtObservation:
+        return {"status": "PASS"}  # type: ignore[return-value]
 
 
 def api_client(app) -> httpx.AsyncClient:
@@ -160,12 +194,58 @@ def api_client(app) -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_api_does_not_collect_psirt_on_nominal_audit_path(
+async def test_api_does_not_collect_psirt_without_firmware_version(
     tmp_path: Path,
 ) -> None:
     app = create_app(
         settings=Settings(report_directory=tmp_path),
         fortiguard=ForbiddenPsirtFortiGuard(),
+    )
+    raw = "config system global\n    set hostname edge\nend\n"
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={"configuration": ("synthetic.conf", raw, "text/plain")},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["context"]["psirt"] is None
+    psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
+    assert psirt["status"] == "UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_api_collects_psirt_and_registers_correlated_finding(tmp_path: Path) -> None:
+    fortiguard = CorrelatedPsirtFortiGuard()
+    app = create_app(settings=Settings(report_directory=tmp_path), fortiguard=fortiguard)
+    raw = (
+        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
+        "config system global\n    set hostname edge\nend\n"
+    )
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={"configuration": ("synthetic.conf", raw, "text/plain")},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert fortiguard.versions == ["7.2.9"]
+    assert payload["context"]["psirt"]["fortios_version"] == "7.2.9"
+    psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
+    assert psirt["status"] == "PASS"
+
+
+@pytest.mark.asyncio
+async def test_api_rejects_malformed_psirt_observation_without_breaking_registry(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        settings=Settings(report_directory=tmp_path),
+        fortiguard=MalformedPsirtFortiGuard(),
     )
     raw = (
         "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
@@ -180,17 +260,16 @@ async def test_api_does_not_collect_psirt_on_nominal_audit_path(
 
     assert response.status_code == 201
     payload = response.json()
-    assert payload["context"]["psirt"] is None
-    assert {
-        finding["control_id"] for finding in payload["findings"]
-    }.isdisjoint({"EXT-PSIRT-001", "NET-CTI-WAN-001", "NET-ISDB-WAN-001"})
+    assert payload["context"]["psirt"]["status"] == "ERROR"
+    assert [item["control_id"] for item in payload["findings"]][-1] == "EXT-PSIRT-001"
+    assert payload["findings"][-1]["status"] == "UNKNOWN"
 
 
 @pytest.mark.asyncio
 async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path) -> None:
     app = create_app(
         settings=Settings(report_directory=tmp_path),
-        fortiguard=ForbiddenPsirtFortiGuard(),
+        fortiguard=CorrelatedPsirtFortiGuard(),
     )
 
     async with api_client(app) as client:

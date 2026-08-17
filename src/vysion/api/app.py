@@ -8,13 +8,18 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
 
-from vysion.adapters.fortiguard import FortiGuardClient, FortiGuardService
+from vysion.adapters.fortiguard import (
+    FortiGuardClient,
+    FortiGuardService,
+    error_psirt_observation,
+)
 from vysion.audit.engine import AuditEngine
 from vysion.audit.models import (
     AuditContext,
     ContextProvenance,
     FortiGateConfiguration,
     ProofState,
+    PsirtObservation,
     RuleMatchStatistics,
     UtmLicenseDetails,
     UtmLicenseStatus,
@@ -636,6 +641,17 @@ def create_app(
             context_operator=context_operator,
             context_method=context_method,
         )
+        firmware_version = parsed.device_identity.firmware_version
+        if firmware_version is not None:
+            try:
+                psirt = PsirtObservation.model_validate(
+                    await fortiguard.check_psirt(firmware_version)
+                )
+            except Exception:
+                psirt = error_psirt_observation(firmware_version)
+            context = context.model_copy(
+                update={"psirt": psirt}
+            )
 
         created_at = clock()
         report = JsonAuditReport(

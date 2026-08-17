@@ -40,17 +40,17 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 ## Limites connues du socle
 
 - authentification applicative volontairement absente ; le contrôle d'accès repose sur l'allowlist IP externe acceptée pour Vysion ;
-- parser FortiGate structurel limité aux trois contrôles du socle ;
+- parser FortiGate structurel alimentant les contrôles enregistrés du socle et la corrélation PSIRT ;
 - parser fail-closed sur les preuves auditées : section/preuve absente, interface WAN non identifiable, `allowaccess`/MFA indéterminable ou mutation non interprétée d'une clé auditée → `UNKNOWN`, jamais `PASS` ; une preuve antérieure est invalidée par toute directive ultérieure incomplète ou mutation non interprétée de la même clé ; une non-conformité explicitement prouvée reste `FAIL` ;
 - sections réellement non auditées, clés supplémentaires et sous-sections inconnues traversées puis ignorées sans devenir des preuves ; section auditée imbriquée ou nom de section ressemblant à une section auditée → rejet ;
 - UTF-8 et BOM UTF-8 initial acceptés ; NUL, contrôles C0/C1 non autorisés, DEL, caractères de format invisibles et séparateurs Unicode dangereux rejetés ; lexer probant sans transformation implicite des backslashes ou guillemets ;
 - structure tronquée, section auditée top-level dupliquée, directive placée hors `edit` dans une section à entrées, directive probante dupliquée ou valeur probante lexicalement ambiguë → rejet ;
 - le hostname doit respecter une syntaxe DNS/hostname ; vide ou générique → `FAIL`, lexicalement malformé → rejet ;
-- seulement trois contrôles représentatifs ;
-- le contrôle WAN identifie les interfaces nommées `wan*` ou portant explicitement `set role wan` ; zones et SD-WAN restent hors périmètre ;
+- les contrôles externes restent dépendants d'une observation complète et fraîche ; une réponse PSIRT absente, incomplète, non corrélée ou périmée produit `UNKNOWN` ;
+- le contrôle WAN identifie les interfaces nommées `wan*` ou portant explicitement `set role wan` ; les zones et SD-WAN sont résolus par projection typée et les collisions restent ambiguës ;
 - le contrôle MFA ne reconnaît encore que `fortitoken`, `email` et `sms` ; une autre valeur reste `UNKNOWN` ;
 - le rapport JSON canonique est persisté ; les exports DOCX et XLSX sont générés à la demande depuis le même modèle Pydantic typé, sans copie persistante supplémentaire ;
-- FortiGuard vérifie actuellement la disponibilité du endpoint, pas encore les advisories corrélés au firmware ;
+- FortiGuard vérifie la disponibilité de l'endpoint et corrèle les advisories critiques/élevés à la version FortiOS lorsque la réponse est complète ; le contenu externe reste `UNKNOWN` si la source ne peut pas être vérifiée ;
 - stockage mono-instance local, cohérent avec un unique conteneur ;
 - purge TTL au démarrage, avant écriture et à la lecture ; une sauvegarde externe du volume conserve sa propre politique de rétention ;
 - aucune homologation de production n'est revendiquée.

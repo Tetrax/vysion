@@ -107,6 +107,36 @@ async def test_fortiguard_psirt_fg_ir_advisory_is_explicit_fail() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fortiguard_psirt_unexpected_transport_exception_is_error() -> None:
+    def broken(_: httpx.Request) -> httpx.Response:
+        raise RuntimeError("synthetic transport failure")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(broken)) as http:
+        result = await FortiGuardClient(
+            http=http,
+            status_url="https://www.fortiguard.com/",
+        ).check_psirt("7.2.9")
+
+    assert result.status is ExternalObservationStatus.ERROR
+    assert result.complete is False
+
+
+@pytest.mark.asyncio
+async def test_fortiguard_psirt_http_failure_is_unknown() -> None:
+    def unavailable(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request, text="synthetic unavailable")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as http:
+        result = await FortiGuardClient(
+            http=http,
+            status_url="https://www.fortiguard.com/",
+        ).check_psirt("7.2.9")
+
+    assert result.status is ExternalObservationStatus.UNKNOWN
+    assert result.complete is False
+
+
+@pytest.mark.asyncio
 async def test_fortiguard_psirt_redirected_effective_url_is_unknown() -> None:
     def redirected(request: httpx.Request) -> httpx.Response:
         if request.url.host == "www.fortiguard.com":

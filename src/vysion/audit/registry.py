@@ -5,6 +5,7 @@ from vysion.audit.controls.administration import (
     check_local_user_mfa,
 )
 from vysion.audit.controls.external_services import (
+    check_fortiguard_psirt,
     check_ldaps_connectors,
 )
 from vysion.audit.controls.firewall import (
@@ -61,4 +62,5 @@ def default_registry() -> tuple[Control, ...]:
         check_ips_profiles,
         check_appcontrol_profiles,
         check_ldaps_connectors,
+        check_fortiguard_psirt,
     )

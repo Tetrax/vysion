@@ -6,10 +6,10 @@ Vysion v2 est le nouveau socle interne SNS Security d'audit de configurations Fo
 
 - parser FortiGate minimal et neuf, fail-closed dans les sections auditées ;
 - modèles Pydantic immuables et statuts `PASS`, `FAIL`, `UNKNOWN`, `ERROR` ;
-- registre modulaire de trois contrôles représentatifs : hostname, SSH WAN, MFA administrateur ;
+- registre modulaire couvrant le système, le réseau, l'administration, le firewall, le VPN, l'UTM, les connecteurs LDAP et la corrélation PSIRT FortiOS ;
 - API FastAPI d'upload et de téléchargement JSON / DOCX / XLSX ;
 - stockage par UUID v4 avec timestamps UTC, TTL, purge au démarrage, avant écriture et à la lecture ;
-- adaptateur FortiGuard fail-closed (`UNKNOWN` ou `ERROR`, jamais `PASS` implicite) ;
+- adaptateur FortiGuard fail-closed pour la disponibilité et la corrélation PSIRT (`UNKNOWN` ou `ERROR`, jamais `PASS` implicite) ;
 - interface React minimale compilée au build, avec téléchargement des trois formats ;
 - un Dockerfile multi-stage, un conteneur, un service Compose et un volume ;
 - Nginx interne pour TLS, limites HTTP, headers, statiques et proxy `/api` ;
@@ -25,7 +25,7 @@ Les sections auditées `system global`, `system interface` et `system admin` son
 
 La valeur `hostname` doit respecter une syntaxe DNS/hostname (labels de 1 à 63 caractères, lettres/chiffres/tirets, longueur totale maximale de 253 caractères). Une valeur vide ou générique `fortigate` reste un constat `FAIL`; une valeur lexicalement malformée est rejetée.
 
-Le contrôle WAN identifie les interfaces dont le nom commence par `wan` ou dont `set role wan` est explicitement présent. Les zones et l'appartenance SD-WAN restent à porter depuis l'oracle legacy avant équivalence fonctionnelle avec Vysion v1.
+Le contrôle WAN identifie les interfaces dont le nom commence par `wan` ou dont `set role wan` est explicitement présent. Les zones et l'appartenance SD-WAN sont projetées depuis la structure FortiOS et restent fail-closed lorsqu'une référence est absente ou ambiguë.
 
 Le vocabulaire `allowaccess` reconnu par ce tracer est borné aux valeurs FortiOS connues suivantes : `fabric`, `fgfm`, `ftm`, `http`, `https`, `ping`, `probe-response`, `radius-acct`, `snmp`, `speed-test`, `ssh` et `telnet`. Une valeur inconnue invalide la preuve et produit `UNKNOWN` afin d'éviter un faux `PASS`.
 

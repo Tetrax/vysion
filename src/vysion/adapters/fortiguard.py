@@ -16,6 +16,23 @@ class FortiGuardStatus(StrEnum):
     ERROR = "ERROR"
 
 
+PSIRT_SOURCE = "https://www.fortiguard.com/psirt"
+PSIRT_RULESET_ID = "fortiguard-psirt-critical-high"
+PSIRT_RULESET_VERSION = "2026-08-13"
+
+
+def error_psirt_observation(fortios_version: str) -> PsirtObservation:
+    return PsirtObservation(
+        status=ExternalObservationStatus.ERROR,
+        fortios_version=fortios_version,
+        source=PSIRT_SOURCE,
+        ruleset_id=PSIRT_RULESET_ID,
+        ruleset_version=PSIRT_RULESET_VERSION,
+        observed_at=datetime.now(UTC),
+        complete=False,
+    )
+
+
 class FortiGuardResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -25,6 +42,8 @@ class FortiGuardResult(BaseModel):
 
 class FortiGuardService(Protocol):
     async def check(self) -> FortiGuardResult: ...
+
+    async def check_psirt(self, fortios_version: str) -> PsirtObservation: ...
 
 
 class FortiGuardClient:
@@ -51,17 +70,16 @@ class FortiGuardClient:
         )
 
     async def check_psirt(self, fortios_version: str) -> PsirtObservation:
-        source = "https://www.fortiguard.com/psirt"
         common = {
             "fortios_version": fortios_version,
-            "source": source,
-            "ruleset_id": "fortiguard-psirt-critical-high",
-            "ruleset_version": "2026-08-13",
+            "source": PSIRT_SOURCE,
+            "ruleset_id": PSIRT_RULESET_ID,
+            "ruleset_version": PSIRT_RULESET_VERSION,
             "observed_at": datetime.now(UTC),
         }
         try:
             response = await self._http.get(
-                source,
+                PSIRT_SOURCE,
                 params={
                     "filter": "1",
                     "product": "FortiOS-6K7K,FortiOS",
@@ -75,9 +93,11 @@ class FortiGuardClient:
                 complete=False,
                 **common,
             )
+        except Exception:
+            return error_psirt_observation(fortios_version)
         if response.status_code != 200:
             return PsirtObservation(
-                status=ExternalObservationStatus.ERROR,
+                status=ExternalObservationStatus.UNKNOWN,
                 complete=False,
                 **common,
             )
