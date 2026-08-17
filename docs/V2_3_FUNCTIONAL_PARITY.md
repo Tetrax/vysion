@@ -68,7 +68,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 33 | HA | `verifier_ha_session_pickup` | A | `HA-SESSION-PICKUP-001` | Les trois options legacy sont projetées et contrôlées sans raw-text. |
 | 34 | HA | `verifier_ha_redundance_interfaces` | A | `HA-HEARTBEAT-REDUNDANCY-001` | `hbdev` est projeté avec validation des paires interface/priorité. |
 | 35 | HA | `verifier_ha_override` | A | `HA-OVERRIDE-001` | `disable` ou `enable` avec attente exacte de 30 secondes reproduisent la règle legacy. |
-| 36 | Réseau / firewall | `verifier_ports_deny` | B | `FW-SENSITIVE-PROTOCOL-DENY-001` | Proximité sur les protocoles sensibles, mais couverture et portée des ports legacy à comparer. |
+| 36 | Réseau / firewall | `verifier_ports_deny` | A | `FW-SENSITIVE-PROTOCOL-DENY-001` | Couverture typed du ruleset sensible, y compris deny global `any`→`any` quand LAN/WAN et ports sont certains. |
 | 37 | Réseau | `verifier_utilisation_sdwan` | C | Projection SD-WAN + contrôle d’utilisation | Le parser/projection existe, aucun contrôle V2 enregistré. |
 | 38 | Réseau / UTM | `verifier_profils_securite_sur_regles` | A | `FW-UTM-PROFILE-BINDING-001` | Liaison des profils utilisés sur les règles. |
 | 39 | UTM | `verifier_mail_filter` | C | Projection mailfilter + contrôle | Aucun équivalent V2. |
@@ -95,11 +95,11 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 35**
-- **B — partiels identifiés : 1**
+- **A — équivalents identifiés : 36**
+- **B — partiels identifiés : 0**
 - **C — absents identifiés : 23**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **39 / 59** (66,1 %)
+- Disposition réellement `MIGRATED` : **40 / 59** (67,8 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -189,7 +189,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 8 | Service ALL dans les règles | `MIGRATED` | `FW-INTERNET-ALL-SERVICE-001` rejoué avec sélection WAN typed : ALL canonique sur accept/enable certain produit FAIL ; deny/disable est hors portée ; destination ou service non résolu reste UNKNOWN. Les exemptions historiques spécifiques ne sont pas recopiées. |
 | 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
 | 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |
-| 36 | Ports sensibles interdits | `LEGACY_REVIEW_REQUIRED` | Le contrôle V2 est partiel ; couverture et portée legacy ne sont pas encore équivalentes. |
+| 36 | Ports sensibles interdits | `MIGRATED` | `FW-SENSITIVE-PROTOCOL-DENY-001` résout les ports et groupes typed selon le ruleset versionné. Un deny global `any`→`any` est reconnu uniquement avec LAN/WAN prouvées et couverture complète ; couverture partielle UNKNOWN, accept sensible certain FAIL. |
 
 ## Disposition du tracer réseau SD-WAN
 

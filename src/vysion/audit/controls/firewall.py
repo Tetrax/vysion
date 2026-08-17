@@ -307,6 +307,12 @@ def _ref_wan_state(
 ) -> bool | None:
     name = reference.name.casefold()
     interfaces = _interface_by_name(configuration)
+    if name == "any":
+        if _interface_name_collisions(configuration):
+            return None
+        if scope.selected:
+            return True if scope.names and not scope.unresolved else None
+        return True if any(_role(item) == "wan" for item in interfaces.values()) else None
     if scope.selected:
         if name in scope.names:
             return True
@@ -335,6 +341,17 @@ def _ref_lan_state(
     configuration: FortiGateConfiguration, reference: ObjectReference
 ) -> bool | None:
     name = reference.name.casefold()
+    if name == "any":
+        if _interface_name_collisions(configuration):
+            return None
+        return (
+            True
+            if any(
+                _role(item) == "lan"
+                for item in _interface_by_name(configuration).values()
+            )
+            else None
+        )
     interface = _interface_by_name(configuration).get(name)
     if interface is not None:
         interface_role = _role(interface)
