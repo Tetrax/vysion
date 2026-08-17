@@ -418,7 +418,7 @@ wheels = [
 
 [[package]]
 name = "vysion"
-version = "2.0.0.dev0"
+version = "2.2.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

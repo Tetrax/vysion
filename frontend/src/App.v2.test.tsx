@@ -10,7 +10,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Vysion v2.1.2 guided workflow', () => {
+describe('Vysion v2.2.0-dev guided workflow', () => {
   it('previews the selected file before showing equipment context', async () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -116,7 +116,7 @@ describe('Vysion v2.1.2 guided workflow', () => {
     const objects = Array.from({ length: 5 }, (_, index) => ({ name: `policy-${index + 1}`, object_type: 'policy' }))
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ hostname: 'lab', model: '60E', firmware_version: '7.2.9', interfaces: [], zones: [], sdwan_zones: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ report_id: '7bd449c4-ef96-4d72-b4f6-2bc099c982a2', expires_at: '2026-08-12T12:01:00Z', fortiguard: { status: 'UNKNOWN', detail: 'fixture' }, findings: [{ control_id: 'FW-LIST', title: 'Liste', status: 'FAIL', category: 'firewall', severity: 'high', applicability: 'applicable', message: 'fail', evidence: ['preuve structurée'], affected_objects: objects }] }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ report_id: '7bd449c4-ef96-4d72-b4f6-2bc099c982a2', expires_at: '2026-08-12T12:01:00Z', fortiguard: { status: 'UNKNOWN', detail: 'fixture' }, findings: [{ control_id: 'FW-LIST', title: 'Liste', status: 'FAIL', category: 'firewall', severity: 'high', applicability: 'applicable', message: 'fail', evidence: ['preuve legacy', { section: 'system interface', entry: 'wan1', directive: 'allowaccess', tokens: ['ssh'] }], evidence_items: [{ directive: 'allowaccess' }], affected_objects: objects }] }), { status: 201 }))
     render(<App />)
     await user.upload(screen.getByLabelText('Configuration FortiGate'), new File(['safe'], 'safe.conf'))
     await screen.findByText('lab')
@@ -128,12 +128,14 @@ describe('Vysion v2.1.2 guided workflow', () => {
     details.focus()
     await user.keyboard('{Enter}')
     expect(details).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByText('preuve structurée')).toBeInTheDocument()
+    expect(screen.getByText('system interface · wan1 · allowaccess · ssh')).toBeInTheDocument()
+    expect(screen.getByText('allowaccess')).toBeInTheDocument()
+    expect(screen.getByText('preuve legacy')).toBeInTheDocument()
     expect(screen.queryByText('policy · policy-4')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Afficher les 5 éléments' }))
     expect(screen.getByText('policy · policy-5')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Masquer les détails' }))
-    expect(screen.queryByText('preuve structurée')).not.toBeInTheDocument()
+    expect(screen.queryByText('system interface · wan1 · allowaccess · ssh')).not.toBeInTheDocument()
   })
 
   it('preserves error, info, unknown domains, operator and long evidence lists', async () => {

@@ -37,3 +37,16 @@ def test_audit_engine_keeps_legacy_one_argument_controls_compatible() -> None:
     ).run(FortiGateConfiguration(), AuditContext())
 
     assert findings[0].control_id == "LEGACY-001"
+
+
+def test_audit_engine_converts_control_execution_failure_to_distinct_error_finding() -> None:
+    def broken_control(configuration: FortiGateConfiguration) -> AuditFinding:
+        raise RuntimeError("fixture failure")
+
+    findings = AuditEngine((broken_control,)).run(FortiGateConfiguration(), AuditContext())
+
+    assert len(findings) == 1
+    assert findings[0].control_id == "ENGINE-broken_control"
+    assert findings[0].status is AuditStatus.ERROR
+    assert findings[0].applicability.value == "unknown"
+    assert "RuntimeError" in findings[0].message

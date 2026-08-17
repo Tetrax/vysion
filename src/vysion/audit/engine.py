@@ -1,9 +1,60 @@
 import inspect
 from collections.abc import Callable, Iterable
 
-from vysion.audit.models import AuditContext, AuditFinding, FortiGateConfiguration
+from vysion.audit.models import (
+    Applicability,
+    AuditContext,
+    AuditFinding,
+    AuditPriority,
+    AuditSeverity,
+    AuditStatus,
+    EvidenceCertainty,
+    EvidenceItem,
+    FortiGateConfiguration,
+    RiskAssessment,
+)
 
 Control = Callable[..., AuditFinding]
+
+
+def _control_error(control: Control, error: Exception) -> AuditFinding:
+    control_name = getattr(control, "__qualname__", getattr(control, "__name__", "unknown"))
+    control_short_name = getattr(control, "__name__", "unknown")
+    control_id = getattr(control, "control_id", f"ENGINE-{control_short_name}")
+    error_type = type(error).__name__
+    return AuditFinding(
+        control_id=str(control_id),
+        title=f"Échec d’exécution — {control_name}",
+        status=AuditStatus.ERROR,
+        category="engine",
+        priority=AuditPriority.P0,
+        severity=AuditSeverity.HIGH,
+        applicability=Applicability.UNKNOWN,
+        evidence=(f"exécution du contrôle interrompue: {error_type}",),
+        evidence_items=(
+            EvidenceItem(
+                section="audit-engine",
+                entry=control_name,
+                directive="execution",
+                tokens=(error_type,),
+                certainty=EvidenceCertainty.INVALID,
+            ),
+        ),
+        message=(
+            f"Le contrôle {control_name} n’a pas pu s’exécuter ({error_type}). "
+            "Aucune conclusion de conformité ne doit être tirée."
+        ),
+        risk=RiskAssessment(
+            summary="Le contrôle n’a pas produit de résultat vérifiable.",
+            impact="La couverture d’audit est incomplète.",
+            likelihood="Inconnu",
+            treatment="Diagnostiquer l’erreur puis rejouer l’audit.",
+        ),
+        recommendation="Corriger l’échec d’exécution avant d’interpréter le contrôle.",
+        remediation=(
+            "Consulter les journaux techniques et rejouer l’audit sur la même configuration."
+        ),
+    )
 
 
 class AuditEngine:
@@ -17,9 +68,12 @@ class AuditEngine:
     ) -> list[AuditFinding]:
         findings: list[AuditFinding] = []
         for control in self._controls:
-            parameters = inspect.signature(control).parameters
-            if "context" in parameters:
-                findings.append(control(configuration, context=context))
-            else:
-                findings.append(control(configuration))
+            try:
+                parameters = inspect.signature(control).parameters
+                if "context" in parameters:
+                    findings.append(control(configuration, context=context))
+                else:
+                    findings.append(control(configuration))
+            except Exception as error:
+                findings.append(_control_error(control, error))
         return findings

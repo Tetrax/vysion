@@ -452,6 +452,7 @@ async def test_api_round_trips_explicit_operator_context_without_false_defaults(
             },
             "client": "Client synthétique",
             "site": "Paris-lab",
+            "operator_comment": None,
             "ha": True,
             "mpls": None,
             "utm_license": False,
@@ -550,7 +551,15 @@ async def test_api_generates_xlsx_from_the_stored_typed_report(tmp_path: Path) -
         f'attachment; filename="vysion-{report_id}.xlsx"'
     )
     workbook = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
-    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert workbook.sheetnames[:3] == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert {
+        "Audit configuration",
+        "Actions sans accord",
+        "Actions avec accord",
+        "Statistiques",
+        "Comptes",
+        "Métadonnées équipement",
+    } <= set(workbook.sheetnames)
     summary = {
         str(key): value
         for key, value in workbook["Synthèse"].iter_rows(
@@ -621,4 +630,4 @@ async def test_health_reports_application_readiness(tmp_path: Path) -> None:
         response = await client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "vysion", "version": "2"}
+    assert response.json() == {"status": "ok", "service": "vysion", "version": "2.2.0-dev"}

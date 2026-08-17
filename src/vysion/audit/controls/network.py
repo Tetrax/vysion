@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vysion.audit.controls._evidence import evidence_for_directive
+from vysion.audit.controls._names import unique_named
 from vysion.audit.models import (
     AffectedObject,
     Applicability,
@@ -14,8 +15,10 @@ from vysion.audit.models import (
     EvidenceItem,
     FortiGateConfiguration,
     Interface,
+    ProofState,
     RiskAssessment,
     SecondaryIP,
+    WanSelectionKind,
 )
 
 _FORBIDDEN_PROTOCOLS = frozenset({"ssh", "http", "https"})
@@ -160,27 +163,98 @@ def _context_wans(
     configuration: FortiGateConfiguration,
     context: AuditContext | None,
 ) -> tuple[tuple[Interface, ...], tuple[str, ...], bool]:
-    by_name = {interface.name.casefold(): interface for interface in configuration.interfaces}
+    by_name, interface_collisions = unique_named(configuration.interfaces)
+    zones, zone_collisions = unique_named(configuration.zones)
+    sdwan_zones, sdwan_collisions = unique_named(configuration.sdwan_zones)
+    contradictions = [
+        f"Nom d'interface ambigu (insensible à la casse): {name}"
+        for name in sorted(interface_collisions)
+    ]
+    contradictions.extend(
+        f"Nom de zone ambigu (insensible à la casse): {name}"
+        for name in sorted(zone_collisions)
+    )
+    contradictions.extend(
+        f"Nom de zone SD-WAN ambigu (insensible à la casse): {name}"
+        for name in sorted(sdwan_collisions)
+    )
+
+    if context is not None and context.wan_selections is not None:
+        selected: list[Interface] = []
+        selected_names: set[str] = set()
+        for selection in context.wan_selections:
+            key = selection.name.casefold()
+            resolved_names: tuple[str, ...]
+            if selection.kind is WanSelectionKind.INTERFACE:
+                resolved_names = () if key in interface_collisions else (selection.name,)
+            elif selection.kind is WanSelectionKind.ZONE:
+                zone = zones.get(key)
+                resolved_names = (
+                    tuple(reference.name for reference in zone.interfaces)
+                    if zone is not None and zone.proof_state is ProofState.PROVEN
+                    else ()
+                )
+            elif selection.kind is WanSelectionKind.SDWAN:
+                zone = sdwan_zones.get(key)
+                resolved_names = (
+                    tuple(reference.name for reference in zone.interfaces)
+                    if zone is not None and zone.proof_state is ProofState.PROVEN
+                    else ()
+                )
+            else:
+                resolved_names = tuple(
+                    interface.name
+                    for interface in by_name.values()
+                    if interface.role is not None and interface.role.casefold() == "wan"
+                )
+
+            if not resolved_names:
+                if selection.kind is WanSelectionKind.INTERFACE and key in interface_collisions:
+                    contradictions.append(f"WAN déclarée ambiguë: {selection.name}")
+                elif selection.kind is WanSelectionKind.ZONE and key in zone_collisions:
+                    contradictions.append(f"Zone WAN déclarée ambiguë: {selection.name}")
+                elif selection.kind is WanSelectionKind.SDWAN and key in sdwan_collisions:
+                    contradictions.append(f"Zone SD-WAN déclarée ambiguë: {selection.name}")
+                else:
+                    contradictions.append(f"WAN déclarée non résolue: {selection.name}")
+                continue
+
+            unresolved = tuple(
+                name
+                for name in resolved_names
+                if name.casefold() not in by_name or name.casefold() in interface_collisions
+            )
+            if unresolved:
+                contradictions.extend(
+                    f"WAN déclarée inconnue: {name}" for name in unresolved
+                )
+                continue
+
+            for resolved_name in resolved_names:
+                normalized = resolved_name.casefold()
+                if normalized in selected_names:
+                    continue
+                selected_names.add(normalized)
+                selected.append(by_name[normalized])
+        return tuple(selected), tuple(dict.fromkeys(contradictions)), True
+
     if context is not None and context.selected_wans is not None:
         selected: list[Interface] = []
-        contradictions: list[str] = []
         for declared_name in context.selected_wans:
-            interface = by_name.get(declared_name.casefold())
-            if interface is None:
-                contradictions.append(f"WAN déclarée inconnue: {declared_name}")
+            key = declared_name.casefold()
+            interface = by_name.get(key)
+            if interface is None or key in interface_collisions:
+                contradictions.append(f"WAN déclarée inconnue ou ambiguë: {declared_name}")
             else:
-                # The operator context is authoritative for a certain typed
-                # interface.  A structural role is not required to repeat the
-                # operator's selection.
                 selected.append(interface)
-        return tuple(selected), tuple(contradictions), True
+        return tuple(selected), tuple(dict.fromkeys(contradictions)), True
 
     inferred = tuple(
         interface
-        for interface in configuration.interfaces
+        for interface in by_name.values()
         if interface.role is not None and interface.role.casefold() == "wan"
     )
-    return inferred, (), False
+    return inferred, tuple(dict.fromkeys(contradictions)), False
 
 
 def _finding(

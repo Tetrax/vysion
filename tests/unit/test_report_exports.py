@@ -147,7 +147,15 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
         data_only=False,
     )
 
-    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert workbook.sheetnames[:3] == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert {
+        "Audit configuration",
+        "Actions sans accord",
+        "Actions avec accord",
+        "Statistiques",
+        "Comptes",
+        "Métadonnées équipement",
+    } <= set(workbook.sheetnames)
     context_values = [cell.value for row in workbook["Synthèse"].iter_rows() for cell in row]
     assert "operator-form" in context_values
     assert "analyst" in context_values
@@ -175,12 +183,43 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
     assert "wan1" in row[9]
     assert "@risk" in row[10]
     assert row[13] == "Non renseigné"
+    assert workbook["Actions sans accord"]["A2"].value == "NET-WAN-MGMT-001"
+    assert workbook["Actions avec accord"].max_row == 1
 
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and cell.value.startswith(("=", "+", "-", "@")):
                     raise AssertionError(f"formula-like cell was not escaped: {cell.coordinate}")
+
+
+def test_legacy_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
+    finding = _enriched_report().findings[0].model_copy(
+        update={
+            "evidence": (
+                EvidenceItem(
+                    section="system interface",
+                    entry="wan1",
+                    directive="allowaccess",
+                    tokens=("https",),
+                    line=42,
+                ),
+            ),
+            "evidence_items": (),
+        }
+    )
+    report = _enriched_report().model_copy(update={"findings": (finding,)})
+
+    with ZipFile(BytesIO(render_docx(report))) as package:
+        document = package.read("word/document.xml").decode("utf-8")
+    assert "allowaccess" in document
+    assert "ligne 42" in document
+
+    workbook = load_workbook(BytesIO(render_xlsx(report)), data_only=False)
+    proof = workbook["Contrôles enrichis"]["I2"].value
+    assert isinstance(proof, str)
+    assert "allowaccess" in proof
+    assert "ligne 42" in proof
 
 
 def test_m5_json_docx_xlsx_share_all_finding_ids() -> None:

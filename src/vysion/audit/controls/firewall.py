@@ -26,6 +26,7 @@ from vysion.audit.models import (
     EvidenceCertainty,
     EvidenceItem,
     FortiGateConfiguration,
+    Interface,
     ObjectReference,
     Policy,
     PortRange,
@@ -34,6 +35,8 @@ from vysion.audit.models import (
     RiskAssessment,
     Vip,
     VirtualServer,
+    WanSelectionKind,
+    Zone,
 )
 from vysion.audit.rulesets.sensitive_protocols import (
     SensitiveProtocolRuleset,
@@ -155,8 +158,8 @@ def _policy_section(configuration: FortiGateConfiguration):
     return configuration.document.section("firewall policy")
 
 
-def _interface_by_name(configuration: FortiGateConfiguration) -> dict[str, object]:
-    result: dict[str, object] = {}
+def _interface_by_name(configuration: FortiGateConfiguration) -> dict[str, Interface]:
+    result: dict[str, Interface] = {}
     collisions: set[str] = set()
     for interface in configuration.interfaces:
         key = interface.name.casefold()
@@ -169,10 +172,22 @@ def _interface_by_name(configuration: FortiGateConfiguration) -> dict[str, objec
     return result
 
 
-def _zone_by_name(configuration: FortiGateConfiguration) -> dict[str, object]:
-    result: dict[str, object] = {}
+def _interface_name_collisions(configuration: FortiGateConfiguration) -> frozenset[str]:
+    seen: set[str] = set()
     collisions: set[str] = set()
-    for zone in configuration.zones:
+    for interface in configuration.interfaces:
+        key = interface.name.casefold()
+        if key in seen:
+            collisions.add(key)
+        else:
+            seen.add(key)
+    return frozenset(collisions)
+
+
+def _zone_by_name(zones: Iterable[Zone]) -> dict[str, Zone]:
+    result: dict[str, Zone] = {}
+    collisions: set[str] = set()
+    for zone in zones:
         key = zone.name.casefold()
         if key in result:
             collisions.add(key)
@@ -183,12 +198,63 @@ def _zone_by_name(configuration: FortiGateConfiguration) -> dict[str, object]:
     return result
 
 
+def _resolved_zone_interfaces(
+    zone: Zone,
+    interfaces: dict[str, Interface],
+) -> tuple[str, ...] | None:
+    if zone.proof_state is not ProofState.PROVEN or not zone.interfaces:
+        return None
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for reference in zone.interfaces:
+        key = reference.name.casefold()
+        interface = interfaces.get(key)
+        if interface is None or key in seen:
+            return None
+        seen.add(key)
+        resolved.append(getattr(interface, "name", reference.name))
+    return tuple(resolved)
+
+
 def _context_wan_scope(
     configuration: FortiGateConfiguration,
     context: AuditContext | None,
 ) -> _WanScope:
     interfaces = _interface_by_name(configuration)
-    zones = _zone_by_name(configuration)
+    interface_collisions = _interface_name_collisions(configuration)
+    zones = _zone_by_name(configuration.zones)
+    sdwan_zones = _zone_by_name(configuration.sdwan_zones)
+    if context is not None and context.wan_selections is not None:
+        names: set[str] = set()
+        unresolved: list[str] = []
+        for selection in context.wan_selections:
+            if selection.kind is WanSelectionKind.INTERFACE:
+                resolved = interfaces.get(selection.name.casefold())
+                if resolved is None:
+                    unresolved.append(selection.name)
+                    continue
+                names.add(getattr(resolved, "name", selection.name).casefold())
+            elif selection.kind in {WanSelectionKind.ZONE, WanSelectionKind.SDWAN}:
+                index = zones if selection.kind is WanSelectionKind.ZONE else sdwan_zones
+                zone = index.get(selection.name.casefold())
+                if zone is None:
+                    unresolved.append(selection.name)
+                    continue
+                resolved_zone_interfaces = _resolved_zone_interfaces(zone, interfaces)
+                if resolved_zone_interfaces is None:
+                    unresolved.append(selection.name)
+                    continue
+                names.add(zone.name.casefold())
+                names.update(name.casefold() for name in resolved_zone_interfaces)
+            else:
+                if interface_collisions:
+                    unresolved.extend(sorted(interface_collisions))
+                names.update(
+                    interface.name.casefold()
+                    for interface in interfaces.values()
+                    if _role(interface) == "wan"
+                )
+        return _WanScope(selected=True, names=frozenset(names), unresolved=tuple(unresolved))
     if context is None or context.selected_wans is None:
         return _WanScope(selected=False, names=frozenset(), unresolved=())
     names: set[str] = set()
@@ -200,9 +266,15 @@ def _context_wan_scope(
         if interface is None and zone is None:
             unresolved.append(declared)
             continue
-        names.add(normalized)
-        if zone is not None and zone.proof_state is ProofState.PROVEN:
-            names.update(reference.name.casefold() for reference in zone.interfaces)
+        if zone is not None:
+            resolved_zone_interfaces = _resolved_zone_interfaces(zone, interfaces)
+            if resolved_zone_interfaces is None:
+                unresolved.append(declared)
+                continue
+            names.add(zone.name.casefold())
+            names.update(name.casefold() for name in resolved_zone_interfaces)
+        else:
+            names.add(getattr(interface, "name", declared).casefold())
     return _WanScope(selected=True, names=frozenset(names), unresolved=tuple(unresolved))
 
 
@@ -212,7 +284,7 @@ def _role(interface: object) -> str | None:
 
 
 def _zone_members_roles(configuration: FortiGateConfiguration, zone_name: str) -> set[str] | None:
-    zone = _zone_by_name(configuration).get(zone_name.casefold())
+    zone = _zone_by_name(configuration.zones).get(zone_name.casefold())
     if zone is None or zone.proof_state is not ProofState.PROVEN or not zone.interfaces:
         return None
     interfaces = _interface_by_name(configuration)

@@ -1,7 +1,7 @@
 import json
 from collections.abc import Iterable
-from datetime import timedelta
-from typing import Annotated
+from datetime import date, timedelta
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 import httpx
@@ -10,14 +10,26 @@ from fastapi.responses import JSONResponse, Response
 
 from vysion.adapters.fortiguard import FortiGuardClient, FortiGuardService
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditContext, ContextProvenance, EvidenceCertainty
+from vysion.audit.models import (
+    AuditContext,
+    ContextProvenance,
+    FortiGateConfiguration,
+    ProofState,
+    RuleMatchStatistics,
+    UtmLicenseDetails,
+    UtmLicenseStatus,
+    WanSelection,
+    WanSelectionKind,
+)
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.config import Settings
 from vysion.reports.docx_report import render_docx
-from vysion.reports.json_report import JsonAuditReport
+from vysion.reports.json_report import AccountMetadata, EquipmentMetadata, JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
 from vysion.storage.reports import Clock, JsonReportStore, utc_now
+
+VYSION_VERSION = "2.2.0-dev"
 
 
 def _optional_bool(value: str | None, field_name: str) -> bool | None:
@@ -31,6 +43,18 @@ def _optional_bool(value: str | None, field_name: str) -> bool | None:
     if normalized in {"unknown", "unset", "none", "null"}:
         return None
     raise HTTPException(status_code=422, detail=f"{field_name} must be true or false")
+
+
+def _optional_nonnegative_int(value: str | None, field_name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value.strip())
+    except (AttributeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be an integer") from exc
+    if parsed < 0:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be non-negative")
+    return parsed
 
 
 def _selected_wans(values: Iterable[str]) -> tuple[str, ...] | None:
@@ -85,6 +109,172 @@ def _text_values(values: Iterable[object], field_name: str) -> list[str]:
     return result
 
 
+def _unique_named(items: Iterable[Any]) -> dict[str, Any]:
+    resolved: dict[str, Any] = {}
+    duplicates: set[str] = set()
+    for item in items:
+        key = item.name.casefold()
+        if key in duplicates:
+            continue
+        if key in resolved:
+            duplicates.add(key)
+            resolved.pop(key)
+            continue
+        resolved[key] = item
+    return resolved
+
+
+def _resolve_interface_references(
+    references: Iterable[Any],
+    interfaces: dict[str, Any],
+) -> tuple[str, ...]:
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for reference in references:
+        key = reference.name.casefold()
+        interface = interfaces.get(key)
+        if interface is None or key in seen:
+            return ()
+        seen.add(key)
+        resolved.append(interface.name)
+    return tuple(resolved) if resolved else ()
+
+
+def _selected_wan_scopes(
+    values: Iterable[str],
+    configuration: FortiGateConfiguration,
+) -> tuple[WanSelection, ...] | None:
+    raw_items: list[object] = []
+    explicit_json_list = False
+    for value in values:
+        if not value.strip():
+            continue
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="selected_wan_scopes must be valid JSON",
+            ) from exc
+        if isinstance(decoded, list):
+            explicit_json_list = True
+            raw_items.extend(decoded)
+        elif isinstance(decoded, dict):
+            raw_items.append(decoded)
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="selected_wan_scopes must be a JSON list of objects",
+            )
+    if not raw_items:
+        return () if explicit_json_list else None
+
+    interfaces = _unique_named(configuration.interfaces)
+    zones = _unique_named(configuration.zones)
+    sdwan_zones = _unique_named(configuration.sdwan_zones)
+    selections: list[WanSelection] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw_items:
+        if not isinstance(item, dict) or set(item) - {"name", "kind"}:
+            raise HTTPException(
+                status_code=422,
+                detail="each selected_wan_scope must contain only name and kind",
+            )
+        name = item.get("name")
+        kind_value = item.get("kind")
+        if not isinstance(name, str) or not name.strip() or not isinstance(kind_value, str):
+            raise HTTPException(
+                status_code=422,
+                detail="each selected_wan_scope needs a non-empty name and kind",
+            )
+        try:
+            kind = WanSelectionKind(kind_value.casefold())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid WAN selection kind") from exc
+        normalized_name = name.strip()
+        unique_key = (kind.value, normalized_name.casefold())
+        if unique_key in seen:
+            raise HTTPException(status_code=422, detail="WAN selections must be unique")
+        seen.add(unique_key)
+
+        resolved_interfaces: tuple[str, ...] = ()
+        if kind is WanSelectionKind.INTERFACE:
+            resolved = interfaces.get(normalized_name.casefold())
+            resolved_interfaces = (resolved.name,) if resolved is not None else ()
+        elif kind is WanSelectionKind.ZONE:
+            zone = zones.get(normalized_name.casefold())
+            if zone is not None and zone.proof_state is ProofState.PROVEN:
+                resolved_interfaces = _resolve_interface_references(zone.interfaces, interfaces)
+        elif kind is WanSelectionKind.SDWAN:
+            zone = sdwan_zones.get(normalized_name.casefold())
+            if zone is not None and zone.proof_state is ProofState.PROVEN:
+                resolved_interfaces = _resolve_interface_references(zone.interfaces, interfaces)
+        else:
+            if normalized_name.casefold() != "automatic":
+                raise HTTPException(
+                    status_code=422,
+                    detail="automatic WAN selection must be named automatic",
+                )
+            resolved_interfaces = tuple(
+                interface.name
+                for interface in configuration.interfaces
+                if interface.role is not None and interface.role.casefold() == "wan"
+            )
+        selections.append(
+            WanSelection(
+                name=normalized_name,
+                kind=kind,
+                interfaces=resolved_interfaces,
+            )
+        )
+    return tuple(selections)
+
+
+def _utm_license_details(
+    *,
+    legacy: str | None,
+    status_value: str | None,
+    expiration_value: str | None,
+    provenance: str | None,
+    manual_value: str | None,
+) -> UtmLicenseDetails | None:
+    values = (status_value, expiration_value, provenance, manual_value)
+    if not any(value is not None for value in values):
+        return None
+    if status_value is None:
+        raise HTTPException(status_code=422, detail="utm_license_status is required")
+    try:
+        status = UtmLicenseStatus(status_value.strip().casefold())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="utm_license_status must be active or inactive",
+        ) from exc
+    expiration = None
+    if expiration_value:
+        try:
+            expiration = date.fromisoformat(expiration_value.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="utm_license_expiration must be an ISO date",
+            ) from exc
+    manual = _optional_bool(manual_value, "utm_license_manual")
+    if legacy is not None and _optional_bool(legacy, "utm_license") != (
+        status is UtmLicenseStatus.ACTIVE
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="utm_license conflicts with utm_license_status",
+        )
+    return UtmLicenseDetails(
+        status=status,
+        expiration_date=expiration,
+        provenance=provenance,
+        manual=False if manual is None else manual,
+    )
+
+
 def _optional_form_value(values: Iterable[object], field_name: str) -> str | None:
     non_empty = [value for value in _text_values(values, field_name) if value != ""]
     if len(non_empty) > 1:
@@ -134,17 +324,39 @@ def _operator_provenance(
 def _audit_context(
     *,
     selected_wans: Iterable[str],
+    selected_wan_scopes: Iterable[str] = (),
+    configuration: FortiGateConfiguration,
     client: str | None,
     site: str | None,
+    serial_number: str | None,
+    uptime: str | None,
+    unmatched_rules: str | None,
+    operator_comment: str | None,
+    operator: str | None,
     ha: str | None,
     mpls: str | None,
     utm_license: str | None,
+    utm_license_status: str | None,
+    utm_license_expiration: str | None,
+    utm_license_provenance: str | None,
+    utm_license_manual: str | None,
     operator_context: str | None = None,
     context_source: str | None,
     context_operator: str | None,
     context_method: str | None,
 ) -> AuditContext:
     selected = _selected_wans(selected_wans)
+    typed_selections = _selected_wan_scopes(selected_wan_scopes, configuration)
+    if typed_selections is not None:
+        typed_names = tuple(selection.name for selection in typed_selections)
+        if selected and sorted(name.casefold() for name in selected) != sorted(
+            name.casefold() for name in typed_names
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="selected_wans conflicts with selected_wan_scopes",
+            )
+        selected = typed_names
     booleans = {
         "ha": _optional_bool(ha, "ha"),
         "mpls": _optional_bool(mpls, "mpls"),
@@ -156,11 +368,31 @@ def _audit_context(
         context_operator=context_operator,
         context_method=context_method,
     )
+    license_details = _utm_license_details(
+        legacy=utm_license,
+        status_value=utm_license_status,
+        expiration_value=utm_license_expiration,
+        provenance=utm_license_provenance,
+        manual_value=utm_license_manual,
+    )
+    unmatched_value = _optional_nonnegative_int(unmatched_rules, "unmatched_rules")
+    rule_match_statistics = (
+        RuleMatchStatistics(unmatched_rules=unmatched_value)
+        if unmatched_value is not None
+        else None
+    )
     return AuditContext(
         selected_wans=selected,
+        wan_selections=typed_selections,
         operator_provenance=provenance,
         client=client,
         site=site,
+        serial_number=serial_number,
+        uptime=uptime,
+        operator_comment=operator_comment,
+        rule_match_statistics=rule_match_statistics,
+        operator=operator,
+        utm_license_details=license_details,
         **booleans,
     )
 
@@ -184,30 +416,85 @@ async def _read_parsed_configuration(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _preview_sdwan_zones(configuration) -> list[dict[str, object]]:
-    section = configuration.document.section("system sdwan")
-    if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
-        return []
-    zones: list[dict[str, object]] = []
-    for entry in section.entries:
-        if entry.certainty is not EvidenceCertainty.CERTAIN:
+def _preview_zone_payload(
+    zones: Iterable[Any],
+    interfaces: dict[str, Any],
+    *,
+    sort_interfaces: bool = False,
+) -> list[dict[str, object]]:
+    preview: list[dict[str, object]] = []
+    for zone in _unique_named(zones).values():
+        if zone.proof_state is not ProofState.PROVEN:
             continue
-        interfaces = sorted(
+        resolved_interfaces = _resolve_interface_references(zone.interfaces, interfaces)
+        if not resolved_interfaces:
+            continue
+        preview.append(
             {
-                token
-                for directive in entry.directives
-                if directive.name in {"interface", "member"}
-                and directive.certainty is EvidenceCertainty.CERTAIN
-                and not directive.mutation
-                for token in directive.tokens
+                "name": zone.name,
+                "interfaces": (
+                    sorted(resolved_interfaces)
+                    if sort_interfaces
+                    else list(resolved_interfaces)
+                ),
             }
         )
-        zones.append({"name": entry.name, "interfaces": interfaces})
-    return zones
+    return preview
+
+
+def _preview_sdwan_zones(configuration) -> list[dict[str, object]]:
+    interfaces = _unique_named(configuration.interfaces)
+    return _preview_zone_payload(
+        configuration.sdwan_zones,
+        interfaces,
+        sort_interfaces=True,
+    )
+
+
+def _equipment_metadata(configuration: FortiGateConfiguration) -> EquipmentMetadata:
+    identity = configuration.device_identity
+    return EquipmentMetadata(
+        hostname=identity.hostname,
+        model=identity.model,
+        firmware_version=identity.firmware_version,
+        serial_number=identity.serial_number,
+        interface_names=tuple(interface.name for interface in configuration.interfaces),
+        zone_names=tuple(zone.name for zone in configuration.zones),
+        sdwan_zone_names=tuple(zone.name for zone in configuration.sdwan_zones),
+        interface_zone_relations=tuple(
+            f"{interface.name} → {interface.zone.name}"
+            for interface in configuration.interfaces
+            if interface.zone is not None
+        ),
+    )
+
+
+def _account_metadata(configuration: FortiGateConfiguration) -> tuple[AccountMetadata, ...]:
+    administrators = tuple(
+        AccountMetadata(
+            name=account.name,
+            kind="administrator",
+            two_factor=account.two_factor,
+            peer_auth=None if account.peer_auth is None else str(account.peer_auth),
+        )
+        for account in configuration.administrators
+    )
+    local_users = tuple(
+        AccountMetadata(
+            name=account.name,
+            kind="local-user",
+            two_factor=account.two_factor,
+        )
+        for account in configuration.local_users
+    )
+    return administrators + local_users
 
 
 def _preview_payload(configuration) -> dict[str, object]:
     identity = configuration.device_identity
+    preview_interfaces = tuple(_unique_named(configuration.interfaces).values())
+    interface_index = _unique_named(configuration.interfaces)
+    preview_zones = _preview_zone_payload(configuration.zones, interface_index)
     return {
         "hostname": identity.hostname,
         "model": identity.model,
@@ -218,14 +505,13 @@ def _preview_payload(configuration) -> dict[str, object]:
                 "name": interface.name,
                 "role": interface.role,
             }
-            for interface in configuration.interfaces
+            for interface in preview_interfaces
         ],
-        "zones": [
-            {
-                "name": zone.name,
-                "interfaces": [reference.name for reference in zone.interfaces],
-            }
-            for zone in configuration.zones
+        "zones": preview_zones,
+        "wan_relations": [
+            {"interface": interface.name, "zone": interface.zone.name}
+            for interface in preview_interfaces
+            if interface.zone is not None
         ],
         "sdwan_zones": _preview_sdwan_zones(configuration),
     }
@@ -249,7 +535,7 @@ def create_app(
             status_url=resolved_settings.fortiguard_status_url,
         )
 
-    app = FastAPI(title="Vysion", version="2.0.0", docs_url=None, redoc_url=None)
+    app = FastAPI(title="Vysion", version=VYSION_VERSION, docs_url=None, redoc_url=None)
     if managed_http is not None:
         client = managed_http
 
@@ -259,7 +545,7 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "vysion", "version": "2"}
+        return {"status": "ok", "service": "vysion", "version": VYSION_VERSION}
 
     @app.post("/api/audits/preview")
     async def preview_audit(configuration: Annotated[UploadFile, File()]) -> JSONResponse:
@@ -280,8 +566,20 @@ def create_app(
     ) -> JSONResponse:
         form = await request.form()
         selected_wans = _text_values(form.getlist("selected_wans"), "selected_wans")
+        selected_wan_scopes = _text_values(
+            form.getlist("selected_wan_scopes"), "selected_wan_scopes"
+        )
         client = _optional_form_value(form.getlist("client"), "client")
         site = _optional_form_value(form.getlist("site"), "site")
+        serial_number = _optional_form_value(form.getlist("serial_number"), "serial_number")
+        uptime = _optional_form_value(form.getlist("uptime"), "uptime")
+        unmatched_rules = _optional_form_value(
+            form.getlist("unmatched_rules"), "unmatched_rules"
+        )
+        operator_comment = _optional_form_value(
+            form.getlist("context_comment") or form.getlist("comment"), "context_comment"
+        )
+        operator = _optional_form_value(form.getlist("operator"), "operator")
         operator_context = _optional_form_value(
             form.getlist("operator_context"), "operator_context"
         )
@@ -292,6 +590,18 @@ def create_app(
             form.getlist("mpls_context") or form.getlist("mpls"), "mpls_context"
         )
         utm_license = _optional_form_value(form.getlist("utm_license"), "utm_license")
+        utm_license_status = _optional_form_value(
+            form.getlist("utm_license_status"), "utm_license_status"
+        )
+        utm_license_expiration = _optional_form_value(
+            form.getlist("utm_license_expiration"), "utm_license_expiration"
+        )
+        utm_license_provenance = _optional_form_value(
+            form.getlist("utm_license_provenance"), "utm_license_provenance"
+        )
+        utm_license_manual = _optional_form_value(
+            form.getlist("utm_license_manual"), "utm_license_manual"
+        )
         context_source = _optional_form_value(form.getlist("context_source"), "context_source")
         context_operator = _optional_form_value(
             form.getlist("context_operator"), "context_operator"
@@ -305,11 +615,22 @@ def create_app(
 
         context = _audit_context(
             selected_wans=selected_wans,
+            selected_wan_scopes=selected_wan_scopes,
+            configuration=parsed,
             client=client,
             site=site,
+            serial_number=serial_number,
+            uptime=uptime,
+            unmatched_rules=unmatched_rules,
+            operator_comment=operator_comment,
+            operator=operator,
             ha=ha,
             mpls=mpls,
             utm_license=utm_license,
+            utm_license_status=utm_license_status,
+            utm_license_expiration=utm_license_expiration,
+            utm_license_provenance=utm_license_provenance,
+            utm_license_manual=utm_license_manual,
             operator_context=operator_context,
             context_source=context_source,
             context_operator=context_operator,
@@ -323,6 +644,8 @@ def create_app(
             expires_at=created_at + timedelta(seconds=resolved_settings.report_ttl_seconds),
             source_name=configuration.filename or "configuration.conf",
             context=context,
+            equipment=_equipment_metadata(parsed),
+            accounts=_account_metadata(parsed),
             fortiguard=await fortiguard.check(),
             findings=tuple(engine.run(parsed, context=context)),
         )

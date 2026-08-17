@@ -50,7 +50,13 @@ end
 
 def test_duplicate_generic_entries_and_sections_never_become_certain() -> None:
     repeated = FortiGateParser().parse(
-        """config system zone
+        """config system interface
+    edit "wan1"
+    next
+    edit "lan"
+    next
+end
+config system zone
     edit "internet"
         set interface "wan1"
     next

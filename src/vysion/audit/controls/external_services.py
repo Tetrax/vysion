@@ -8,6 +8,7 @@ from vysion.audit.controls._evidence import (
     evidence_for_directive,
     evidence_for_section,
 )
+from vysion.audit.controls._names import unique_named
 from vysion.audit.models import (
     AffectedObject,
     Applicability,
@@ -25,6 +26,7 @@ from vysion.audit.models import (
     RiskAssessment,
     StructuralDirective,
     StructuralEntry,
+    WanSelectionKind,
 )
 from vysion.audit.rulesets.external_services import (
     expected_cti_ipv4,
@@ -53,26 +55,94 @@ def _wan_names(
     context: AuditContext | None,
 ) -> tuple[frozenset[str], bool]:
     section = configuration.document.section("system interface")
-    certain_names = (
-        frozenset(
+    if section is not None and section.certainty is EvidenceCertainty.CERTAIN:
+        entries, entry_collisions = unique_named(section.entries)
+        certain_names = frozenset(
             entry.name.casefold()
-            for entry in section.entries
+            for entry in entries.values()
             if entry.certainty is EvidenceCertainty.CERTAIN
         )
-        if section is not None and section.certainty is EvidenceCertainty.CERTAIN
-        else frozenset()
+    else:
+        entry_collisions = frozenset()
+        certain_names = frozenset()
+
+    interfaces, interface_collisions = unique_named(configuration.interfaces)
+    zones, zone_collisions = unique_named(configuration.zones)
+    sdwan_zones, sdwan_collisions = unique_named(configuration.sdwan_zones)
+    resolved = not (
+        entry_collisions
+        or interface_collisions
+        or zone_collisions
+        or sdwan_collisions
     )
+    proven_zone_names = frozenset(
+        zone.name.casefold()
+        for zone in (*zones.values(), *sdwan_zones.values())
+        if zone.proof_state is ProofState.PROVEN
+    )
+
+    if context is not None and context.wan_selections is not None:
+        selected: set[str] = set()
+        for selection in context.wan_selections:
+            key = selection.name.casefold()
+            if selection.kind is WanSelectionKind.INTERFACE:
+                if key not in interfaces or key in interface_collisions:
+                    resolved = False
+                else:
+                    selected.add(key)
+            elif selection.kind in {WanSelectionKind.ZONE, WanSelectionKind.SDWAN}:
+                index = zones if selection.kind is WanSelectionKind.ZONE else sdwan_zones
+                collisions = (
+                    zone_collisions
+                    if selection.kind is WanSelectionKind.ZONE
+                    else sdwan_collisions
+                )
+                zone = index.get(key)
+                if zone is None or key in collisions or zone.proof_state is not ProofState.PROVEN:
+                    resolved = False
+                    continue
+                references = tuple(reference.name.casefold() for reference in zone.interfaces)
+                unresolved = tuple(
+                    name
+                    for name in references
+                    if name not in interfaces or name in interface_collisions
+                )
+                if unresolved or not references:
+                    resolved = False
+                    continue
+                selected.add(key)
+                selected.update(references)
+            else:
+                selected.update(
+                    interface.name.casefold()
+                    for interface in interfaces.values()
+                    if interface.role is not None and interface.role.casefold() == "wan"
+                )
+        return (
+            frozenset(selected),
+            bool(selected)
+            and resolved
+            and selected <= certain_names | proven_zone_names,
+        )
+
     if context is not None and context.selected_wans is not None:
-        selected = frozenset(name.casefold() for name in context.selected_wans)
-        return selected, bool(selected and selected <= certain_names)
+        selected_wans = frozenset(name.casefold() for name in context.selected_wans)
+        return (
+            selected_wans,
+            bool(selected_wans)
+            and not selected_wans & interface_collisions
+            and selected_wans <= certain_names,
+        )
+
     inferred = frozenset(
         interface.name.casefold()
-        for interface in configuration.interfaces
-        if interface.role == "wan"
+        for interface in interfaces.values()
+        if interface.role is not None
+        and interface.role.casefold() == "wan"
         and "role" in interface.parsed_keys
         and interface.name.casefold() in certain_names
     )
-    return inferred, bool(inferred)
+    return inferred, bool(inferred) and resolved
 
 
 def _active_policy_direction(

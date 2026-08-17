@@ -128,7 +128,13 @@ end
 
 
 def test_repeated_disjoint_top_level_projected_sections_are_merged() -> None:
-    raw = """config system zone
+    raw = """config system interface
+    edit "wan1"
+    next
+    edit "lan"
+    next
+end
+config system zone
     edit "internet"
         set interface "wan1"
     next

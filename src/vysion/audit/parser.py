@@ -28,6 +28,10 @@ _AUDITED_ENTRY_SECTIONS = {"system interface", "system admin"}
 _AUDITED_SECTIONS = _AUDITED_ENTRY_SECTIONS | {"system global"}
 _ENTRY_ONLY_NAMESPACES = {"system admin", "user local", "user ldap"}
 _CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
+    "system zone",
+    "system sdwan",
+    "zone",
+    "members",
     "user local",
     "user ldap",
     "vpn ipsec phase1-interface",
@@ -121,6 +125,7 @@ _MUTATION_DIRECTIVES = {"append", "select", "unselect", "unset"}
 _RESERVED_DIRECTIVES = _MUTATION_DIRECTIVES | {"config", "edit", "end", "next", "set"}
 _PROJECTED_SECTIONS = {
     "system zone",
+    "system sdwan",
     "firewall policy",
     "firewall service custom",
     "firewall service group",
@@ -155,6 +160,7 @@ _PROJECTED_SECTIONS = {
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
+    "system sdwan": {"interface", "member"},
     "firewall policy": {
         "name", "srcintf", "dstintf", "srcaddr", "dstaddr", "action", "status",
         "schedule", "service", "logtraffic", "utm-status", "profile-group",
@@ -205,6 +211,7 @@ _PROJECTED_KEYS = {
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),
+    "system sdwan": frozenset({"status", "load-balance-mode", "duplicate"}),
     "firewall policy": frozenset(
         {
             "auto-asic-offload",
@@ -322,6 +329,30 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     ),
 }
 _PROJECTED_CHILD_KEYS = {
+    "zone": {"interface", "member"},
+    "members": {"interface", "zone"},
+    "health-check": {
+        "server",
+        "members",
+        "interval",
+        "failtime",
+        "recoverytime",
+        "update-cascade-interface",
+        "sla-fail-log-period",
+        "sla-pass-log-period",
+        "http-agent",
+        "protocol",
+        "port",
+    },
+    "service": {
+        "name",
+        "mode",
+        "dst",
+        "src",
+        "health-check",
+        "priority-members",
+        "quality",
+    },
     "secondaryip": {"ip", "allowaccess"},
     "dashboard": {"name"},
     "realservers": {"ip", "port"},
@@ -333,6 +364,7 @@ _PROJECTED_CHILD_KEYS = {
     "authentication-rule": {"groups", "portal"},
 }
 _PROJECTED_CHILDREN = {
+    "system sdwan": frozenset({"zone", "members", "health-check", "service"}),
     "system interface": frozenset({"secondaryip"}),
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
     "vpn ssl settings": frozenset({"authentication-rule"}),
@@ -806,10 +838,13 @@ def _projection_directives(
     entry: StructuralEntry,
     section_name: str,
 ) -> dict[str, StructuralDirective]:
+    allowed_keys = _PROJECTED_KEYS.get(section_name) or _PROJECTED_CHILD_KEYS.get(
+        section_name, frozenset()
+    )
     return {
         name: directive
         for name, directive in _directive_map(entry).items()
-        if name in _PROJECTED_KEYS[section_name]
+        if name in allowed_keys
     }
 
 
@@ -824,15 +859,28 @@ def _references(
     )
 
 
+def _interface_references_are_proven(
+    references: tuple[ObjectReference, ...],
+    interface_names: frozenset[str],
+) -> bool:
+    normalized_names = tuple(reference.name.casefold() for reference in references)
+    return bool(normalized_names) and len(set(normalized_names)) == len(
+        normalized_names
+    ) and all(name in interface_names for name in normalized_names)
+
+
 def _project_generic_sections(
     document: StructuralDocument,
+    interface_names: frozenset[str] = frozenset(),
 ) -> tuple[
+    tuple[Zone, ...],
     tuple[Zone, ...],
     tuple[Policy, ...],
     tuple[LocalUser, ...],
     tuple[SecurityProfile, ...],
 ]:
     zones: list[Zone] = []
+    sdwan_zones: list[Zone] = []
     policies: list[Policy] = []
     local_users: list[LocalUser] = []
     security_profiles: list[SecurityProfile] = []
@@ -844,24 +892,160 @@ def _project_generic_sections(
             for entry in section.entries:
                 directives = _projection_directives(entry, section.name)
                 interface = directives.get("interface")
+                references = (
+                    _references(tuple(interface.tokens), "zone-interface", "interface")
+                    if interface is not None
+                    else ()
+                )
                 zones.append(
                     Zone(
                         name=entry.name,
-                        interfaces=(
-                            _references(tuple(interface.tokens), "zone-interface", "interface")
-                            if interface is not None
-                            else ()
-                        ),
+                        interfaces=references,
                         parsed_keys=frozenset(directives),
                         proof_state=(
                             ProofState.PROVEN
-                            if interface is not None
+                            if _interface_references_are_proven(references, interface_names)
                             and section.certainty is EvidenceCertainty.CERTAIN
                             and entry.certainty is EvidenceCertainty.CERTAIN
                             else ProofState.UNKNOWN
                         ),
                     )
                 )
+        elif section.name == "system sdwan":
+            nested_zone_section = next(
+                (child for child in section.children if child.name == "zone"),
+                None,
+            )
+            nested_members_section = next(
+                (child for child in section.children if child.name == "members"),
+                None,
+            )
+            if nested_zone_section is not None:
+                nested_children_are_known = all(
+                    child.name in {"zone", "members"} for child in section.children
+                )
+                member_references: dict[str, list[ObjectReference]] = {}
+                member_certainty: dict[str, bool] = {}
+                declared_zone_names = tuple(
+                    entry.name.casefold() for entry in nested_zone_section.entries
+                )
+                if nested_members_section is not None:
+                    for member in nested_members_section.entries:
+                        directives = _projection_directives(member, "members")
+                        interface = directives.get("interface")
+                        zone = directives.get("zone")
+                        zone_names = (
+                            tuple(token.casefold() for token in zone.tokens)
+                            if zone is not None
+                            else declared_zone_names if len(declared_zone_names) == 1 else ()
+                        )
+                        if len(zone_names) != 1:
+                            for zone_name in zone_names:
+                                member_certainty[zone_name] = False
+                            continue
+                        zone_name = zone_names[0]
+                        valid_member = (
+                            interface is not None
+                            and len(interface.tokens) == 1
+                            and not member.children
+                            and not nested_members_section.children
+                            and nested_members_section.certainty
+                            is EvidenceCertainty.CERTAIN
+                            and member.certainty is EvidenceCertainty.CERTAIN
+                        )
+                        member_certainty[zone_name] = member_certainty.get(
+                            zone_name, True
+                        ) and valid_member
+                        if interface is not None:
+                            member_references.setdefault(zone_name, []).extend(
+                                _references(
+                                    tuple(interface.tokens),
+                                    "sdwan-member",
+                                    "interface",
+                                )
+                            )
+                for entry in nested_zone_section.entries:
+                    directives = _projection_directives(entry, "zone")
+                    direct_interface = directives.get("interface")
+                    direct_member = directives.get("member")
+                    direct_selected = direct_interface or direct_member
+                    direct_aliases_are_unambiguous = not (
+                        direct_interface is not None and direct_member is not None
+                    )
+                    direct_references = (
+                        _references(
+                            tuple(direct_selected.tokens),
+                            "sdwan-interface",
+                            "interface",
+                        )
+                        if direct_selected is not None
+                        else ()
+                    )
+                    references = direct_references + tuple(
+                        member_references.get(entry.name.casefold(), ())
+                    )
+                    has_members = nested_members_section is not None
+                    references_are_proven = _interface_references_are_proven(
+                        references, interface_names
+                    )
+                    evidence_is_complete = (
+                        member_certainty.get(entry.name.casefold(), False)
+                        if has_members
+                        else bool(direct_references)
+                    )
+                    sdwan_zones.append(
+                        Zone(
+                            name=entry.name,
+                            interfaces=references,
+                            parsed_keys=frozenset(directives)
+                            | (
+                                {"interface"}
+                                if member_references.get(entry.name.casefold())
+                                else set()
+                            ),
+                            proof_state=(
+                                ProofState.PROVEN
+                                if nested_children_are_known
+                                and not entry.children
+                                and direct_aliases_are_unambiguous
+                                and evidence_is_complete
+                                and references_are_proven
+                                and section.certainty is EvidenceCertainty.CERTAIN
+                                and nested_zone_section.certainty
+                                is EvidenceCertainty.CERTAIN
+                                and entry.certainty is EvidenceCertainty.CERTAIN
+                                else ProofState.UNKNOWN
+                            ),
+                        )
+                    )
+            else:
+                for entry in section.entries:
+                    directives = _projection_directives(entry, section.name)
+                    interface = directives.get("interface")
+                    member = directives.get("member")
+                    selected = interface or member
+                    aliases_are_unambiguous = (interface is None) != (member is None)
+                    references = (
+                        _references(tuple(selected.tokens), "sdwan-interface", "interface")
+                        if selected is not None
+                        else ()
+                    )
+                    sdwan_zones.append(
+                        Zone(
+                            name=entry.name,
+                            interfaces=references,
+                            parsed_keys=frozenset(directives),
+                            proof_state=(
+                                ProofState.PROVEN
+                                if aliases_are_unambiguous
+                                and not entry.children
+                                and _interface_references_are_proven(references, interface_names)
+                                and section.certainty is EvidenceCertainty.CERTAIN
+                                and entry.certainty is EvidenceCertainty.CERTAIN
+                                else ProofState.UNKNOWN
+                            ),
+                        )
+                    )
         elif section.name == "firewall policy":
             for entry in section.entries:
                 directives = _projection_directives(entry, section.name)
@@ -969,7 +1153,47 @@ def _project_generic_sections(
                         ),
                     )
                 )
-    return tuple(zones), tuple(policies), tuple(local_users), tuple(security_profiles)
+    return (
+        tuple(zones),
+        tuple(sdwan_zones),
+        tuple(policies),
+        tuple(local_users),
+        tuple(security_profiles),
+    )
+
+
+def _attach_interface_zones(
+    interfaces: tuple[Interface, ...],
+    zones: tuple[Zone, ...],
+) -> tuple[Interface, ...]:
+    """Attach only one certain zone relation to each interface."""
+    return tuple(
+        interface.model_copy(
+            update={
+                "zone": (
+                    ObjectReference(
+                        object_type="zone",
+                        name=matches[0].name,
+                        relation="member-of",
+                    )
+                    if len(matches) == 1
+                    else None
+                )
+            }
+        )
+        for interface in interfaces
+        for matches in [
+            [
+                zone
+                for zone in zones
+                if zone.proof_state is ProofState.PROVEN
+                and any(
+                    reference.name.casefold() == interface.name.casefold()
+                    for reference in zone.interfaces
+                )
+            ]
+        ]
+    )
 
 
 def _merge_repeated_projected_sections(
@@ -1789,7 +2013,17 @@ class FortiGateParser:
                     )
                 )
             administrators = normalized_administrators
-        zones, policies, local_users, security_profiles = _project_generic_sections(document)
+        (
+            zones,
+            sdwan_zones,
+            policies,
+            local_users,
+            security_profiles,
+        ) = _project_generic_sections(
+            document,
+            frozenset(interface.name.casefold() for interface in interfaces),
+        )
+        interfaces = list(_attach_interface_zones(tuple(interfaces), zones))
         firewall_projection = project_firewall(document)
         object_references = tuple(
             reference
@@ -1815,6 +2049,7 @@ class FortiGateParser:
             device_identity=device_identity,
             interfaces=tuple(interfaces),
             zones=zones,
+            sdwan_zones=sdwan_zones,
             policies=policies,
             object_references=object_references,
             administrators=tuple(administrators),
