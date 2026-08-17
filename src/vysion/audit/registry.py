@@ -17,6 +17,7 @@ from vysion.audit.controls.firewall import (
     check_vserver_extintf_any,
 )
 from vysion.audit.controls.network import check_wan_management_access
+from vysion.audit.controls.references import check_reference_integrity
 from vysion.audit.controls.system import check_automatic_revision_backups, check_hostname
 from vysion.audit.controls.utm import (
     check_antivirus_profiles,
@@ -64,4 +65,5 @@ def default_registry() -> tuple[Control, ...]:
         check_ldaps_connectors,
         check_fortiguard_psirt,
         check_automatic_revision_backups,
+        check_reference_integrity,
     )

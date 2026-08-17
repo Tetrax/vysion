@@ -262,7 +262,9 @@ def _project_policy(entry: StructuralEntry) -> Policy:
     services = _tokens(directives, "service")
     refs = _references(srcaddr, "source-address") + _references(dstaddr, "destination-address")
     refs += _references(services, "policy-service", "service")
+    profile_group_values = _tokens(directives, "profile-group")
     profile_group = _single(directives, "profile-group")
+    profile_group_is_valid = "profile-group" not in directives or len(profile_group_values) == 1
     internet_service = _single(directives, "internet-service")
     action = _single(directives, "action")
     direct_profiles = _profile_refs(directives)
@@ -305,6 +307,7 @@ def _project_policy(entry: StructuralEntry) -> Policy:
         proof_state=(
             ProofState.PROVEN
             if entry.certainty is EvidenceCertainty.CERTAIN
+            and profile_group_is_valid
             and all(
                 key in directives for key in ("srcintf", "dstintf", "srcaddr", "dstaddr", "action")
             )
