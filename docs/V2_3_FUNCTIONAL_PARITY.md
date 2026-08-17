@@ -177,7 +177,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 52 | Logs par règle | `BLOCKED_EXTERNAL_SOURCE` | Les compteurs de logs sont runtime et absents des backups ; ils restent explicitement non renseignés. |
 | 53 | Inventaire administrateurs | `MIGRATED` | Les comptes typés sont exposés dans le JSON canonique et la feuille XLSX Comptes, sans credential. |
 | 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
-| 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | Les références de policy existent mais les objets schedule ne sont pas encore projetés complètement. |
+| 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | `Policy.schedule` expose seulement le nom référencé. Les namespaces `firewall schedule onetime/recurring/group`, leurs dates, groupes et timezone ne sont ni projetés ni présents dans le corpus ; aucune expiration n'est inventée. |
 | 56 | Profils SSL/SSH | `MIGRATED` | `FW-SSL-SSH-PROFILE-001` résout les profils utilisés et valide le sous-bloc typed `https` aux seuils FortiOS exacts de V1 ; mutation/collision/résolution incomplète UNKNOWN. |
 
 ## Dispositions explicites du lot réseau
@@ -187,8 +187,8 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 3 | Usage par séquence | `MIGRATED` | `FW-BY-SEQUENCE-USAGE-001` reproduit les trois critères legacy sur le document structurel : `global-label`, plusieurs interfaces, ou `any` dans `srcintf`/`dstintf`. L’absence ou l’ambiguïté reste UNKNOWN. |
 | 4 | Objets inutilisés | `MIGRATED` | `CFG-UNUSED-SERVICE-001` restitue uniquement les services custom/groupes certainement orphelins depuis le graphe typed. Namespace absent/incomplet, collision, mutation, cycle ou résolution incomplète restent UNKNOWN ; famille certaine vide NOT_APPLICABLE. |
 | 8 | Service ALL dans les règles | `MIGRATED` | `FW-INTERNET-ALL-SERVICE-001` rejoué avec sélection WAN typed : ALL canonique sur accept/enable certain produit FAIL ; deny/disable est hors portée ; destination ou service non résolu reste UNKNOWN. Les exemptions historiques spécifiques ne sont pas recopiées. |
-| 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
-| 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |
+| 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Le parser V2 ne projette pas `firewall address`/`addrgrp` avec `type geography`, et le corpus ne contient aucun cas Geo-IP. Namespace et applicabilité ne sont donc pas prouvables sans élargissement spéculatif. |
+| 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | `AuditContext.mpls` est typed, mais `router static` (blackhole, distance, destination) n'est pas projeté et aucun corpus route MPLS/L2L n'existe ; la décision ne peut pas être corrélée sûrement. |
 | 36 | Ports sensibles interdits | `MIGRATED` | `FW-SENSITIVE-PROTOCOL-DENY-001` résout les ports et groupes typed selon le ruleset versionné. Un deny global `any`→`any` est reconnu uniquement avec LAN/WAN prouvées et couverture complète ; couverture partielle UNKNOWN, accept sensible certain FAIL. |
 
 ## Disposition du tracer réseau SD-WAN
