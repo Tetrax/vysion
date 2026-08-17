@@ -420,7 +420,7 @@ def test_m6_ldaps_absent_namespace_is_unknown_but_explicit_empty_is_not_applicab
     assert empty.applicability.value == "not_applicable"
 
 
-def test_registry_contains_m1_m8_controls_with_references_last() -> None:
+def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> None:
     expected_ids = (
         "SYS-HOSTNAME-001",
         "NET-WAN-MGMT-001",
@@ -449,6 +449,10 @@ def test_registry_contains_m1_m8_controls_with_references_last() -> None:
         "EXT-PSIRT-001",
         "SYS-BACKUP-AUTO-001",
         "CFG-REF-INTEGRITY-001",
+        "SYS-AUTO-INSTALL-USB-001",
+        "SYS-FORTIMANAGER-SYNC-001",
+        "SYS-FORTIANALYZER-SYNC-001",
+        "SYS-ADMIN-HTTPS-PORT-001",
     )
     configuration = FortiGateParser().parse("config system global\nend\n")
 
@@ -457,8 +461,13 @@ def test_registry_contains_m1_m8_controls_with_references_last() -> None:
     )
 
     assert registered_ids == expected_ids
-    assert len(registered_ids) == 27
-    assert registered_ids[-1] == "CFG-REF-INTEGRITY-001"
+    assert len(registered_ids) == 31
+    assert registered_ids[-4:] == (
+        "SYS-AUTO-INSTALL-USB-001",
+        "SYS-FORTIMANAGER-SYNC-001",
+        "SYS-FORTIANALYZER-SYNC-001",
+        "SYS-ADMIN-HTTPS-PORT-001",
+    )
 
 
 @pytest.mark.parametrize("secure_value", ["unknown", "starttls"])

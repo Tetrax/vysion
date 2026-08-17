@@ -33,6 +33,10 @@ CONTROL_IDS = (
     "EXT-PSIRT-001",
     "SYS-BACKUP-AUTO-001",
     "CFG-REF-INTEGRITY-001",
+    "SYS-AUTO-INSTALL-USB-001",
+    "SYS-FORTIMANAGER-SYNC-001",
+    "SYS-FORTIANALYZER-SYNC-001",
+    "SYS-ADMIN-HTTPS-PORT-001",
 )
 
 SYNTHETIC_CONFIG = """\
@@ -83,6 +87,7 @@ def test_representative_configuration_crosses_parser_registry_and_typed_engine()
                 "IAM-LOCAL-USER-MFA-001": AuditStatus.NOT_APPLICABLE,
                 "IAM-DEFAULT-ADMIN-001": AuditStatus.PASS,
                 "IAM-GUEST-ACCOUNT-001": AuditStatus.PASS,
+                "SYS-ADMIN-HTTPS-PORT-001": AuditStatus.PASS,
             }.get(control_id, AuditStatus.UNKNOWN)
         )
         for control_id in CONTROL_IDS

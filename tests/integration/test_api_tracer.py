@@ -67,6 +67,10 @@ CONTROL_IDS = (
     "EXT-PSIRT-001",
     "SYS-BACKUP-AUTO-001",
     "CFG-REF-INTEGRITY-001",
+    "SYS-AUTO-INSTALL-USB-001",
+    "SYS-FORTIMANAGER-SYNC-001",
+    "SYS-FORTIANALYZER-SYNC-001",
+    "SYS-ADMIN-HTTPS-PORT-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -263,12 +267,14 @@ async def test_api_rejects_malformed_psirt_observation_without_breaking_registry
     assert response.status_code == 201
     payload = response.json()
     assert payload["context"]["psirt"]["status"] == "ERROR"
-    psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
+    findings = {item["control_id"]: item for item in payload["findings"]}
+    psirt = findings["EXT-PSIRT-001"]
     assert psirt["status"] == "UNKNOWN"
-    assert payload["findings"][-2]["control_id"] == "SYS-BACKUP-AUTO-001"
-    assert payload["findings"][-2]["status"] == "UNKNOWN"
-    assert payload["findings"][-1]["control_id"] == "CFG-REF-INTEGRITY-001"
-    assert payload["findings"][-1]["status"] == "UNKNOWN"
+    assert findings["SYS-BACKUP-AUTO-001"]["status"] == "UNKNOWN"
+    assert findings["CFG-REF-INTEGRITY-001"]["status"] == "UNKNOWN"
+    assert findings["SYS-AUTO-INSTALL-USB-001"]["status"] == "UNKNOWN"
+    assert findings["SYS-FORTIMANAGER-SYNC-001"]["status"] == "UNKNOWN"
+    assert findings["SYS-FORTIANALYZER-SYNC-001"]["status"] == "UNKNOWN"
 
 
 @pytest.mark.asyncio
@@ -301,6 +307,13 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
     expected_statuses[CONTROL_IDS.index("VPN-SSL-001")] = "NOT_APPLICABLE"
     expected_statuses[CONTROL_IDS.index("SYS-BACKUP-AUTO-001")] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-REF-INTEGRITY-001")] = "UNKNOWN"
+    for control_id in (
+        "SYS-AUTO-INSTALL-USB-001",
+        "SYS-FORTIMANAGER-SYNC-001",
+        "SYS-FORTIANALYZER-SYNC-001",
+        "SYS-ADMIN-HTTPS-PORT-001",
+    ):
+        expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     assert [finding["status"] for finding in findings] == expected_statuses
     assert all(
         finding["evidence_items"]
@@ -428,6 +441,10 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                 if finding["control_id"] in {
                     "SYS-BACKUP-AUTO-001",
                     "CFG-REF-INTEGRITY-001",
+                    "SYS-AUTO-INSTALL-USB-001",
+                    "SYS-FORTIMANAGER-SYNC-001",
+                    "SYS-FORTIANALYZER-SYNC-001",
+                    "SYS-ADMIN-HTTPS-PORT-001",
                 }
                 else "P0"
             )
