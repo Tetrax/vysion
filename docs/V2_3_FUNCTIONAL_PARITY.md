@@ -40,7 +40,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 5 | Système / administration | `verifier_compte_guest` | A | `IAM-GUEST-ACCOUNT-001` | Absence du compte guest. |
 | 6 | Système / administration | `verifier_compte_admin` | A | `IAM-DEFAULT-ADMIN-001` | Absence du compte administrateur par défaut. |
 | 7 | VPN | `verifier_vpn_ssl_utilisation` | A | `VPN-SSL-001` | État/usage SSL-VPN typé. |
-| 8 | Réseau / firewall | `verifier_presence_all_port_dans_regles` | C | Nouveau contrôle de couverture des ports ALL | La couverture de services V2 ne reproduit pas encore cette règle legacy. |
+| 8 | Réseau / firewall | `verifier_presence_all_port_dans_regles` | A | `FW-INTERNET-ALL-SERVICE-001` | ALL canonique sur policy accept/enable vers une WAN certaine ; deny/disable hors portée, service non résolu UNKNOWN. |
 | 9 | Réseau / firewall | `verifier_utilisation_geo_ip` | C | Nouveau contrôle Geo-IP | Aucun équivalent V2 identifié. |
 | 10 | Réseau / firewall | `verifier_logs_deny_implicit` | A | `FW-IMPLICIT-DENY-LOG-001` | Journalisation du deny implicite. |
 | 11 | Système / lifecycle | `verifier_modele_fortigate_eol` | C | Source/version EOL à définir | Ne pas confondre avec PSIRT ; dépendance externe éventuelle. |
@@ -95,11 +95,11 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 34**
+- **A — équivalents identifiés : 35**
 - **B — partiels identifiés : 1**
-- **C — absents identifiés : 24**
+- **C — absents identifiés : 23**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **38 / 59** (64,4 %)
+- Disposition réellement `MIGRATED` : **39 / 59** (66,1 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -186,7 +186,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 |---:|---|---|---|
 | 3 | Usage par séquence | `MIGRATED` | `FW-BY-SEQUENCE-USAGE-001` reproduit les trois critères legacy sur le document structurel : `global-label`, plusieurs interfaces, ou `any` dans `srcintf`/`dstintf`. L’absence ou l’ambiguïté reste UNKNOWN. |
 | 4 | Objets inutilisés | `MIGRATED` | `CFG-UNUSED-SERVICE-001` restitue uniquement les services custom/groupes certainement orphelins depuis le graphe typed. Namespace absent/incomplet, collision, mutation, cycle ou résolution incomplète restent UNKNOWN ; famille certaine vide NOT_APPLICABLE. |
-| 8 | Service ALL dans les règles | `LEGACY_REVIEW_REQUIRED` | La portée exacte de la règle legacy doit être comparée aux services/groupes résolus. |
+| 8 | Service ALL dans les règles | `MIGRATED` | `FW-INTERNET-ALL-SERVICE-001` rejoué avec sélection WAN typed : ALL canonique sur accept/enable certain produit FAIL ; deny/disable est hors portée ; destination ou service non résolu reste UNKNOWN. Les exemptions historiques spécifiques ne sont pas recopiées. |
 | 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Aucun contrôle V2 n'est enregistré et l'applicabilité métier doit être confirmée. |
 | 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | La règle dépend du contexte MPLS/L2L et d'une projection de routes dédiée. |
 | 36 | Ports sensibles interdits | `LEGACY_REVIEW_REQUIRED` | Le contrôle V2 est partiel ; couverture et portée legacy ne sont pas encore équivalentes. |
