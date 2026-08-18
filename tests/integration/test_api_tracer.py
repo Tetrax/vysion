@@ -374,6 +374,73 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_api_json_docx_xlsx_share_typed_equipment_inventory(tmp_path: Path) -> None:
+    app = create_app(
+        settings=Settings(report_directory=tmp_path),
+        fortiguard=CorrelatedPsirtFortiGuard(),
+    )
+
+    async with api_client(app) as client:
+        response = await client.post(
+            "/api/audits",
+            files={
+                "configuration": (
+                    "anonymized-fortigate.conf",
+                    REALISTIC_FIXTURE.read_bytes(),
+                    "text/plain",
+                )
+            },
+        )
+        assert response.status_code == 201
+        payload = response.json()
+        report_id = payload["report_id"]
+        equipment = payload["equipment"]
+        assert equipment["hostname"] == "edge-lab.example"
+        assert equipment["model"] == "60E"
+        assert equipment["firmware_version"] == "7.2.8"
+        assert equipment["interface_names"] == ["wan1", "port1"]
+        assert equipment["policy_count"] == 2
+        assert equipment["vip_count"] == 2
+
+        docx_response = await client.get(f"/api/reports/{report_id}.docx")
+        xlsx_response = await client.get(f"/api/reports/{report_id}.xlsx")
+
+    assert docx_response.status_code == 200
+    document = Document(BytesIO(docx_response.content))
+    docx_text = "\n".join(
+        [paragraph.text for paragraph in document.paragraphs]
+        + [
+            cell.text
+            for table in document.tables
+            for row in table.rows
+            for cell in row.cells
+        ]
+    )
+    assert "edge-lab.example" in docx_text
+    assert "60E" in docx_text
+    assert "7.2.8" in docx_text
+    assert "Règles firewall" in docx_text
+    assert "2" in docx_text
+
+    assert xlsx_response.status_code == 200
+    workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True)
+    metadata = {
+        row[0]: row[1]
+        for row in workbook["Métadonnées équipement"].iter_rows(values_only=True)
+    }
+    inventory = {
+        row[0]: row[1]
+        for row in workbook["Inventaire configuration"].iter_rows(values_only=True)
+    }
+    assert metadata["Hostname"] == "edge-lab.example"
+    assert metadata["Modèle"] == "60E"
+    assert metadata["Version FortiOS"] == "7.2.8"
+    assert metadata["Interfaces"] == "wan1, port1"
+    assert inventory["Règles firewall"] == 2
+    assert inventory["VIP / groupes VIP / virtual servers"] == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "configuration",
     [

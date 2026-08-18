@@ -23,6 +23,8 @@ type AuditContext = {
   operator_provenance?: { source: string; operator?: string | null; method?: string | null } | null
 }
 type EquipmentInventory = {
+  hostname?: string | null; model?: string | null; firmware_version?: string | null; serial_number?: string | null
+  interface_names?: string[]; zone_names?: string[]; sdwan_zone_names?: string[]; interface_zone_relations?: string[]
   policy_count: number; policy_enabled_count: number; policy_disabled_count: number; policy_status_unknown_count: number
   service_object_count: number; vip_count: number; security_profile_count: number; ipsec_tunnel_count: number
   ssl_vpn_configured: boolean; ha_configured: boolean
@@ -110,7 +112,12 @@ function ContextSummary({ context }: { context: AuditContext }) {
 }
 
 function EquipmentInventorySummary({ equipment }: { equipment: EquipmentInventory }) {
+  const list = (values?: string[]) => values?.join(', ') || 'Aucune'
   return <section className="context-summary" aria-label="Inventaire de configuration"><h3>Inventaire de configuration</h3><dl>
+    <div><dt>Hostname</dt><dd>{display(equipment.hostname)}</dd></div><div><dt>Modèle</dt><dd>{display(equipment.model)}</dd></div>
+    <div><dt>Version FortiOS</dt><dd>{display(equipment.firmware_version)}</dd></div><div><dt>Numéro de série</dt><dd>{display(equipment.serial_number)}</dd></div>
+    <div><dt>Interfaces projetées</dt><dd>{list(equipment.interface_names)}</dd></div><div><dt>Zones</dt><dd>{list(equipment.zone_names)}</dd></div>
+    <div><dt>Zones SD-WAN</dt><dd>{list(equipment.sdwan_zone_names)}</dd></div><div><dt>Relations interface → zone</dt><dd>{list(equipment.interface_zone_relations)}</dd></div>
     <div><dt>Règles firewall</dt><dd>{equipment.policy_count}</dd></div><div><dt>Actives explicites</dt><dd>{equipment.policy_enabled_count}</dd></div>
     <div><dt>Désactivées explicites</dt><dd>{equipment.policy_disabled_count}</dd></div><div><dt>Statut inconnu</dt><dd>{equipment.policy_status_unknown_count}</dd></div>
     <div><dt>Objets service</dt><dd>{equipment.service_object_count}</dd></div><div><dt>VIP et virtual servers</dt><dd>{equipment.vip_count}</dd></div>

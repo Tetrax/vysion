@@ -406,6 +406,39 @@ def _policy_complete(policy: Policy) -> bool:
     return policy.proof_state is ProofState.PROVEN and required <= policy.parsed_keys
 
 
+def _proves_no_all_from_builtin_https(
+    configuration: FortiGateConfiguration,
+    policy: Policy,
+) -> bool:
+    """Use the bounded legacy negative proof for an explicit built-in HTTPS token.
+
+    This control detects the literal ``ALL`` service.  A certain ``HTTPS`` token
+    is enough to prove the negative when no custom service namespace can redefine
+    or collide with that name.  Other incomplete or unresolved service names stay
+    on the fail-closed UNKNOWN path below.
+    """
+    if (
+        policy.action != "accept"
+        or policy.proof_state is not ProofState.PROVEN
+        or "service" not in policy.parsed_keys
+        or not policy.services
+        or any(reference.name.casefold() != "https" for reference in policy.services)
+    ):
+        return False
+    for section_name in ("firewall service custom", "firewall service group"):
+        section = configuration.document.section(section_name)
+        if section is None:
+            continue
+        if (
+            section.certainty is not EvidenceCertainty.CERTAIN
+            or section.entries
+            or section.children
+            or section.directives
+        ):
+            return False
+    return True
+
+
 def _policy_evidence(
     configuration: FortiGateConfiguration,
     policy: Policy,
@@ -573,6 +606,9 @@ def check_internet_all_service(
             continue
         if policy.status == "disable":
             continue
+        if _proves_no_all_from_builtin_https(configuration, policy):
+            applicable_safe.append(policy)
+            continue
         if policy.action is None or policy.status is None:
             unknown.append(policy)
             continue
@@ -680,7 +716,7 @@ def check_internet_all_service(
         affected_objects=_affected(
             (policy.policy_id for policy in applicable_safe), "firewall-policy"
         ),
-        message="Aucune politique Internet complète et activée n'autorise ALL.",
+        message="Aucune politique exportée ne déclare explicitement ALL.",
         risk=_risk(
             "Les services Internet sont bornés par les politiques certaines.",
             "La surface de sortie non nécessaire est réduite.",

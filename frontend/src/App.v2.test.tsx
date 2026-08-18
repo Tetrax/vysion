@@ -89,7 +89,7 @@ describe('Vysion v2.2.0-dev guided workflow', () => {
     ]
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ hostname: 'lab', model: '60E', firmware_version: '7.2.9', interfaces: [], zones: [], sdwan_zones: [] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ report_id: '7bd449c4-ef96-4d72-b4f6-2bc099c982a2', expires_at: '2026-08-12T12:01:00Z', context: {}, equipment: { policy_count: 12, policy_enabled_count: 9, policy_disabled_count: 2, policy_status_unknown_count: 1, service_object_count: 8, vip_count: 3, security_profile_count: 6, ipsec_tunnel_count: 2, ssl_vpn_configured: true, ha_configured: false }, fortiguard: { status: 'UNKNOWN', detail: 'fixture' }, findings }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ report_id: '7bd449c4-ef96-4d72-b4f6-2bc099c982a2', expires_at: '2026-08-12T12:01:00Z', context: {}, equipment: { hostname: 'parsed-fw', model: '100F', firmware_version: '7.4.3', interface_names: ['wan1', 'lan1'], zone_names: ['internet'], sdwan_zone_names: ['sdwan-public'], interface_zone_relations: ['wan1 → internet'], policy_count: 12, policy_enabled_count: 9, policy_disabled_count: 2, policy_status_unknown_count: 1, service_object_count: 8, vip_count: 3, security_profile_count: 6, ipsec_tunnel_count: 2, ssl_vpn_configured: true, ha_configured: false }, fortiguard: { status: 'UNKNOWN', detail: 'fixture' }, findings }), { status: 201 }))
     render(<App />)
     await user.upload(screen.getByLabelText('Configuration FortiGate'), new File(['safe'], 'safe.conf'))
     await screen.findByText('lab')
@@ -98,6 +98,13 @@ describe('Vysion v2.2.0-dev guided workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
 
     expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('TOTAL5')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Hostnameparsed-fw')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Modèle100F')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Version FortiOS7.4.3')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Interfaces projetéeswan1, lan1')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Zonesinternet')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Zones SD-WANsdwan-public')
+    expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Relations interface → zonewan1 → internet')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Règles firewall12')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Statut inconnu1')
     expect(screen.getByLabelText('Synthèse des statuts')).toHaveTextContent('NOT_APPLICABLE1')

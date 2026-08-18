@@ -2,6 +2,7 @@
 
 from vysion.audit.engine import AuditEngine
 from vysion.audit.models import (
+    Applicability,
     AuditContext,
     AuditStatus,
     EvidenceCertainty,
@@ -82,3 +83,29 @@ def test_unresolved_non_all_service_remains_unknown() -> None:
     )
 
     assert finding.status is AuditStatus.UNKNOWN
+
+
+def test_explicit_https_proves_no_all_without_optional_policy_defaults() -> None:
+    raw = """config system interface
+    edit "wan-lab"
+        set role wan
+    next
+end
+config firewall policy
+    edit 1
+        set srcintf "wan-lab"
+        set dstintf "unresolved-destination"
+        set srcaddr "all"
+        set dstaddr "all"
+        set action accept
+        set service "HTTPS"
+    next
+end
+"""
+
+    finding = _all_finding(raw, selected_wan="wan-lab")
+
+    assert finding.status is AuditStatus.PASS
+    assert finding.applicability is Applicability.APPLICABLE
+    assert any("HTTPS" in item.tokens for item in finding.evidence_items)
+    assert finding.message == "Aucune politique exportée ne déclare explicitement ALL."
