@@ -22,6 +22,13 @@ from vysion.audit.controls.ha import (
     check_ha_override,
     check_ha_session_pickup,
 )
+from vysion.audit.controls.legacy_admin import (
+    check_legacy_admin_loopback,
+    check_legacy_dns_database,
+    check_legacy_local_admin,
+    check_legacy_pki_presence,
+    check_legacy_pki_removal,
+)
 from vysion.audit.controls.network import check_wan_management_access
 from vysion.audit.controls.network_parity import (
     check_by_sequence_usage,
@@ -106,4 +113,9 @@ def default_registry() -> tuple[Control, ...]:
         check_mail_filter_usage,
         check_ssl_ssh_profiles,
         check_unused_service_objects,
+        check_legacy_local_admin,
+        check_legacy_pki_removal,
+        check_legacy_pki_presence,
+        check_legacy_admin_loopback,
+        check_legacy_dns_database,
     )

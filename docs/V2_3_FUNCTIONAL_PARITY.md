@@ -47,9 +47,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 12 | Système | `verifier_auto_install_usb` | A | `SYS-AUTO-INSTALL-USB-001` | Migré dans le premier tracer ; PASS exige les deux directives disable certaines. |
 | 13 | Réseau / external services | `verifier_presence_isdb` | A | `NET-ISDB-WAN-001` | Blocage ISDB entrant/sortant sur flux WAN. |
 | 14 | Réseau | `verifier_http_https_desactive_sur_interfaces_wan` | A | `NET-WAN-MGMT-001` | Accès d’administration sur interfaces WAN ; replay nécessaire pour confirmer SSH/HTTP/HTTPS. |
-| 15 | Administration / identité | `verifier_compte_admin_[REDACTED]` | C | Contrôle compte admin historique + MFA métier | Règle historique spécifique, absente du registre V2. |
-| 16 | Administration / identité | `verifier_suppression_compte_pki_[REDACTED]` | C | Contrôle compte admin PKI historique | Règle historique spécifique, absente du registre V2. |
-| 17 | Administration / identité | `verifier_presence_compte_pki_[REDACTED]` | C | Contrôle compte admin PKI historique | Règle historique spécifique, absente du registre V2. |
+| 15 | Administration / identité | `verifier_compte_admin_[REDACTED]` | A | `IAM-LEGACY-ADMIN-001` + policy opérateur typed | Alias, mot de passe local et MFA email reproduits sans cible historique persistée. |
+| 16 | Administration / identité | `verifier_suppression_compte_pki_[REDACTED]` | A | `IAM-LEGACY-PKI-REMOVAL-001` + policy opérateur typed | Absence du compte PKI déprécié vérifiée structurellement. |
+| 17 | Administration / identité | `verifier_presence_compte_pki_[REDACTED]` | A | `IAM-LEGACY-PKI-PRESENCE-001` + policy opérateur typed | Présence et activation peer-group/peer-auth du compte PKI requis. |
 | 18 | Administration | `verifier_sync_fortianalyzer` | A | `SYS-FORTIANALYZER-SYNC-001` | Migré ; enable + serveur certain, disable explicite FAIL, absence UNKNOWN. |
 | 19 | Administration | `verifier_sync_fortimanager` | A | `SYS-FORTIMANAGER-SYNC-001` | Migré ; type FortiManager + fmg certain, ou FortiGuard explicite. |
 | 20 | Administration / identité | `verifier_mfa_utilisateurs_admins` | A | `IAM-ADMIN-MFA-001` + `IAM-LOCAL-USER-MFA-001` | Le chemin V2 sépare administrateurs et utilisateurs locaux. |
@@ -57,8 +57,8 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 22 | Réseau / external services | `verifier_presence_cti` | A | `NET-CTI-WAN-001` | Présence CTI sur les flux WAN. |
 | 23 | Administration / identité | `verifier_ldaps` | A | `IAM-LDAPS-001` | LDAPS + certificat CA, avec statut absent/ambigu à aligner. |
 | 24 | Système | `verifier_sauvegardes_automatiques` | A | `SYS-BACKUP-AUTO-001` | `revision-backup-on-logout` + `revision-image-auto-backup`. |
-| 25 | Administration / réseau | `verifier_acces_admin_[REDACTED]_via_loopback` | C | Projection loopback/FQDN/VIP + contrôle historique | Règle métier historique absente. |
-| 26 | Système / réseau | `verifier_dns_database` | C | Projection `system dns-database` | Entrée FQDN historique absente de V2. |
+| 25 | Administration / réseau | `verifier_acces_admin_[REDACTED]_via_loopback` | A | `NET-LEGACY-ADMIN-LOOPBACK-001` + projections typed | Chaîne directe V1 FQDN/groupe → policy → loopback → VIP, cible fournie par policy. |
+| 26 | Système / réseau | `verifier_dns_database` | A | `DNS-LEGACY-DATABASE-001` + projection typed | Présence de l’entrée configurée par l’opérateur, sans FQDN historique codé. |
 | 27 | Réseau / firewall | `verifier_sip_alg` | A | `NET-SIP-ALG-001` | Migré ; helper SIP certain ou mode ALG explicite FAIL, preuve incomplète UNKNOWN. |
 | 28 | UTM / external services | `verifier_fortisandbox_cloud` | A | `UTM-FORTISANDBOX-CLOUD-001` | Région Europe explicite + licence UTM opérateur sourcée ; absence UNKNOWN. |
 | 29 | UTM / external services | `verifier_anycast_fortiguard` | A | `UTM-FORTIGUARD-ANYCAST-001` | `fortiguard-anycast disable` explicite, sans supposer le défaut. |
@@ -95,11 +95,11 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 36**
+- **A — équivalents identifiés : 41**
 - **B — partiels identifiés : 0**
-- **C — absents identifiés : 23**
+- **C — absents identifiés : 18**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **40 / 59** (67,8 %)
+- Disposition réellement `MIGRATED` : **45 / 59** (76,3 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -109,13 +109,13 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 |---:|---|---|---|
 | 11 | Modèle FortiGate EOL | `BLOCKED_EXTERNAL_SOURCE` | La source Fortinet publique, versionnée et vérifiable n’est pas disponible dans ce checkout ; aucun EOL n’est spéculé. |
 | 12 | Auto-install USB | `MIGRATED` | `SYS-AUTO-INSTALL-USB-001`, tests PASS/FAIL/UNKNOWN et replay moteur. |
-| 15 | Compte admin historique | `LEGACY_REVIEW_REQUIRED` | La liste de comptes et l’adresse MFA historiques sont spécifiques ; la cible doit être fournie par l’opérateur, jamais codée en clair. |
-| 16 | Suppression compte PKI historique | `LEGACY_REVIEW_REQUIRED` | Le nom de compte/groupe historique est spécifique ; politique opérateur requise. |
-| 17 | Présence compte PKI historique | `LEGACY_REVIEW_REQUIRED` | Le nom de compte/groupe historique est spécifique ; politique opérateur requise. |
+| 15 | Compte admin historique | `MIGRATED` | `IAM-LEGACY-ADMIN-001` consomme aliases, email MFA et peer-group depuis une policy opérateur typed ; provenance `legacy_v1`, contexte absent UNKNOWN. |
+| 16 | Suppression compte PKI historique | `MIGRATED` | `IAM-LEGACY-PKI-REMOVAL-001` vérifie l’absence de l’identité paramétrée ; provenance `legacy_v1`, sans literal spécifique. |
+| 17 | Présence compte PKI historique | `MIGRATED` | `IAM-LEGACY-PKI-PRESENCE-001` vérifie peer-group ou peer-auth sur l’identité paramétrée ; provenance `legacy_v1`. |
 | 18 | Synchronisation FortiAnalyzer | `MIGRATED` | `SYS-FORTIANALYZER-SYNC-001`, sections classiques/cloud typées. |
 | 19 | Synchronisation FortiManager | `MIGRATED` | `SYS-FORTIMANAGER-SYNC-001`, mode et serveur typés. |
-| 25 | Accès admin historique via loopback | `LEGACY_REVIEW_REQUIRED` | Domaine/FQDN/VIP historique spécifique ; cible opérateur requise. |
-| 26 | DNS database historique | `LEGACY_REVIEW_REQUIRED` | FQDN historique spécifique ; cible opérateur requise. |
+| 25 | Accès admin historique via loopback | `MIGRATED` | `NET-LEGACY-ADMIN-LOOPBACK-001` reproduit la chaîne structurelle V1 avec FQDN fourni par policy, projections typed et UNKNOWN fail-closed. |
+| 26 | DNS database historique | `MIGRATED` | `DNS-LEGACY-DATABASE-001` vérifie l’entrée paramétrée dans la projection typed ; contexte absent UNKNOWN. |
 | 27 | SIP ALG | `MIGRATED` | `NET-SIP-ALG-001`, absence du helper SIP et mode kernel-helper-based prouvés séparément. |
 | 45 | Port HTTPS admin | `MIGRATED` | `SYS-ADMIN-HTTPS-PORT-001`, 443 FAIL, port personnalisé PASS, preuve absente UNKNOWN. |
 

@@ -276,6 +276,35 @@ class PsirtObservation(BaseModel):
     complete: bool = False
 
 
+class LegacyV1AdminPolicy(BaseModel):
+    """Operator-supplied targets for the historical V1 administration rules."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    local_admin_names: tuple[str, ...]
+    local_admin_mfa_email: str
+    pki_peer_group: str
+    deprecated_pki_account: str
+    required_pki_account: str
+    administration_fqdn: str
+    dns_database_entry: str
+
+    @model_validator(mode="after")
+    def require_non_empty_targets(self) -> "LegacyV1AdminPolicy":
+        values = (
+            *self.local_admin_names,
+            self.local_admin_mfa_email,
+            self.pki_peer_group,
+            self.deprecated_pki_account,
+            self.required_pki_account,
+            self.administration_fqdn,
+            self.dns_database_entry,
+        )
+        if not self.local_admin_names or any(not value.strip() for value in values):
+            raise ValueError("legacy_v1 administration targets must be non-empty")
+        return self
+
+
 class AuditContext(BaseModel):
     """Immutable operator/context facts; omitted booleans remain unknown (None)."""
 
@@ -307,6 +336,7 @@ class AuditContext(BaseModel):
     utm_license_details: UtmLicenseDetails | None = None
     utm_license_details_explicit: bool = Field(default=False, exclude=True)
     psirt: PsirtObservation | None = None
+    legacy_v1_admin_policy: LegacyV1AdminPolicy | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -398,6 +428,7 @@ class AuditContext(BaseModel):
             "rule_match_statistics",
             "operator",
             "ha_cabling_redundancy",
+            "legacy_v1_admin_policy",
         ):
             if getattr(self, field_name) is None:
                 serialized.pop(field_name, None)
@@ -442,6 +473,7 @@ class Interface(BaseModel):
     address: str | None = None
     allowaccess: frozenset[str] = Field(default_factory=frozenset)
     role: str | None = None
+    interface_type: str | None = None
     secondary_ips: tuple["SecondaryIP", ...] = ()
     zone: ObjectReference | None = None
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
@@ -539,6 +571,32 @@ class VipGroup(BaseModel):
     name: str
     members: tuple[ObjectReference, ...] = ()
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class AddressObject(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    address_type: str | None = None
+    fqdn: str | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class AddressGroup(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    members: tuple[ObjectReference, ...] = ()
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class DnsDatabaseEntry(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
     proof_state: ProofState = ProofState.UNKNOWN
 
 
@@ -743,6 +801,9 @@ class FortiGateConfiguration(BaseModel):
     service_groups: tuple[ServiceObject, ...] = ()
     vips: tuple[Vip, ...] = ()
     vip_groups: tuple[VipGroup, ...] = ()
+    address_objects: tuple[AddressObject, ...] = ()
+    address_groups: tuple[AddressGroup, ...] = ()
+    dns_database_entries: tuple[DnsDatabaseEntry, ...] = ()
     virtual_servers: tuple[VirtualServer, ...] = ()
     profile_groups: tuple[ProfileGroup, ...] = ()
     log_setting: LogSetting | None = None
@@ -780,6 +841,7 @@ class AuditFinding(BaseModel):
     recommendation: str | None = None
     remediation: str | None = None
     customer_approval: bool | None = None
+    rule_provenance: str | None = None
 
     @field_validator("affected_objects", mode="before")
     @classmethod

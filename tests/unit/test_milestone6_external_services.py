@@ -465,6 +465,11 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "UTM-MAIL-FILTER-USAGE-001",
         "FW-SSL-SSH-PROFILE-001",
         "CFG-UNUSED-SERVICE-001",
+        "IAM-LEGACY-ADMIN-001",
+        "IAM-LEGACY-PKI-REMOVAL-001",
+        "IAM-LEGACY-PKI-PRESENCE-001",
+        "NET-LEGACY-ADMIN-LOOPBACK-001",
+        "DNS-LEGACY-DATABASE-001",
     )
     configuration = FortiGateParser().parse("config system global\nend\n")
 
@@ -473,8 +478,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
     )
 
     assert registered_ids == expected_ids
-    assert len(registered_ids) == 43
-    assert registered_ids[-16:] == (
+    assert len(registered_ids) == 48
+    assert registered_ids[-21:] == (
         "SYS-AUTO-INSTALL-USB-001",
         "SYS-FORTIMANAGER-SYNC-001",
         "SYS-FORTIANALYZER-SYNC-001",
@@ -491,6 +496,11 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "UTM-MAIL-FILTER-USAGE-001",
         "FW-SSL-SSH-PROFILE-001",
         "CFG-UNUSED-SERVICE-001",
+        "IAM-LEGACY-ADMIN-001",
+        "IAM-LEGACY-PKI-REMOVAL-001",
+        "IAM-LEGACY-PKI-PRESENCE-001",
+        "NET-LEGACY-ADMIN-LOOPBACK-001",
+        "DNS-LEGACY-DATABASE-001",
     )
 
 

@@ -83,6 +83,11 @@ CONTROL_IDS = (
     "UTM-MAIL-FILTER-USAGE-001",
     "FW-SSL-SSH-PROFILE-001",
     "CFG-UNUSED-SERVICE-001",
+    "IAM-LEGACY-ADMIN-001",
+    "IAM-LEGACY-PKI-REMOVAL-001",
+    "IAM-LEGACY-PKI-PRESENCE-001",
+    "NET-LEGACY-ADMIN-LOOPBACK-001",
+    "DNS-LEGACY-DATABASE-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -333,6 +338,11 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "UTM-FORTISANDBOX-CLOUD-001",
         "UTM-FORTIGUARD-ANYCAST-001",
         "NET-SDWAN-USAGE-001",
+        "IAM-LEGACY-ADMIN-001",
+        "IAM-LEGACY-PKI-REMOVAL-001",
+        "IAM-LEGACY-PKI-PRESENCE-001",
+        "NET-LEGACY-ADMIN-LOOPBACK-001",
+        "DNS-LEGACY-DATABASE-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-UNUSED-SERVICE-001")] = "UNKNOWN"
@@ -480,6 +490,11 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "UTM-MAIL-FILTER-USAGE-001",
                     "FW-SSL-SSH-PROFILE-001",
                     "CFG-UNUSED-SERVICE-001",
+                    "IAM-LEGACY-ADMIN-001",
+                    "IAM-LEGACY-PKI-REMOVAL-001",
+                    "IAM-LEGACY-PKI-PRESENCE-001",
+                    "NET-LEGACY-ADMIN-LOOPBACK-001",
+                    "DNS-LEGACY-DATABASE-001",
                 }
                 else "P0"
             )

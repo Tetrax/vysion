@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 
 from vysion.audit.firewall_projection import apply_firewall_projection, project_firewall
 from vysion.audit.ha_projection import apply_ha_projection, project_ha
+from vysion.audit.legacy_admin_projection import (
+    apply_legacy_admin_projection,
+    project_legacy_admin,
+)
 from vysion.audit.models import (
     Administrator,
     DeviceIdentity,
@@ -46,7 +50,7 @@ _RELEVANT_KEYS = {
         "revision-image-auto-backup",
         "default-voip-alg-mode",
     },
-    "system interface": {"ip", "allowaccess", "role"},
+    "system interface": {"ip", "allowaccess", "role", "type"},
     "system admin": {"peer-auth", "two-factor"},
 }
 _TOLERATED_NON_PROBATIVE_KEYS = {
@@ -137,6 +141,9 @@ _PROJECTED_SECTIONS = {
     "firewall service group",
     "firewall vip",
     "firewall vipgrp",
+    "firewall address",
+    "firewall addrgrp",
+    "system dns-database",
     "firewall profile-group",
     "firewall webfilter profile",
     "firewall ips sensor",
@@ -190,6 +197,9 @@ _PROJECTED_KEYS = {
     "firewall service group": {"member"},
     "firewall vip": {"extintf", "extip", "mappedip", "type"},
     "firewall vipgrp": {"member"},
+    "firewall address": {"type", "fqdn"},
+    "firewall addrgrp": {"member"},
+    "system dns-database": set(),
     "firewall profile-group": {
         "webfilter-profile", "ips-sensor", "av-profile", "dnsfilter-profile",
         "application-list", "ssl-ssh-profile", "voip-profile", "waf-profile",
@@ -277,6 +287,9 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
         {"comment", "extport", "mappedport", "portforward", "protocol", "uuid"}
     ),
     "firewall vipgrp": frozenset({"interface", "uuid"}),
+    "firewall address": frozenset({"comment", "subnet", "uuid"}),
+    "firewall addrgrp": frozenset({"comment", "uuid"}),
+    "system dns-database": frozenset({"authoritative", "domain", "ttl", "type"}),
     "user local": frozenset({"passwd", "passwd-time"}),
     "user ldap": frozenset(
         {
@@ -1514,6 +1527,7 @@ class FortiGateParser:
                             else frozenset(_observed_tokens(entry, "allowaccess"))
                         ),
                         role=values.get("role", "").lower() or None,
+                        interface_type=values.get("type", "").lower() or None,
                         secondary_ips=_secondary_ip_projection(entry.name, entry.children),
                         parsed_keys=frozenset(values),
                         proof_state=(
@@ -1849,7 +1863,7 @@ class FortiGateParser:
                         )
                         frame.invalidate(key)
                         continue
-                elif (frame.audited_section == "system interface" and key == "role") or (
+                elif (frame.audited_section == "system interface" and key in {"role", "type"}) or (
                     frame.audited_section == "system admin" and key == "two-factor"
                 ):
                     if len(value_tokens) != 1:
@@ -2103,4 +2117,7 @@ class FortiGateParser:
         configuration = apply_firewall_projection(configuration, firewall_projection)
         configuration = apply_vpn_projection(configuration, project_vpn(document))
         configuration = apply_ha_projection(configuration, project_ha(document))
+        configuration = apply_legacy_admin_projection(
+            configuration, project_legacy_admin(document)
+        )
         return apply_utm_projection(configuration, project_utm(document))
