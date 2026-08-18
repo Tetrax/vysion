@@ -54,7 +54,7 @@ def ldap_entry(name: str, *directives: str) -> str:
 
 
 def wan_interfaces() -> str:
-    return '''config system interface
+    return """config system interface
     edit "wan1"
         set ip 192.0.2.1/24
         set role wan
@@ -64,13 +64,13 @@ def wan_interfaces() -> str:
         set role lan
     next
 end
-'''
+"""
 
 
 def external_resources(*names: str, disabled: tuple[str, ...] = ()) -> str:
     entries = "".join(
         f'    edit "{name}"\n        set status '
-        f'{"disable" if name in disabled else "enable"}\n    next\n'
+        f"{'disable' if name in disabled else 'enable'}\n    next\n"
         for name in names
     )
     return "config system external-resource\n" + entries + "end\n"
@@ -90,6 +90,7 @@ def policy(
 ) -> str:
     def quote(values: tuple[str, ...]) -> str:
         return " ".join(f'"{value}"' for value in values)
+
     extra = ""
     if isdb_src:
         extra += f"        set internet-service-src-name {quote(isdb_src)}\n"
@@ -119,7 +120,7 @@ def wan_policies(*entries: str) -> str:
 def isdb_groups(**groups: tuple[str, ...]) -> str:
     entries = "".join(
         f'    edit "{name}"\n        set member '
-        f'{" ".join(chr(34) + value + chr(34) for value in members)}\n    next\n'
+        f"{' '.join(chr(34) + value + chr(34) for value in members)}\n    next\n"
         for name, members in groups.items()
     )
     return "config firewall internet-service-group\n" + entries + "end\n"
@@ -127,14 +128,24 @@ def isdb_groups(**groups: tuple[str, ...]) -> str:
 
 def test_m6_isdb_casefold_group_collision_is_unknown() -> None:
     incoming = (
-        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Tor-Exit.Node", "Spam-Spamming.Server",
-        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
+        "VPN-Anonymous.VPN",
+        "Tor-Relay.Node",
+        "Tor-Exit.Node",
+        "Spam-Spamming.Server",
+        "Proxy-Proxy.Server",
+        "Phishing-Phishing.Server",
+        "Malicious-Malicious.Server",
         "Botnet-C&C.Server",
     )
     outgoing = (
-        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Spam-Spamming.Server",
-        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
-        "Botnet-C&C.Server", "Blockchain-Crypto.Mining.Pool",
+        "VPN-Anonymous.VPN",
+        "Tor-Relay.Node",
+        "Spam-Spamming.Server",
+        "Proxy-Proxy.Server",
+        "Phishing-Phishing.Server",
+        "Malicious-Malicious.Server",
+        "Botnet-C&C.Server",
+        "Blockchain-Crypto.Mining.Pool",
     )
     raw = (
         wan_interfaces()
@@ -177,9 +188,16 @@ def test_m6_cti_complete_resources_and_wan_flows_pass() -> None:
 
 def test_m6_cti_resource_casefold_collision_is_unknown_but_unique_fold_resolves() -> None:
     cti = (
-        "IPV4_CTI_SNS", "IPV4_SNS", "HASH_CTI_SNS_SHA1", "HASH_CTI_SNS_SHA256",
-        "HASH_SNS_SHA1", "HASH_SNS_SHA256", "FQDN_SNS", "URL_SNS",
-        "FQDN_CTI_SNS", "URL_CTI_SNS",
+        "IPV4_CTI_SNS",
+        "IPV4_SNS",
+        "HASH_CTI_SNS_SHA1",
+        "HASH_CTI_SNS_SHA256",
+        "HASH_SNS_SHA1",
+        "HASH_SNS_SHA256",
+        "FQDN_SNS",
+        "URL_SNS",
+        "FQDN_CTI_SNS",
+        "URL_CTI_SNS",
     )
     ipv4 = ("IPV4_CTI_SNS", "IPV4_SNS")
     policies = wan_policies(
@@ -239,13 +257,21 @@ def test_m6_cti_policy_defaulted_status_is_unknown_not_active() -> None:
 
 def test_m6_cti_missing_explicit_flow_object_fails_but_unknown_relation_is_unknown() -> None:
     cti = (
-        "IPV4_CTI_SNS", "IPV4_SNS", "HASH_CTI_SNS_SHA1", "HASH_CTI_SNS_SHA256",
-        "HASH_SNS_SHA1", "HASH_SNS_SHA256", "FQDN_SNS", "URL_SNS",
-        "FQDN_CTI_SNS", "URL_CTI_SNS",
+        "IPV4_CTI_SNS",
+        "IPV4_SNS",
+        "HASH_CTI_SNS_SHA1",
+        "HASH_CTI_SNS_SHA256",
+        "HASH_SNS_SHA1",
+        "HASH_SNS_SHA256",
+        "FQDN_SNS",
+        "URL_SNS",
+        "FQDN_CTI_SNS",
+        "URL_CTI_SNS",
     )
     weak = (
         "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
-        + wan_interfaces() + external_resources(*cti)
+        + wan_interfaces()
+        + external_resources(*cti)
         + wan_policies(policy(1, "wan1", "lan", srcaddr=("IPV4_SNS",)))
     )
     unknown = external_resources(*cti) + wan_policies(policy(1, "mystery", "lan"))
@@ -256,18 +282,27 @@ def test_m6_cti_missing_explicit_flow_object_fails_but_unknown_relation_is_unkno
 
 def test_m6_cti_disabled_resource_fails_and_unknown_policy_prevents_pass() -> None:
     cti = (
-        "IPV4_CTI_SNS", "IPV4_SNS", "HASH_CTI_SNS_SHA1", "HASH_CTI_SNS_SHA256",
-        "HASH_SNS_SHA1", "HASH_SNS_SHA256", "FQDN_SNS", "URL_SNS",
-        "FQDN_CTI_SNS", "URL_CTI_SNS",
+        "IPV4_CTI_SNS",
+        "IPV4_SNS",
+        "HASH_CTI_SNS_SHA1",
+        "HASH_CTI_SNS_SHA256",
+        "HASH_SNS_SHA1",
+        "HASH_SNS_SHA256",
+        "FQDN_SNS",
+        "URL_SNS",
+        "FQDN_CTI_SNS",
+        "URL_CTI_SNS",
     )
     ipv4 = ("IPV4_CTI_SNS", "IPV4_SNS")
     disabled = (
-        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n" + wan_interfaces()
+        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
+        + wan_interfaces()
         + external_resources(*cti, disabled=("IPV4_CTI_SNS",))
         + wan_policies(policy(1, "wan1", "lan", srcaddr=ipv4))
     )
     mixed = (
-        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n" + wan_interfaces()
+        "#config-version=FGT60E-7.2.9-FW-build1-1:opmode=0\n"
+        + wan_interfaces()
         + external_resources(*cti)
         + wan_policies(
             policy(1, "wan1", "lan", srcaddr=ipv4),
@@ -340,22 +375,30 @@ def test_m6_cti_explicit_disabled_resource_dominates_unknown_key() -> None:
 
 def test_m6_isdb_complete_bidirectional_wan_flows_pass_and_missing_fails() -> None:
     incoming = (
-        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Tor-Exit.Node", "Spam-Spamming.Server",
-        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
+        "VPN-Anonymous.VPN",
+        "Tor-Relay.Node",
+        "Tor-Exit.Node",
+        "Spam-Spamming.Server",
+        "Proxy-Proxy.Server",
+        "Phishing-Phishing.Server",
+        "Malicious-Malicious.Server",
         "Botnet-C&C.Server",
     )
     outgoing = (
-        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Spam-Spamming.Server",
-        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
-        "Botnet-C&C.Server", "Blockchain-Crypto.Mining.Pool",
+        "VPN-Anonymous.VPN",
+        "Tor-Relay.Node",
+        "Spam-Spamming.Server",
+        "Proxy-Proxy.Server",
+        "Phishing-Phishing.Server",
+        "Malicious-Malicious.Server",
+        "Botnet-C&C.Server",
+        "Blockchain-Crypto.Mining.Pool",
     )
     complete = wan_interfaces() + wan_policies(
         policy(1, "wan1", "lan", isdb_src=incoming),
         policy(2, "lan", "wan1", isdb_dst=outgoing),
     )
-    weak = wan_interfaces() + wan_policies(
-        policy(1, "wan1", "lan", isdb_src=incoming[:-1])
-    )
+    weak = wan_interfaces() + wan_policies(policy(1, "wan1", "lan", isdb_src=incoming[:-1]))
 
     assert check_isdb_wan_flows(FortiGateParser().parse(complete)).status is AuditStatus.PASS
     assert check_isdb_wan_flows(FortiGateParser().parse(weak)).status is AuditStatus.FAIL
@@ -363,16 +406,21 @@ def test_m6_isdb_complete_bidirectional_wan_flows_pass_and_missing_fails() -> No
 
 def test_m6_isdb_resolves_groups_and_orphan_group_is_unknown() -> None:
     incoming = (
-        "VPN-Anonymous.VPN", "Tor-Relay.Node", "Tor-Exit.Node", "Spam-Spamming.Server",
-        "Proxy-Proxy.Server", "Phishing-Phishing.Server", "Malicious-Malicious.Server",
+        "VPN-Anonymous.VPN",
+        "Tor-Relay.Node",
+        "Tor-Exit.Node",
+        "Spam-Spamming.Server",
+        "Proxy-Proxy.Server",
+        "Phishing-Phishing.Server",
+        "Malicious-Malicious.Server",
         "Botnet-C&C.Server",
     )
-    complete = wan_interfaces() + isdb_groups(block_in=incoming) + wan_policies(
-        policy(1, "wan1", "lan", isdb_src_group="block_in")
+    complete = (
+        wan_interfaces()
+        + isdb_groups(block_in=incoming)
+        + wan_policies(policy(1, "wan1", "lan", isdb_src_group="block_in"))
     )
-    orphan = wan_interfaces() + wan_policies(
-        policy(1, "wan1", "lan", isdb_src_group="missing")
-    )
+    orphan = wan_interfaces() + wan_policies(policy(1, "wan1", "lan", isdb_src_group="missing"))
 
     assert check_isdb_wan_flows(FortiGateParser().parse(complete)).status is AuditStatus.PASS
     assert check_isdb_wan_flows(FortiGateParser().parse(orphan)).status is AuditStatus.UNKNOWN
@@ -471,8 +519,17 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "NET-LEGACY-ADMIN-LOOPBACK-001",
         "DNS-LEGACY-DATABASE-001",
         "NET-GEO-IP-USAGE-001",
-            "NET-RFC6890-BLACKHOLE-001",
-            "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        "NET-RFC6890-BLACKHOLE-001",
+        "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        "WIFI-FORTIAP-OBSOLETE-001",
+        "WIFI-SSID-LIMIT-001",
+        "WIFI-RADIO2-40MHZ-001",
+        "WIFI-DARRP-001",
+        "WIFI-FREQUENCY-HANDOFF-001",
+        "WIFI-TIM-001",
+        "WIFI-BAND-001",
+        "WIFI-CHANNELS-001",
+        "WIFI-SHORT-GUARD-INTERVAL-001",
     )
     configuration = FortiGateParser().parse("config system global\nend\n")
 
@@ -481,8 +538,8 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
     )
 
     assert registered_ids == expected_ids
-    assert len(registered_ids) == 51
-    assert registered_ids[-24:] == (
+    assert len(registered_ids) == 60
+    assert registered_ids[-33:] == (
         "SYS-AUTO-INSTALL-USB-001",
         "SYS-FORTIMANAGER-SYNC-001",
         "SYS-FORTIANALYZER-SYNC-001",
@@ -507,6 +564,15 @@ def test_registry_preserves_existing_prefix_and_appends_parity_controls() -> Non
         "NET-GEO-IP-USAGE-001",
         "NET-RFC6890-BLACKHOLE-001",
         "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        "WIFI-FORTIAP-OBSOLETE-001",
+        "WIFI-SSID-LIMIT-001",
+        "WIFI-RADIO2-40MHZ-001",
+        "WIFI-DARRP-001",
+        "WIFI-FREQUENCY-HANDOFF-001",
+        "WIFI-TIM-001",
+        "WIFI-BAND-001",
+        "WIFI-CHANNELS-001",
+        "WIFI-SHORT-GUARD-INTERVAL-001",
     )
 
 

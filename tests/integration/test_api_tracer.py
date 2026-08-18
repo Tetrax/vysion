@@ -91,6 +91,15 @@ CONTROL_IDS = (
     "NET-GEO-IP-USAGE-001",
     "NET-RFC6890-BLACKHOLE-001",
     "FW-LEGACY-SCHEDULE-INVENTORY-001",
+    "WIFI-FORTIAP-OBSOLETE-001",
+    "WIFI-SSID-LIMIT-001",
+    "WIFI-RADIO2-40MHZ-001",
+    "WIFI-DARRP-001",
+    "WIFI-FREQUENCY-HANDOFF-001",
+    "WIFI-TIM-001",
+    "WIFI-BAND-001",
+    "WIFI-CHANNELS-001",
+    "WIFI-SHORT-GUARD-INTERVAL-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -347,8 +356,9 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "NET-LEGACY-ADMIN-LOOPBACK-001",
         "DNS-LEGACY-DATABASE-001",
         "NET-GEO-IP-USAGE-001",
-            "NET-RFC6890-BLACKHOLE-001",
-            "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        "NET-RFC6890-BLACKHOLE-001",
+        "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        *CONTROL_IDS[-9:],
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-UNUSED-SERVICE-001")] = "UNKNOWN"
@@ -452,9 +462,7 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
             "+00:00", "Z"
         )
         assert payload["fortiguard"]["status"] == "AVAILABLE"
-        statuses = {
-            finding["control_id"]: finding["status"] for finding in payload["findings"]
-        }
+        statuses = {finding["control_id"]: finding["status"] for finding in payload["findings"]}
         assert {
             control_id
             for control_id, finding_status in statuses.items()
@@ -477,7 +485,8 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
             finding["priority"]
             == (
                 "P1"
-                if finding["control_id"] in {
+                if finding["control_id"]
+                in {
                     "SYS-BACKUP-AUTO-001",
                     "CFG-REF-INTEGRITY-001",
                     "SYS-AUTO-INSTALL-USB-001",
@@ -502,9 +511,18 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "NET-LEGACY-ADMIN-LOOPBACK-001",
                     "DNS-LEGACY-DATABASE-001",
                     "NET-GEO-IP-USAGE-001",
-                        "NET-RFC6890-BLACKHOLE-001",
-                        "FW-LEGACY-SCHEDULE-INVENTORY-001",
-                    }
+                    "NET-RFC6890-BLACKHOLE-001",
+                    "FW-LEGACY-SCHEDULE-INVENTORY-001",
+                    "WIFI-FORTIAP-OBSOLETE-001",
+                    "WIFI-SSID-LIMIT-001",
+                    "WIFI-RADIO2-40MHZ-001",
+                    "WIFI-DARRP-001",
+                    "WIFI-FREQUENCY-HANDOFF-001",
+                    "WIFI-TIM-001",
+                    "WIFI-BAND-001",
+                    "WIFI-CHANNELS-001",
+                    "WIFI-SHORT-GUARD-INTERVAL-001",
+                }
                 else "P0"
             )
             for finding in payload["findings"][1:]
@@ -584,8 +602,7 @@ async def test_api_json_docx_xlsx_preserve_all_control_ids(
 
     workbook = load_workbook(BytesIO(xlsx_response.content), read_only=True, data_only=True)
     xlsx_ids = [
-        row[0]
-        for row in workbook["Contrôles enrichis"].iter_rows(min_row=2, values_only=True)
+        row[0] for row in workbook["Contrôles enrichis"].iter_rows(min_row=2, values_only=True)
     ]
     assert xlsx_ids == expected_ids
 
@@ -655,9 +672,7 @@ async def test_api_keeps_contradictory_selected_wan_unknown_and_traceable(tmp_pa
 
     assert response.status_code == 201
     finding = next(
-        item
-        for item in response.json()["findings"]
-        if item["control_id"] == "NET-WAN-MGMT-001"
+        item for item in response.json()["findings"] if item["control_id"] == "NET-WAN-MGMT-001"
     )
     assert finding["status"] == "UNKNOWN"
     assert finding["applicability"] == "unknown"

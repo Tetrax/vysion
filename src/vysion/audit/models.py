@@ -591,6 +591,42 @@ class ScheduleCounts(BaseModel):
     expired: int = Field(ge=0)
 
 
+class WirelessRadio(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    mode: str | None = None
+    vaps: tuple[str, ...] = ()
+    channel_bonding: str | None = None
+    darrp: str | None = None
+    band: str | None = None
+    channels: tuple[str, ...] = ()
+    short_guard_interval: str | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class WirelessProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    frequency_handoff: str | None = None
+    powersave_optimize: tuple[str, ...] = ()
+    radios: tuple[WirelessRadio, ...] = ()
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class WirelessAccessPoint(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    device_id: str
+    name: str | None = None
+    profile: ObjectReference | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
 class PortRange(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -865,6 +901,8 @@ class FortiGateConfiguration(BaseModel):
     onetime_schedules: tuple[OnetimeSchedule, ...] = ()
     recurring_schedules: tuple[RecurringSchedule, ...] = ()
     schedule_groups: tuple[ScheduleGroup, ...] = ()
+    wireless_access_points: tuple[WirelessAccessPoint, ...] = ()
+    wireless_profiles: tuple[WirelessProfile, ...] = ()
     service_objects: tuple[ServiceObject, ...] = ()
     service_groups: tuple[ServiceObject, ...] = ()
     vips: tuple[Vip, ...] = ()

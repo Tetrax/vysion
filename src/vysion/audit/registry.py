@@ -70,6 +70,17 @@ from vysion.audit.controls.vpn import (
     check_ssl_vpn,
     check_vpn_crypto,
 )
+from vysion.audit.controls.wifi import (
+    check_band,
+    check_channels,
+    check_darrp,
+    check_frequency_handoff,
+    check_obsolete_fortiap,
+    check_radio2_40mhz,
+    check_short_guard_interval,
+    check_ssid_limit,
+    check_tim,
+)
 from vysion.audit.engine import Control
 
 
@@ -126,4 +137,13 @@ def default_registry() -> tuple[Control, ...]:
         check_legacy_geo_ip_usage,
         check_legacy_rfc6890_blackhole,
         check_legacy_schedule_inventory,
+        check_obsolete_fortiap,
+        check_ssid_limit,
+        check_radio2_40mhz,
+        check_darrp,
+        check_frequency_handoff,
+        check_tim,
+        check_band,
+        check_channels,
+        check_short_guard_interval,
     )

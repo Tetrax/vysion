@@ -153,6 +153,6 @@ def test_registry_appends_legacy_admin_controls_in_stable_order() -> None:
         for finding in AuditEngine(controls).run(FortiGateParser().parse(PASS_CONFIG), _context())
     )
 
-    assert ids[-8:-3] == CONTROL_IDS
-    assert len(controls) == 51
+    assert ids[43:48] == CONTROL_IDS
+    assert len(controls) == 60
     assert len(ids) == len(set(ids))

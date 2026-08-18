@@ -47,7 +47,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 51
+    assert len(statuses) == 60
     assert statuses == {
         finding.control_id: (
             AuditStatus.FAIL
@@ -55,7 +55,8 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
             else AuditStatus.NOT_APPLICABLE
             if finding.control_id in {"VPN-SSL-001", "FW-SSL-SSH-PROFILE-001"}
             else AuditStatus.UNKNOWN
-            if finding.control_id in {
+            if finding.control_id
+            in {
                 "EXT-PSIRT-001",
                 "SYS-BACKUP-AUTO-001",
                 "CFG-REF-INTEGRITY-001",
@@ -76,11 +77,20 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
                 "IAM-LEGACY-PKI-REMOVAL-001",
                 "IAM-LEGACY-PKI-PRESENCE-001",
                 "NET-LEGACY-ADMIN-LOOPBACK-001",
-                    "DNS-LEGACY-DATABASE-001",
-                    "NET-GEO-IP-USAGE-001",
-                        "NET-RFC6890-BLACKHOLE-001",
-                        "FW-LEGACY-SCHEDULE-INVENTORY-001",
-                }
+                "DNS-LEGACY-DATABASE-001",
+                "NET-GEO-IP-USAGE-001",
+                "NET-RFC6890-BLACKHOLE-001",
+                "FW-LEGACY-SCHEDULE-INVENTORY-001",
+                "WIFI-FORTIAP-OBSOLETE-001",
+                "WIFI-SSID-LIMIT-001",
+                "WIFI-RADIO2-40MHZ-001",
+                "WIFI-DARRP-001",
+                "WIFI-FREQUENCY-HANDOFF-001",
+                "WIFI-TIM-001",
+                "WIFI-BAND-001",
+                "WIFI-CHANNELS-001",
+                "WIFI-SHORT-GUARD-INTERVAL-001",
+            }
             else AuditStatus.PASS
         )
         for finding in findings
@@ -969,8 +979,7 @@ end
 
     configuration = FortiGateParser().parse(raw)
     findings = {
-        item.control_id: item
-        for item in AuditEngine(default_registry()).run(configuration)
+        item.control_id: item for item in AuditEngine(default_registry()).run(configuration)
     }
 
     assert configuration.complete_backup is False
@@ -989,8 +998,7 @@ end
 
     configuration = FortiGateParser().parse(raw)
     findings = {
-        item.control_id: item
-        for item in AuditEngine(default_registry()).run(configuration)
+        item.control_id: item for item in AuditEngine(default_registry()).run(configuration)
     }
 
     assert configuration.complete_backup is False
@@ -1009,8 +1017,7 @@ end
 
     configuration = FortiGateParser().parse(raw)
     findings = {
-        item.control_id: item
-        for item in AuditEngine(default_registry()).run(configuration)
+        item.control_id: item for item in AuditEngine(default_registry()).run(configuration)
     }
 
     assert configuration.complete_backup is False
@@ -1137,9 +1144,7 @@ end
 )
 def test_ambiguous_empty_firewall_namespace_never_passes(control_id: str) -> None:
     namespace = (
-        "firewall vip"
-        if "VIP" in control_id or "VSERVER" in control_id
-        else "firewall policy"
+        "firewall vip" if "VIP" in control_id or "VSERVER" in control_id else "firewall policy"
     )
     raw = f"""config {namespace}
     config vendor-extra

@@ -78,28 +78,28 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 43 | UTM | `verifier_ips_profiles` | A | `UTM-IPS-001` | Conformité des profils IPS utilisés. |
 | 44 | UTM | `verifier_app_control_profiles` | A | `UTM-APPCONTROL-001` | Conformité des profils Application Control utilisés. |
 | 45 | Système / administration | `verifier_port_https_admin` | A | `SYS-ADMIN-HTTPS-PORT-001` | Migré ; 443 explicite FAIL, port personnalisé certain PASS, absence/ambiguïté UNKNOWN. |
-| 46 | Wi-Fi | `check_obsolete_fortiap_devices` | C | Projection wireless-controller WTP | Aucun support Wi-Fi V2. |
-| 47 | Wi-Fi | `verifier_nombre_ssid_par_profil_wifi` | C | Projection Wi-Fi/SSID | Aucun support Wi-Fi V2. |
-| 48 | Wi-Fi | `verifier_utilisation_bande_5ghz` | C | Projection Wi-Fi/radio | Aucun support Wi-Fi V2. |
-| 49 | Wi-Fi | `verifier_darrp_enable` | C | Projection Wi-Fi/DARRP | Aucun support Wi-Fi V2. |
-| 50 | Wi-Fi | `verifier_frequency_handoff` | C | Projection Wi-Fi/handoff | Aucun support Wi-Fi V2. |
-| 51 | Wi-Fi | `verifier_tim_enable` | C | Projection Wi-Fi/TIM | Aucun support Wi-Fi V2. |
+| 46 | Wi-Fi | `check_obsolete_fortiap_devices` | A | `WIFI-FORTIAP-OBSOLETE-001` | Suffixes B/C legacy_v1 sur WTP typés. |
+| 47 | Wi-Fi | `verifier_nombre_ssid_par_profil_wifi` | A | `WIFI-SSID-LIMIT-001` | FAIL à partir de cinq SSID par radio. |
+| 48 | Wi-Fi | `verifier_utilisation_bande_5ghz` | A | `WIFI-RADIO2-40MHZ-001` | Radio 2 active en 40 MHz ; disabled reste FAIL selon V1. |
+| 49 | Wi-Fi | `verifier_darrp_enable` | A | `WIFI-DARRP-001` | DARRP requis sur radios actives. |
+| 50 | Wi-Fi | `verifier_frequency_handoff` | A | `WIFI-FREQUENCY-HANDOFF-001` | Handoff requis lorsque radio 1 est active. |
+| 51 | Wi-Fi | `verifier_tim_enable` | A | `WIFI-TIM-001` | TIM requis pour les radios actives. |
 | 52 | Reporting / statistiques | `verifier_logs_par_regle` | C | Statistiques de logs par règle | Nécessite données de configuration/runtime séparées. |
 | 53 | Reporting / inventaire | `exporter_utilisateurs_admins` | A | Inventaire administrateurs typé | Feuille Comptes XLSX et JSON canonique, sans secret d'authentification. |
 | 54 | Reporting / statistiques | `compter_regles_activ_ou_desactiv` | A | Statistiques policies | Comptages total/enable/disable/inconnu depuis les policies typées. |
 | 55 | Reporting / statistiques | `collect_schedule_data` | C | Statistiques schedules | Aucun équivalent V2. |
 | 56 | Réseau / firewall | `verifier_ssl_ssh_profiles` | C | Projection SSL/SSH profiles | Aucun contrôle V2 dédié. |
-| 57 | Wi-Fi | `verifier_band_conformite` | C | Projection Wi-Fi/bande | Aucun support Wi-Fi V2. |
-| 58 | Wi-Fi | `verifier_channels_conformite` | C | Projection Wi-Fi/canaux | Aucun support Wi-Fi V2. |
-| 59 | Wi-Fi | `verifier_short_guard_interval` | C | Projection Wi-Fi/SGI | Aucun support Wi-Fi V2. |
+| 57 | Wi-Fi | `verifier_band_conformite` | A | `WIFI-BAND-001` | Allowlist exacte legacy_v1 sur radios actives. |
+| 58 | Wi-Fi | `verifier_channels_conformite` | A | `WIFI-CHANNELS-001` | Radio 1 exactement 1/6/11, trois tokens. |
+| 59 | Wi-Fi | `verifier_short_guard_interval` | A | `WIFI-SHORT-GUARD-INTERVAL-001` | SGI requis sur radios actives. |
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 43**
+- **A — équivalents identifiés : 52**
 - **B — partiels identifiés : 0**
-- **C — absents identifiés : 16**
+- **C — absents identifiés : 7**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **48 / 59** (81,4 %)
+- Disposition réellement `MIGRATED` : **57 / 59** (96,6 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -160,15 +160,15 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 42 | DNS Filter | `MIGRATED` | Profils utilisés, catégories et options sont projetés et contrôlés. |
 | 43 | IPS | `MIGRATED` | Profils utilisés et statut sont projetés et contrôlés. |
 | 44 | Application Control | `MIGRATED` | Profils utilisés, entrées et options sont projetés et contrôlés. |
-| 46 | FortiAP obsolète | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne contient le namespace wireless-controller WTP. |
-| 47 | Nombre de SSID par profil | `LEGACY_REVIEW_REQUIRED` | Aucun corpus de backup V2 ne permet un replay sans contrôle spéculatif. |
-| 48 | Utilisation 5 GHz | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 49 | DARRP | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 50 | Frequency handoff | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 51 | TIM | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 57 | Bandes Wi-Fi | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 58 | Canaux Wi-Fi | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
-| 59 | Short guard interval | `LEGACY_REVIEW_REQUIRED` | Aucun profil radio observable dans le corpus V2. |
+| 46 | FortiAP obsolète | `MIGRATED` | WTP typés ; extraction des modèles et suffixes B/C reproduits depuis V1, sans source EOL externe. |
+| 47 | Nombre de SSID par profil | `MIGRATED` | Seuls les profils référencés sont contrôlés ; cinq VAP ou plus produit FAIL. |
+| 48 | Utilisation 5 GHz | `MIGRATED` | Radio 2 doit être active et configurée en `40MHz`, y compris le FAIL V1 si disabled. |
+| 49 | DARRP | `MIGRATED` | `darrp enable` est requis sur chaque radio active ; disabled est exempt. |
+| 50 | Frequency handoff | `MIGRATED` | `frequency-handoff enable` est requis au profil si radio 1 est active. |
+| 51 | TIM | `MIGRATED` | `powersave-optimize` doit contenir `tim` pour les radios actives. |
+| 57 | Bandes Wi-Fi | `MIGRATED` | Allowlist V1 exacte, appliquée aux radios 1/2 actives. |
+| 58 | Canaux Wi-Fi | `MIGRATED` | Radio 1 active exige exactement les trois tokens 1, 6 et 11. |
+| 59 | Short guard interval | `MIGRATED` | `short-guard-interval enable` est requis sur les radios actives. |
 
 ## Dispositions explicites du Lot reporting / inventaires / exports
 

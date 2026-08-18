@@ -267,9 +267,9 @@ def test_m5_json_docx_xlsx_share_all_finding_ids() -> None:
     )
 
     json_ids = [finding.control_id for finding in report.findings]
-    assert len(json_ids) == 51
+    assert len(json_ids) == 60
     assert {"NET-CTI-WAN-001", "NET-ISDB-WAN-001"}.isdisjoint(json_ids)
-    assert json_ids[-35:] == [
+    assert json_ids[-44:] == [
         "UTM-LICENSE-001",
         "UTM-AUTOUPDATE-001",
         "UTM-DNSFILTER-001",
@@ -305,6 +305,15 @@ def test_m5_json_docx_xlsx_share_all_finding_ids() -> None:
         "NET-GEO-IP-USAGE-001",
         "NET-RFC6890-BLACKHOLE-001",
         "FW-LEGACY-SCHEDULE-INVENTORY-001",
+        "WIFI-FORTIAP-OBSOLETE-001",
+        "WIFI-SSID-LIMIT-001",
+        "WIFI-RADIO2-40MHZ-001",
+        "WIFI-DARRP-001",
+        "WIFI-FREQUENCY-HANDOFF-001",
+        "WIFI-TIM-001",
+        "WIFI-BAND-001",
+        "WIFI-CHANNELS-001",
+        "WIFI-SHORT-GUARD-INTERVAL-001",
     ]
 
     with ZipFile(BytesIO(render_docx(report))) as package:

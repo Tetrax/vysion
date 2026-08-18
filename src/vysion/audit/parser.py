@@ -33,6 +33,7 @@ from vysion.audit.models import (
 from vysion.audit.schedule_projection import apply_schedule_projection, project_schedules
 from vysion.audit.utm_projection import apply_utm_projection, project_utm
 from vysion.audit.vpn_projection import apply_vpn_projection, project_vpn
+from vysion.audit.wifi_projection import apply_wifi_projection, project_wifi
 
 _AUDITED_ENTRY_SECTIONS = {"system interface", "system admin"}
 _AUDITED_SECTIONS = _AUDITED_ENTRY_SECTIONS | {"system global"}
@@ -49,6 +50,8 @@ _CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
     "firewall schedule onetime",
     "firewall schedule recurring",
     "firewall schedule group",
+    "wireless-controller wtp",
+    "wireless-controller wtp-profile",
 }
 _ALLOWED_CONTROLS = {"\n", "\r", "\t"}
 _RELEVANT_KEYS = {
@@ -185,6 +188,8 @@ _PROJECTED_SECTIONS = {
     "firewall schedule onetime",
     "firewall schedule recurring",
     "firewall schedule group",
+    "wireless-controller wtp",
+    "wireless-controller wtp-profile",
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
@@ -254,6 +259,8 @@ _PROJECTED_KEYS = {
     "firewall schedule onetime": {"end"},
     "firewall schedule recurring": {"day", "start", "end"},
     "firewall schedule group": {"member"},
+    "wireless-controller wtp": {"name", "wtp-profile"},
+    "wireless-controller wtp-profile": {"frequency-handoff", "powersave-optimize"},
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),
@@ -401,6 +408,24 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "firewall schedule group": frozenset({"color"}),
 }
 _PROJECTED_CHILD_KEYS = {
+    "radio-1": {
+        "mode",
+        "vaps",
+        "channel-bonding",
+        "darrp",
+        "band",
+        "channel",
+        "short-guard-interval",
+    },
+    "radio-2": {
+        "mode",
+        "vaps",
+        "channel-bonding",
+        "darrp",
+        "band",
+        "channel",
+        "short-guard-interval",
+    },
     "zone": {"interface", "member"},
     "members": {"interface", "zone"},
     "health-check": {
@@ -437,6 +462,9 @@ _PROJECTED_CHILD_KEYS = {
     "https": {"cert-probe-failure", "sni-server-cert-check"},
 }
 _PROJECTED_CHILDREN = {
+    "wireless-controller wtp-profile": frozenset({"radio-1", "radio-2"}),
+    "radio-1": frozenset(),
+    "radio-2": frozenset(),
     "system sdwan": frozenset({"zone", "members", "health-check", "service"}),
     "system interface": frozenset({"secondaryip"}),
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
@@ -2146,4 +2174,5 @@ class FortiGateParser:
         configuration = apply_legacy_network_projection(
             configuration, project_legacy_network(document)
         )
+        configuration = apply_wifi_projection(configuration, project_wifi(document))
         return apply_utm_projection(configuration, project_utm(document))

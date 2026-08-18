@@ -123,7 +123,7 @@ def test_certainly_empty_policy_namespace_is_not_applicable() -> None:
 
 def test_registry_appends_schedule_control_with_stable_unique_id() -> None:
     ids = [getattr(control, "control_id", "") for control in default_registry()]
-    assert ids[-1] == CONTROL_ID
-    assert len(ids) == 51
+    assert ids[50] == CONTROL_ID
+    assert len(ids) == 60
     declared_ids = [control_id for control_id in ids if control_id]
     assert len(declared_ids) == len(set(declared_ids))
