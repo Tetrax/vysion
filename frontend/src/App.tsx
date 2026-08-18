@@ -39,6 +39,7 @@ type Filter = 'ALL' | AuditStatus
 
 type WanSelectionKind = 'interface' | 'zone' | 'sdwan' | 'automatic'
 type WanOption = { name: string; kinds: string[]; scopes: WanSelectionKind[]; interfaces: string[]; defaultKind: WanSelectionKind }
+type WanGroupDefinition = { kind: Exclude<WanSelectionKind, 'automatic'>; label: string; description: string }
 
 type StepDefinition = { id: Step; label: string }
 const STEPS: StepDefinition[] = [
@@ -52,6 +53,11 @@ const STEPS: StepDefinition[] = [
 const STATUS_ORDER: Record<AuditStatus, number> = { FAIL: 0, ERROR: 0, UNKNOWN: 1, PASS: 2, NOT_APPLICABLE: 3 }
 const DOMAIN_LABELS: Record<string, string> = { system: 'Système', administration: 'Administration / Identity', identity: 'Administration / Identity', iam: 'Administration / Identity', network: 'Réseau', firewall: 'Firewall', vpn: 'VPN', utm: 'UTM', wifi: 'Wi-Fi' }
 const DOMAIN_ORDER = ['Système', 'Administration / Identity', 'Réseau', 'Firewall', 'VPN', 'UTM', 'Wi-Fi', 'Autre']
+const WAN_GROUPS: WanGroupDefinition[] = [
+  { kind: 'interface', label: 'Interfaces WAN', description: 'Sélectionner une interface individuelle.' },
+  { kind: 'zone', label: 'Zones', description: 'Sélectionner une zone et son périmètre d’interfaces.' },
+  { kind: 'sdwan', label: 'SD-WAN', description: 'Sélectionner une zone SD-WAN et ses membres.' },
+]
 
 function buildWanOptions(preview: Preview): WanOption[] {
   const byName = new Map<string, WanOption>()
@@ -92,23 +98,26 @@ async function responseError(response: Response, action: string): Promise<Error>
   } catch { /* status fallback */ }
   return new Error(`${action} refusé (HTTP ${response.status})`)
 }
-function TriStateField({ label, value, onChange }: { label: string; value: TriState; onChange: (value: TriState) => void }) {
-  return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value as TriState)}><option value="">Non renseigné</option><option value="true">Oui</option><option value="false">Non</option></select></label>
+
+function ConfirmationField({ label, value, onChange, description }: { label: string; value: TriState; onChange: (value: TriState) => void; description: string }) {
+  const checked = value === 'true'
+  return <label className={`confirmation-field${checked ? ' is-checked' : ''}`}>
+    <input aria-label={label} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked ? 'true' : '')} />
+    <span><strong>{label}</strong><small>{checked ? 'Confirmé' : description}</small></span>
+  </label>
 }
+
 function ContextSummary({ context }: { context: AuditContext }) {
   const license = context.utm_license_details
   const licenseStatus = license?.status ?? (context.utm_license === true ? 'active' : context.utm_license === false ? 'inactive' : null)
   const wanSummary = context.wan_selections?.map((selection) => `${selection.name} (${selection.kind})`).join(', ') ?? context.selected_wans?.join(', ')
-  return <section className="context-summary" aria-label="Contexte de l’audit"><h3>Fiche équipement et contexte opérateur</h3><dl>
+  return <section className="context-summary" aria-label="Contexte de l’audit"><h3>Contexte saisi</h3><dl>
     <div><dt>Client</dt><dd>{display(context.client)}</dd></div><div><dt>Site</dt><dd>{display(context.site)}</dd></div>
-    <div><dt>Numéro de série</dt><dd>{display(context.serial_number)}</dd></div><div><dt>Uptime</dt><dd>{display(context.uptime)}</dd></div>
+    <div><dt>Numéro de série</dt><dd>{display(context.serial_number)}</dd></div><div><dt>WAN sélectionnées</dt><dd>{display(wanSummary)}</dd></div>
+    <div><dt>HA</dt><dd>{display(context.ha)}</dd></div><div><dt>MPLS / L2L</dt><dd>{display(context.mpls)}</dd></div>
+    <div><dt>Licence UTM</dt><dd>{display(licenseStatus)}</dd></div><div><dt>Uptime</dt><dd>{display(context.uptime)}</dd></div>
     <div><dt>Règles sans match</dt><dd>{display(context.rule_match_statistics?.unmatched_rules)}</dd></div>
     <div><dt>Commentaire contexte</dt><dd>{display(context.operator_comment)}</dd></div>
-    <div><dt>Opérateur</dt><dd>{display(context.operator)}</dd></div><div><dt>WAN sélectionnées</dt><dd>{display(wanSummary)}</dd></div>
-    <div><dt>HA</dt><dd>{display(context.ha)}</dd></div><div><dt>MPLS / L2L</dt><dd>{display(context.mpls)}</dd></div>
-    <div><dt>Licence UTM</dt><dd>{display(licenseStatus)}</dd></div><div><dt>Fin de licence</dt><dd>{display(license?.expiration_date)}</dd></div>
-    <div><dt>Provenance licence</dt><dd>{display(license?.provenance)}</dd></div><div><dt>Saisie manuelle</dt><dd>{display(license?.manual)}</dd></div>
-    <div><dt>Provenance audit</dt><dd>{display(context.operator_provenance?.source)}</dd></div><div><dt>Analyste</dt><dd>{display(context.operator_provenance?.operator)}</dd></div><div><dt>Méthode</dt><dd>{display(context.operator_provenance?.method)}</dd></div>
   </dl></section>
 }
 
@@ -129,35 +138,17 @@ function EquipmentInventorySummary({ equipment }: { equipment: EquipmentInventor
 
 function formatEvidence(item: EvidenceValue): string {
   if (typeof item === 'string') return item
-  const details = [
-    item.section,
-    item.entry,
-    item.directive,
-    item.tokens?.join(' '),
-    item.line !== null && item.line !== undefined ? `ligne ${item.line}` : null,
-    item.certainty,
-    item.defaulted ? 'valeur par défaut' : null,
-  ].filter(Boolean)
+  const details = [item.section, item.entry, item.directive, item.tokens?.join(' '), item.line !== null && item.line !== undefined ? `ligne ${item.line}` : null, item.certainty, item.defaulted ? 'valeur par défaut' : null].filter(Boolean)
   return details.join(' · ') || 'Preuve structurée'
 }
 function evidenceKey(item: EvidenceItem): string {
-  return JSON.stringify([
-    item.section,
-    item.entry,
-    item.directive,
-    item.tokens,
-    item.line,
-    item.certainty,
-    item.defaulted,
-  ])
+  return JSON.stringify([item.section, item.entry, item.directive, item.tokens, item.line, item.certainty, item.defaulted])
 }
 function Evidence({ finding }: { finding: Finding }) {
   const [allEvidence, setAllEvidence] = useState(false)
   const structuredItems = finding.evidence_items ?? []
   const structuredKeys = new Set(structuredItems.map(evidenceKey))
-  const legacyValues = (finding.evidence ?? [])
-    .filter((item) => typeof item === 'string' || !structuredKeys.has(evidenceKey(item)))
-    .map(formatEvidence)
+  const legacyValues = (finding.evidence ?? []).filter((item) => typeof item === 'string' || !structuredKeys.has(evidenceKey(item))).map(formatEvidence)
   const values = [...structuredItems.map(formatEvidence), ...legacyValues]
   const shown = allEvidence ? values : values.slice(0, 3)
   if (values.length) return <><ul className="detail-list">{shown.map((item, index) => <li key={index}>{item}</li>)}</ul>{values.length > 3 && <button type="button" className="text-button" aria-expanded={allEvidence} onClick={() => setAllEvidence(!allEvidence)}>{allEvidence ? 'Réduire les preuves' : `Afficher les ${values.length} preuves`}</button>}</>
@@ -171,15 +162,15 @@ function FindingCard({ finding }: { finding: Finding }) {
   return <article className="finding-card" data-testid="finding-card">
     <div className="finding-top"><span className={`status status-${finding.status.toLowerCase()}`}>{finding.status}</span><span className="severity">{display(finding.severity)}</span></div>
     <p className="control-id">{finding.control_id}</p><h3>{finding.title}</h3>
-    <div className="compact-meta"><span>{objects.length} objet{objects.length > 1 ? 's' : ''} affecté{objects.length > 1 ? 's' : ''}</span><span>{objects[0]?.object_type ?? 'aucun type'}</span><span>{domainOf(finding)}</span></div>
+    <p className="finding-domain">{domainOf(finding)}</p>
     <p className="message">{finding.message}</p><p className="risk-line"><strong>Risque :</strong> {riskSummary(finding.risk)}</p>
     <button className="details-button" type="button" aria-expanded={open} aria-controls={`details-${finding.control_id}`} onClick={() => setOpen(!open)}>{open ? 'Masquer les détails' : 'Voir les détails'}</button>
     {open && <div id={`details-${finding.control_id}`} className="finding-details">
-      <dl><div><dt>Catégorie</dt><dd>{display(finding.category)}</dd></div><div><dt>Priorité</dt><dd>{display(finding.priority)}</dd></div><div><dt>Applicabilité</dt><dd>{display(finding.applicability)}</dd></div><div><dt>Approbation client</dt><dd>{display(finding.customer_approval)}</dd></div></dl>
+      <dl><div><dt>Contrôle</dt><dd>{display(finding.control_id)}</dd></div><div><dt>Catégorie</dt><dd>{display(finding.category)}</dd></div><div><dt>Priorité</dt><dd>{display(finding.priority)}</dd></div><div><dt>Applicabilité</dt><dd>{display(finding.applicability)}</dd></div><div><dt>Approbation client</dt><dd>{display(finding.customer_approval)}</dd></div></dl>
       <h4>Preuves</h4><Evidence finding={finding} />
       <h4>Objets affectés</h4>{shown.length ? <ul className="detail-list">{shown.map((item, index) => <li key={`${item.object_type}-${item.name}-${index}`}>{item.object_type ?? 'unknown'} · {item.name}</li>)}</ul> : <p>Non renseigné</p>}
       {objects.length > 3 && <button type="button" className="text-button" aria-expanded={allObjects} onClick={() => setAllObjects(!allObjects)}>{allObjects ? 'Réduire la liste' : `Afficher les ${objects.length} éléments`}</button>}
-      {typeof finding.risk === 'object' && finding.risk && <><h4>Analyse du risque</h4><dl><div><dt>Impact</dt><dd>{display(finding.risk.impact)}</dd></div><div><dt>Probabilité</dt><dd>{display(finding.risk.likelihood)}</dd></div><div><dt>Traitement</dt><dd>{display(finding.risk.treatment)}</dd></div></dl></>}
+      {typeof finding.risk === 'object' && finding.risk && <><h4>Analyse du risque</h4><dl><div><dt>Impact</dt><dd>{display(finding.risk.impact)}</dd></div><div><dt>Vraisemblance</dt><dd>{display(finding.risk.likelihood)}</dd></div><div><dt>Traitement</dt><dd>{display(finding.risk.treatment)}</dd></div></dl></>}
       <h4>Recommandation</h4><p>{display(finding.recommendation)}</p><h4>Remédiation</h4><p>{display(finding.remediation)}</p>
     </div>}
   </article>
@@ -209,13 +200,9 @@ function App() {
   const [uptime, setUptime] = useState('')
   const [unmatchedRules, setUnmatchedRules] = useState('')
   const [operatorComment, setOperatorComment] = useState('')
-  const [operator, setOperator] = useState('')
   const [ha, setHa] = useState<TriState>('')
   const [mpls, setMpls] = useState<TriState>('')
   const [utmLicense, setUtmLicense] = useState<TriState>('')
-  const [utmLicenseExpiration, setUtmLicenseExpiration] = useState('')
-  const [utmLicenseProvenance, setUtmLicenseProvenance] = useState('')
-  const [utmLicenseManual, setUtmLicenseManual] = useState(true)
   const [selectedWans, setSelectedWans] = useState<string[]>([])
   const [selectedWanKinds, setSelectedWanKinds] = useState<Record<string, WanSelectionKind>>({})
   const [automaticWan, setAutomaticWan] = useState(false)
@@ -238,10 +225,9 @@ function App() {
 
   async function selectFile(selected: File | null) {
     const generation = ++requestGeneration.current
-    stopProgress()
-    setProgress(0)
+    stopProgress(); setProgress(0)
     setFile(selected); setPreview(null); setReport(null); setError(null); setSelectedWans([]); setSelectedWanKinds({}); setAutomaticWan(false); setLoading(false); setStep('upload')
-    setClient(''); setSite(''); setSerialNumber(''); setUptime(''); setUnmatchedRules(''); setOperatorComment(''); setOperator(''); setHa(''); setMpls(''); setUtmLicense(''); setUtmLicenseExpiration(''); setUtmLicenseProvenance(''); setUtmLicenseManual(true)
+    setClient(''); setSite(''); setSerialNumber(''); setUptime(''); setUnmatchedRules(''); setOperatorComment(''); setHa(''); setMpls(''); setUtmLicense('')
     if (!selected) return
     setPreviewing(true)
     const form = new FormData(); form.append('configuration', selected)
@@ -250,35 +236,24 @@ function App() {
       if (!response.ok) throw await responseError(response, 'Inspection')
       const inspected = (await response.json()) as Preview
       if (generation !== requestGeneration.current) return
-      setPreview(inspected)
-      setSerialNumber(inspected.serial_number ?? '')
+      setPreview(inspected); setSerialNumber(inspected.serial_number ?? '')
       const defaults = buildWanOptions(inspected).filter((option) => option.kinds.includes('Interface WAN'))
-      setSelectedWans(defaults.map((option) => option.name))
-      setSelectedWanKinds(Object.fromEntries(defaults.map((option) => [option.name, option.defaultKind])))
-      setAutomaticWan(false)
-      setStep('context')
+      setSelectedWans(defaults.map((option) => option.name)); setSelectedWanKinds(Object.fromEntries(defaults.map((option) => [option.name, option.defaultKind]))); setAutomaticWan(false); setStep('context')
     } catch (reason) { if (generation === requestGeneration.current) setError(reason instanceof Error ? reason.message : 'Inspection impossible') }
     finally { if (generation === requestGeneration.current) setPreviewing(false) }
   }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!file || !preview) return
     const generation = requestGeneration.current
     setLoading(true); setError(null); setReport(null); setStep('audit'); startProgress()
     const form = new FormData(); form.append('configuration', file)
     if (!automaticWan) selectedWans.forEach((wan) => form.append('selected_wans', wan))
-    const typedScopes = automaticWan
-      ? [{ name: 'automatic', kind: 'automatic' as WanSelectionKind }]
-      : selectedWans.map((wan) => ({ name: wan, kind: selectedWanKinds[wan] ?? 'interface' as WanSelectionKind }))
+    const typedScopes = automaticWan ? [{ name: 'automatic', kind: 'automatic' as WanSelectionKind }] : selectedWans.map((wan) => ({ name: wan, kind: selectedWanKinds[wan] ?? 'interface' as WanSelectionKind }))
     form.append('selected_wan_scopes', JSON.stringify(typedScopes))
-    if (client) form.append('client', client); if (site) form.append('site', site); if (serialNumber) form.append('serial_number', serialNumber); if (uptime) form.append('uptime', uptime); if (unmatchedRules) form.append('unmatched_rules', unmatchedRules); if (operatorComment) form.append('context_comment', operatorComment); if (operator) form.append('operator', operator)
+    if (client) form.append('client', client); if (site) form.append('site', site); if (serialNumber) form.append('serial_number', serialNumber); if (uptime) form.append('uptime', uptime); if (unmatchedRules) form.append('unmatched_rules', unmatchedRules); if (operatorComment) form.append('context_comment', operatorComment)
     if (ha) form.append('ha_context', ha); if (mpls) form.append('mpls_context', mpls)
-    if (utmLicense) {
-      form.append('utm_license', utmLicense)
-      form.append('utm_license_status', utmLicense === 'true' ? 'active' : 'inactive')
-      form.append('utm_license_manual', String(utmLicenseManual))
-      if (utmLicenseExpiration) form.append('utm_license_expiration', utmLicenseExpiration)
-      if (utmLicenseProvenance) form.append('utm_license_provenance', utmLicenseProvenance)
-    }
+    if (utmLicense) { form.append('utm_license', utmLicense); form.append('utm_license_status', utmLicense === 'true' ? 'active' : 'inactive'); form.append('utm_license_manual', 'true') }
     form.append('context_source', 'operator-form'); form.append('context_method', 'manual-selection')
     try {
       const response = await fetch('/api/audits', { method: 'POST', body: form })
@@ -288,18 +263,20 @@ function App() {
     } catch (reason) { if (generation === requestGeneration.current) { stopProgress(); setProgress(0); setError(reason instanceof Error ? reason.message : 'Audit impossible'); setStep('options') } }
     finally { if (generation === requestGeneration.current) setLoading(false) }
   }
+
   function resetAudit() {
-    requestGeneration.current += 1
-    stopProgress(); setProgress(0)
+    requestGeneration.current += 1; stopProgress(); setProgress(0)
     setStep('upload'); setFile(null); setPreview(null); setReport(null); setSelectedWans([]); setSelectedWanKinds({}); setAutomaticWan(false); setError(null); setLoading(false); setPreviewing(false)
-    setClient(''); setSite(''); setSerialNumber(''); setUptime(''); setUnmatchedRules(''); setOperatorComment(''); setOperator(''); setHa(''); setMpls(''); setUtmLicense(''); setUtmLicenseExpiration(''); setUtmLicenseProvenance(''); setUtmLicenseManual(true); setFilter('ALL')
+    setClient(''); setSite(''); setSerialNumber(''); setUptime(''); setUnmatchedRules(''); setOperatorComment(''); setHa(''); setMpls(''); setUtmLicense(''); setFilter('ALL')
     if (fileInput.current) fileInput.current.value = ''
   }
+
   const ordered = useMemo(() => [...(report?.findings ?? [])].sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]), [report])
   const visible = filter === 'ALL' ? ordered : ordered.filter((finding) => finding.status === filter)
   const count = (status: AuditStatus) => ordered.filter((finding) => finding.status === status).length
   const severityCount = (severity: string) => ordered.filter((finding) => finding.severity?.toLowerCase() === severity).length
   const wanOptions = useMemo(() => preview ? buildWanOptions(preview) : [], [preview])
+  const wanGroups = useMemo(() => WAN_GROUPS.map((group) => ({ ...group, options: wanOptions.filter((option) => option.defaultKind === group.kind) })).filter((group) => group.options.length > 0), [wanOptions])
 
   return <div className="app-shell">
     <header className="hero"><img className="hero-image" src={pantherImage} alt="Panthère Vysion" /><div className="hero-content"><p className="eyebrow">SNS Security · usage interne</p><h1>Vysion <span>{VYSION_VERSION}</span></h1><p>Audit de configuration FortiGate</p></div></header>
@@ -308,26 +285,34 @@ function App() {
       <input ref={fileInput} className="visually-hidden" aria-label="Configuration FortiGate" id="configuration" name="configuration" type="file" accept=".conf,.txt,text/plain" onChange={(event) => void selectFile(event.target.files?.[0] ?? null)} />
       {step === 'upload' && <section className="panel upload-panel"><div><p className="section-kicker">Étape 1</p><h2>Inspecter une configuration</h2><p>Le fichier est analysé en mémoire, sans persistance lors de la prévisualisation.</p></div><div className="upload-stack"><label className="upload-control" htmlFor="configuration"><strong>{previewing ? 'Inspection en cours…' : 'Sélectionner un fichier .conf'}</strong><span>{file?.name ?? 'Aucun fichier sélectionné'}</span></label>{file && preview && <button className="primary resume-button" type="button" onClick={() => setStep('context')}>Continuer vers le contexte</button>}</div></section>}
       {error && <p role="alert" className="error">{error}</p>}
+
       {preview && step === 'context' && <form onSubmit={submit} className="workflow">
         <section className="panel equipment" aria-label="Informations équipement"><div className="section-heading"><div><p className="section-kicker">Étape 2</p><h2>Équipement et contexte</h2></div><span className="safe-badge">Preview sûre</span></div>
-          <dl className="device-grid"><div><dt>Hostname</dt><dd>{display(preview.hostname)}</dd></div><div><dt>Modèle</dt><dd>{display(preview.model)}</dd></div><div><dt>Version</dt><dd>FortiOS {display(preview.firmware_version)}</dd></div></dl>
-          <details className="technical-details"><summary>Détails techniques inspectés</summary><dl><div><dt>Interfaces détectées</dt><dd>{preview.interfaces.length}</dd></div><div><dt>Zones</dt><dd>{preview.zones.map((zone) => zone.name).join(', ') || 'Aucune'}</dd></div><div><dt>SD-WAN</dt><dd>{preview.sdwan_zones.map((zone) => zone.name).join(', ') || 'Non détecté'}</dd></div><div><dt>Numéro de série détecté</dt><dd>{display(preview.serial_number)}</dd></div></dl></details>
-          <div className="context-form"><label>Client<input value={client} onChange={(event) => setClient(event.target.value)} placeholder="Non renseigné" /></label><label>Site<input value={site} onChange={(event) => setSite(event.target.value)} placeholder="Non renseigné" /></label><label>Numéro de série<input value={serialNumber} onChange={(event) => setSerialNumber(event.target.value)} placeholder="Saisi manuellement si absent" /></label><label>Uptime<input value={uptime} onChange={(event) => setUptime(event.target.value)} placeholder="Non renseigné" /></label><label>Règles sans match<input aria-label="Règles sans match" type="number" min={0} step={1} value={unmatchedRules} onChange={(event) => setUnmatchedRules(event.target.value)} placeholder="Optionnel — Hit Count ≤ 0" /><small>Observation opérateur issue des statistiques runtime, absente du backup.</small></label><label>Commentaire contexte<textarea aria-label="Commentaire contexte" rows={3} value={operatorComment} onChange={(event) => setOperatorComment(event.target.value)} placeholder="Contexte HA, MPLS/L2L, licence ou réserve métier…" /></label><label>Opérateur<input value={operator} onChange={(event) => setOperator(event.target.value)} placeholder="Opérateur télécom" /></label><TriStateField label="HA" value={ha} onChange={setHa} /><TriStateField label="MPLS" value={mpls} onChange={setMpls} /><TriStateField label="Licence UTM" value={utmLicense} onChange={setUtmLicense} /><label>Date fin licence UTM<input aria-label="Date fin licence UTM" type="date" value={utmLicenseExpiration} onChange={(event) => setUtmLicenseExpiration(event.target.value)} /></label><label>Provenance licence UTM<input aria-label="Provenance licence UTM" value={utmLicenseProvenance} onChange={(event) => setUtmLicenseProvenance(event.target.value)} placeholder="FortiManager, portail, manuel…" /></label><label className="checkbox-field"><input type="checkbox" checked={utmLicenseManual} onChange={(event) => setUtmLicenseManual(event.target.checked)} />Saisie manuelle de la licence</label></div>
+          <dl className="device-grid"><div><dt>Hostname</dt><dd>{display(preview.hostname)}</dd></div><div><dt>Modèle</dt><dd>{display(preview.model)}</dd></div><div><dt>Version</dt><dd>FortiOS {display(preview.firmware_version)}</dd></div><div><dt>Numéro de série détecté</dt><dd>{display(preview.serial_number)}</dd></div></dl>
+          <details className="technical-details"><summary>Détails techniques inspectés</summary><dl><div><dt>Interfaces détectées</dt><dd>{preview.interfaces.length}</dd></div><div><dt>Zones</dt><dd>{preview.zones.map((zone) => zone.name).join(', ') || 'Aucune'}</dd></div><div><dt>SD-WAN</dt><dd>{preview.sdwan_zones.map((zone) => zone.name).join(', ') || 'Non détecté'}</dd></div><div><dt>Relations WAN</dt><dd>{preview.wan_relations?.map((relation) => `${relation.interface} → ${relation.zone}`).join(', ') || 'Non renseignées'}</dd></div></dl></details>
+          <div className="context-form">
+            <div className="context-primary"><label>Client<input value={client} onChange={(event) => setClient(event.target.value)} placeholder="Nom du client" /></label><label>Site<input value={site} onChange={(event) => setSite(event.target.value)} placeholder="Nom du site" /></label><label>Numéro de série<input value={serialNumber} onChange={(event) => setSerialNumber(event.target.value)} placeholder="Saisi manuellement si absent" /></label></div>
+            <fieldset className="confirmation-panel"><legend>Contexte à confirmer</legend><p className="field-hint">Cochez uniquement les éléments confirmés. Une case non cochée reste non renseignée.</p><div className="confirmation-grid"><ConfirmationField label="HA présent" value={ha} onChange={setHa} description="HA non renseigné" /><ConfirmationField label="MPLS / L2L présent" value={mpls} onChange={setMpls} description="MPLS / L2L non renseigné" /><ConfirmationField label="Licence UTM active" value={utmLicense} onChange={setUtmLicense} description="Licence UTM non renseignée" /></div></fieldset>
+            <details className="optional-context"><summary>Informations complémentaires (optionnelles)</summary><div className="context-advanced"><label>Uptime<input value={uptime} onChange={(event) => setUptime(event.target.value)} placeholder="Non renseigné" /></label><label>Règles sans match<input aria-label="Règles sans match" type="number" min={0} step={1} value={unmatchedRules} onChange={(event) => setUnmatchedRules(event.target.value)} placeholder="Optionnel — Hit Count ≤ 0" /><small>Observation issue des statistiques runtime, absente du backup.</small></label><label className="wide-field">Commentaire contexte<textarea aria-label="Commentaire contexte" rows={3} value={operatorComment} onChange={(event) => setOperatorComment(event.target.value)} placeholder="Contexte ou réserve métier…" /></label></div></details>
+          </div>
           <div className="actions guided-actions"><button className="secondary" type="button" onClick={() => setStep('upload')}>Retour à l’upload</button><button className="primary" type="button" onClick={() => setStep('wan')}>Continuer vers la sélection WAN</button></div>
         </section>
       </form>}
-      {preview && step === 'wan' && <section className="panel workflow" aria-label="Sélection WAN"><div className="section-heading"><div><p className="section-kicker">Étape 3</p><h2>Sélection WAN</h2></div><span className="safe-badge">Options envoyables</span></div><p className="intro">Sélectionnez une interface, une zone ou un périmètre SD-WAN. La relation Interface → Zone → Flux → Politique reste conservée dans le rapport.</p>
-        <fieldset className="wan-selection"><legend>Options WAN envoyables</legend><div className="automatic-selection"><button type="button" className={automaticWan ? 'primary' : 'secondary'} aria-pressed={automaticWan} onClick={() => { const next = !automaticWan; setAutomaticWan(next); if (next) { setSelectedWans([]); setSelectedWanKinds({}) } }}>{automaticWan ? 'Association automatique activée' : 'Sélectionner automatiquement les WAN détectées'}</button><small>Les interfaces WAN et leurs zones associées sont résolues côté serveur.</small></div><div className="wan-grid">{wanOptions.map((option) => <label key={`${option.name}:${option.scopes.join('|')}`}><input aria-label={`WAN ${option.name}`} type="checkbox" checked={!automaticWan && selectedWans.includes(option.name)} onChange={() => { setAutomaticWan(false); setSelectedWans((current) => current.includes(option.name) ? current.filter((name) => name !== option.name) : [...current, option.name]); setSelectedWanKinds((current) => { const next = { ...current }; if (selectedWans.includes(option.name)) delete next[option.name]; else next[option.name] = option.defaultKind; return next }) }} /><span><strong>{option.name}</strong><small>{option.kinds.join(' · ')}{option.interfaces.length ? ` · ${option.interfaces.join(', ')}` : ''}</small>{option.scopes.length > 1 && <select aria-label={`Type WAN ${option.name}`} value={selectedWanKinds[option.name] ?? option.defaultKind} onChange={(event) => { setAutomaticWan(false); setSelectedWanKinds((current) => ({ ...current, [option.name]: event.target.value as WanSelectionKind })) }}><option value="interface">Interface</option><option value="zone">Zone</option><option value="sdwan">SD-WAN</option></select>}</span></label>)}</div>{wanOptions.length === 0 && <p className="empty-state">Aucune option nommée et envoyable n’a été fournie par l’inspection.</p>}</fieldset>
+
+      {preview && step === 'wan' && <section className="panel workflow" aria-label="Sélection WAN"><div className="section-heading"><div><p className="section-kicker">Étape 3</p><h2>Sélection WAN</h2></div><span className="safe-badge">Interfaces · zones · SD-WAN</span></div><p className="intro">Choisissez le périmètre à auditer : une interface, une zone ou une zone SD-WAN. Les interfaces membres sont indiquées sous chaque regroupement.</p>
+        <fieldset className="wan-selection"><legend>Périmètre réseau à auditer</legend><div className="automatic-selection"><button type="button" className={automaticWan ? 'primary' : 'secondary'} aria-pressed={automaticWan} onClick={() => { const next = !automaticWan; setAutomaticWan(next); if (next) { setSelectedWans([]); setSelectedWanKinds({}) } }}>{automaticWan ? 'Association automatique activée' : 'Sélectionner automatiquement les WAN détectées'}</button><small>Le serveur résout ensuite les relations interface → zone → flux.</small></div><div className="wan-groups">{wanGroups.map((group) => <fieldset className="wan-group" aria-label={group.label} key={group.kind}><legend>{group.label}</legend><p>{group.description}</p><div className="wan-grid">{group.options.map((option) => { const selected = !automaticWan && selectedWans.includes(option.name); return <div className={`wan-option${selected ? ' is-selected' : ''}`} key={`${option.name}:${option.scopes.join('|')}`}><input id={`wan-${group.kind}-${option.name}`} aria-label={`WAN ${option.name}`} type="checkbox" checked={selected} onChange={() => { setAutomaticWan(false); setSelectedWans((current) => current.includes(option.name) ? current.filter((name) => name !== option.name) : [...current, option.name]); setSelectedWanKinds((current) => { const next = { ...current }; if (selected) delete next[option.name]; else next[option.name] = option.defaultKind; return next }) }} /><label htmlFor={`wan-${group.kind}-${option.name}`}><strong>{option.name}</strong><small>{option.kinds.join(' · ')}</small>{option.interfaces.length > 0 && <span className="wan-members">Membres : {option.interfaces.join(', ')}</span>}</label>{option.scopes.length > 1 && <label className="wan-type">Type sélectionné<select aria-label={`Type WAN ${option.name}`} value={selectedWanKinds[option.name] ?? option.defaultKind} onChange={(event) => { setAutomaticWan(false); setSelectedWanKinds((current) => ({ ...current, [option.name]: event.target.value as WanSelectionKind })) }}><option value="interface">Interface</option><option value="zone">Zone</option><option value="sdwan">SD-WAN</option></select></label>}</div> })}</div></fieldset>)}</div>{wanOptions.length === 0 && <p className="empty-state">Aucune option nommée et envoyable n’a été fournie par l’inspection.</p>}</fieldset>
         <div className="actions"><button className="secondary" type="button" onClick={() => setStep('context')}>Retour au contexte</button><button className="primary" type="button" onClick={() => setStep('options')}>Continuer vers les options d’audit</button></div>
       </section>}
-      {preview && step === 'options' && <form onSubmit={submit} className="workflow"><section className="panel" aria-label="Options d’audit"><div className="section-heading"><div><p className="section-kicker">Étape 4</p><h2>Options d’audit</h2></div><span className="safe-badge">Contexte prêt</span></div><p className="intro">Relisez les informations opérateur avant de lancer l’audit. Les valeurs « Non renseigné » restent inconnues et ne sont pas envoyées.</p><dl className="option-review"><div><dt>WAN sélectionnées</dt><dd>{display(automaticWan ? 'Association automatique' : selectedWans.join(', '))}</dd></div><div><dt>Client / site</dt><dd>{display([client, site].filter(Boolean).join(' · '))}</dd></div><div><dt>HA</dt><dd>{display(ha === '' ? null : ha === 'true')}</dd></div><div><dt>MPLS / L2L</dt><dd>{display(mpls === '' ? null : mpls === 'true')}</dd></div><div><dt>Licence UTM</dt><dd>{display(utmLicense === '' ? null : utmLicense === 'true' ? 'active' : 'inactive')} · {display(utmLicenseExpiration)}</dd></div><div><dt>Provenance</dt><dd>{display(utmLicenseProvenance || 'operator-form · manual-selection')}</dd></div></dl><div className="actions"><button className="secondary" type="button" onClick={() => setStep('wan')}>Retour à la sélection WAN</button><button className="primary" type="submit" disabled={loading}>Lancer l’audit</button></div></section></form>}
+
+      {preview && step === 'options' && <form onSubmit={submit} className="workflow"><section className="panel" aria-label="Options d’audit"><div className="section-heading"><div><p className="section-kicker">Étape 4</p><h2>Options d’audit</h2></div><span className="safe-badge">Contexte prêt</span></div><p className="intro">Vérifiez les choix essentiels avant de lancer l’audit. Les éléments non renseignés restent inconnus et ne sont pas envoyés.</p><dl className="option-review"><div><dt>WAN sélectionnées</dt><dd>{display(automaticWan ? 'Association automatique' : selectedWans.join(', '))}</dd></div><div><dt>Client / site</dt><dd>{display([client, site].filter(Boolean).join(' · '))}</dd></div><div><dt>HA</dt><dd>{display(ha === '' ? null : ha === 'true')}</dd></div><div><dt>MPLS / L2L</dt><dd>{display(mpls === '' ? null : mpls === 'true')}</dd></div><div><dt>Licence UTM</dt><dd>{display(utmLicense === '' ? null : utmLicense === 'true' ? 'active' : 'inactive')}</dd></div></dl><div className="actions"><button className="secondary" type="button" onClick={() => setStep('wan')}>Retour à la sélection WAN</button><button className="primary" type="submit" disabled={loading}>Lancer l’audit</button></div></section></form>}
+
       {preview && step === 'audit' && <section className="panel audit-panel" aria-live="polite"><p className="section-kicker">Étape 5</p><h2>Audit en cours</h2><p role="status">Audit en cours : analyse de la configuration et génération du rapport…</p><div className="progress-container"><div className="progress-track" role="progressbar" aria-label="Progression de l’audit" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-valuetext={`${progress}%`}><span className="progress-fill" style={{ width: `${progress}%` }} /></div><p className="progress-text" aria-live="polite">{progress}%</p></div></section>}
-      {report && step === 'results' && <section className="results" aria-live="polite"><div className="results-header"><div><p className="section-kicker">Étape 6 · Rapport {report.report_id.slice(0, 8)}</p><h2>Synthèse et résultats</h2><p>FortiGuard : <strong>{report.fortiguard.status}</strong>{report.schema_version ? ` · Schéma ${report.schema_version}` : ''}</p></div><div className="download-links" aria-label="Téléchargements du rapport"><a href={`/api/reports/${report.report_id}.json`}>JSON</a><a href={`/api/reports/${report.report_id}.docx`}>DOCX</a><a href={`/api/reports/${report.report_id}.xlsx`}>XLSX</a></div></div>
-        {report.context && <ContextSummary context={report.context} />}
-        {report.equipment && <EquipmentInventorySummary equipment={report.equipment} />}
-        <div className="summary-layout"><div className="stats" aria-label="Synthèse des statuts"><Stat label="TOTAL" value={ordered.length} /><Stat label="FAIL" value={count('FAIL')} tone="fail" /><Stat label="ERROR" value={count('ERROR')} tone="fail" /><Stat label="UNKNOWN" value={count('UNKNOWN')} tone="unknown" /><Stat label="PASS" value={count('PASS')} tone="pass" /><Stat label="NOT_APPLICABLE" value={count('NOT_APPLICABLE')} tone="na" /></div><div className="stats severity-stats" aria-label="Synthèse des sévérités"><Stat label="Critical" value={severityCount('critical')} /><Stat label="High" value={severityCount('high')} /><Stat label="Medium" value={severityCount('medium')} /><Stat label="Low" value={severityCount('low')} /><Stat label="Info" value={severityCount('info')} /></div></div>
-        <div className="domain-summary" aria-label="Synthèse par domaine">{DOMAIN_ORDER.map((domain) => { const items = ordered.filter((finding) => domainOf(finding) === domain); return <div key={domain}><strong>{domain}</strong><span>{items.length} contrôle{items.length > 1 ? 's' : ''}</span><small>{items.length ? items.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])[0].status : '—'}</small></div> })}</div>
-        <div className="filters" aria-label="Filtres des résultats">{(['ALL', 'FAIL', 'ERROR', 'UNKNOWN', 'PASS', 'NOT_APPLICABLE'] as Filter[]).map((item) => <button type="button" key={item} className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === 'ALL' ? 'Tous' : item}</button>)}</div>
+
+      {report && step === 'results' && <section className="results" aria-live="polite"><div className="results-header"><div><p className="section-kicker">Étape 6 · Rapport {report.report_id.slice(0, 8)}</p><h2>Synthèse et résultats</h2><p className="report-meta">FortiGuard : <strong>{report.fortiguard.status}</strong>{report.schema_version ? ` · Schéma ${report.schema_version}` : ''}</p></div><div className="download-links" aria-label="Téléchargements du rapport"><a href={`/api/reports/${report.report_id}.json`}>JSON</a><a href={`/api/reports/${report.report_id}.docx`}>DOCX</a><a href={`/api/reports/${report.report_id}.xlsx`}>XLSX</a></div></div>
+        <section className="executive-summary" aria-label="Synthèse de l’audit"><div className="executive-lead"><span className="section-kicker">Lecture rapide</span><strong>{count('FAIL') + count('ERROR')} point{count('FAIL') + count('ERROR') > 1 ? 's' : ''} à traiter</strong><p>{count('UNKNOWN')} point{count('UNKNOWN') > 1 ? 's' : ''} reste{count('UNKNOWN') > 1 ? 'nt' : ''} à confirmer. Les résultats détaillés sont regroupés par domaine ci-dessous.</p></div><div className="stats" aria-label="Synthèse des statuts"><Stat label="TOTAL" value={ordered.length} /><Stat label="FAIL" value={count('FAIL')} tone="fail" /><Stat label="ERROR" value={count('ERROR')} tone="fail" /><Stat label="UNKNOWN" value={count('UNKNOWN')} tone="unknown" /><Stat label="PASS" value={count('PASS')} tone="pass" /><Stat label="N-A" value={count('NOT_APPLICABLE')} tone="na" /></div></section>
+        <details className="report-details"><summary>Contexte et détails techniques</summary><div className="report-details-body">{report.context && <ContextSummary context={report.context} />}{report.equipment && <EquipmentInventorySummary equipment={report.equipment} />}</div></details>
+        <details className="secondary-summary"><summary>Répartition par sévérité et par domaine</summary><div className="summary-layout"><div className="stats severity-stats" aria-label="Synthèse des sévérités"><Stat label="Critical" value={severityCount('critical')} /><Stat label="High" value={severityCount('high')} /><Stat label="Medium" value={severityCount('medium')} /><Stat label="Low" value={severityCount('low')} /><Stat label="Info" value={severityCount('info')} /></div><div className="domain-summary" aria-label="Synthèse par domaine">{DOMAIN_ORDER.map((domain) => { const items = ordered.filter((finding) => domainOf(finding) === domain); return <div key={domain}><strong>{domain}</strong><span>{items.length} contrôle{items.length > 1 ? 's' : ''}</span><small>{items.length ? items.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status])[0].status : '—'}</small></div> })}</div></div></details>
+        <div className="filters" aria-label="Filtres des résultats">{(['ALL', 'FAIL', 'ERROR', 'UNKNOWN', 'PASS', 'NOT_APPLICABLE'] as Filter[]).map((item) => <button type="button" key={item} className={filter === item ? 'active' : ''} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === 'ALL' ? 'Tous' : item === 'NOT_APPLICABLE' ? 'N-A' : item}</button>)}</div>
         <div className="finding-grid">{visible.map((finding) => <FindingCard key={finding.control_id} finding={finding} />)}</div>
         <div className="results-actions"><button className="secondary" type="button" onClick={resetAudit}>Nouvel audit</button></div>
       </section>}

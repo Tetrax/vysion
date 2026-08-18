@@ -53,7 +53,7 @@ describe('Vysion guided workflow', () => {
     expect(screen.getByText('internet')).toBeInTheDocument()
   })
 
-  it('keeps tri-state context unknown and sends explicit operator provenance', async () => {
+  it('uses simple confirmation checkboxes and omits unconfirmed context', async () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -69,9 +69,10 @@ describe('Vysion guided workflow', () => {
     await user.upload(screen.getByLabelText('Configuration FortiGate'), new File(['safe'], 'safe.conf'))
     await screen.findByText('lab')
 
-    expect(screen.getByLabelText('HA')).toHaveValue('')
-    await user.selectOptions(screen.getByLabelText('MPLS'), 'false')
-    await user.selectOptions(screen.getByLabelText('Licence UTM'), 'true')
+    expect(screen.getByRole('checkbox', { name: 'HA présent' })).not.toBeChecked()
+    expect(screen.queryByLabelText('Opérateur')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Provenance licence UTM')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('checkbox', { name: 'Licence UTM active' }))
     await user.click(screen.getByRole('button', { name: 'Continuer vers la sélection WAN' }))
     await user.click(screen.getByRole('button', { name: 'Continuer vers les options d’audit' }))
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
@@ -79,10 +80,9 @@ describe('Vysion guided workflow', () => {
     const auditCall = vi.mocked(globalThis.fetch).mock.calls[1]
     const body = (auditCall[1] as RequestInit).body as FormData
     expect(body.has('ha_context')).toBe(false)
-    expect(body.get('mpls_context')).toBe('false')
+    expect(body.has('mpls_context')).toBe(false)
     expect(body.get('utm_license')).toBe('true')
-    expect(body.get('context_source')).toBe('operator-form')
-    expect(body.get('context_method')).toBe('manual-selection')
+    expect(body.get('utm_license_status')).toBe('active')
   })
 
   it('summarizes, groups, orders and filters findings without exposing details', async () => {
@@ -104,6 +104,7 @@ describe('Vysion guided workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Continuer vers les options d’audit' }))
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
 
+    expect(await screen.findByLabelText('Synthèse de l’audit')).toHaveTextContent('1 point à traiter')
     expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('TOTAL5')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Hostnameparsed-fw')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Modèle100F')
@@ -114,7 +115,7 @@ describe('Vysion guided workflow', () => {
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Relations interface → zonewan1 → internet')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Règles firewall12')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Statut inconnu1')
-    expect(screen.getByLabelText('Synthèse des statuts')).toHaveTextContent('NOT_APPLICABLE1')
+    expect(screen.getByLabelText('Synthèse des statuts')).toHaveTextContent('N-A1')
     expect(screen.getByLabelText('Synthèse des sévérités')).toHaveTextContent('Critical1')
     expect(screen.getByLabelText('Synthèse par domaine')).toHaveTextContent('Système')
     expect(screen.getByLabelText('Synthèse par domaine')).toHaveTextContent('Wi-Fi')
@@ -126,6 +127,7 @@ describe('Vysion guided workflow', () => {
     expect(cards[3]).toHaveTextContent('WIFI-PASS')
     expect(cards[4]).toHaveTextContent('UTM-NA')
     expect(screen.queryByText('SECRET DETAIL')).not.toBeInTheDocument()
+    expect(screen.getByText('Contexte et détails techniques').closest('details')).not.toHaveAttribute('open')
     await user.click(screen.getByRole('button', { name: 'FAIL' }))
     expect(screen.getAllByTestId('finding-card')).toHaveLength(1)
   })
@@ -157,7 +159,7 @@ describe('Vysion guided workflow', () => {
     expect(screen.queryByText('system interface · wan1 · allowaccess · ssh')).not.toBeInTheDocument()
   })
 
-  it('preserves error, info, unknown domains, operator and long evidence lists', async () => {
+  it('preserves error, info, unknown domains and long evidence lists', async () => {
     const user = userEvent.setup()
     const evidence = Array.from({ length: 5 }, (_, index) => `preuve-${index + 1}`)
     vi.spyOn(globalThis, 'fetch')
@@ -177,7 +179,7 @@ describe('Vysion guided workflow', () => {
     expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('ERROR1')
     expect(screen.getByLabelText('Synthèse des sévérités')).toHaveTextContent('Info1')
     expect(screen.getByLabelText('Synthèse par domaine')).toHaveTextContent('Autre')
-    expect(screen.getByLabelText('Contexte de l’audit')).toHaveTextContent('analyst')
+    expect(screen.queryByText('analyst')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Voir les détails' }))
     expect(screen.getByText('preuve-3')).toBeInTheDocument()
     expect(screen.queryByText('preuve-4')).not.toBeInTheDocument()
@@ -243,16 +245,16 @@ describe('Vysion guided workflow', () => {
     await screen.findByText('old-device')
     await user.type(screen.getByLabelText('Client'), 'Ancien client')
     await user.type(screen.getByLabelText('Site'), 'Ancien site')
-    await user.selectOptions(screen.getByLabelText('HA'), 'true')
-    await user.selectOptions(screen.getByLabelText('MPLS'), 'false')
-    await user.selectOptions(screen.getByLabelText('Licence UTM'), 'true')
+    await user.click(screen.getByRole('checkbox', { name: 'HA présent' }))
+    await user.click(screen.getByRole('checkbox', { name: 'MPLS / L2L présent' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Licence UTM active' }))
     await user.upload(input, new File(['new'], 'new.conf'))
     await screen.findByText('new-device')
     expect(screen.getByLabelText('Client')).toHaveValue('')
     expect(screen.getByLabelText('Site')).toHaveValue('')
-    expect(screen.getByLabelText('HA')).toHaveValue('')
-    expect(screen.getByLabelText('MPLS')).toHaveValue('')
-    expect(screen.getByLabelText('Licence UTM')).toHaveValue('')
+    expect(screen.getByRole('checkbox', { name: 'HA présent' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'MPLS / L2L présent' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Licence UTM active' })).not.toBeChecked()
   })
 
   it('guides the operator through sequential steps without losing context when going back', async () => {
@@ -310,6 +312,9 @@ describe('Vysion guided workflow', () => {
     await screen.findByText('wan-lab')
     await user.click(screen.getByRole('button', { name: 'Continuer vers la sélection WAN' }))
 
+    expect(screen.getByRole('group', { name: 'Interfaces WAN' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Zones' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'SD-WAN' })).toBeInTheDocument()
     expect(screen.getAllByRole('checkbox')).toHaveLength(3)
     expect(screen.getByLabelText('WAN wan1')).toBeChecked()
     expect(screen.getByLabelText('WAN zone-only')).not.toBeChecked()
