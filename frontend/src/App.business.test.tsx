@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,7 +23,7 @@ describe('Vysion métier v2.2', () => {
     await screen.findByText('client-fw')
 
     expect(screen.getByText('100F')).toBeInTheDocument()
-    expect(screen.getByText('FortiOS 7.4.3')).toBeInTheDocument()
+    expect(screen.getByText('7.4.3')).toBeInTheDocument()
     expect(screen.queryByText('Nombre d’interfaces')).not.toBeInTheDocument()
     expect(screen.getByText('Détails techniques inspectés')).toBeInTheDocument()
   })
@@ -47,7 +47,7 @@ describe('Vysion métier v2.2', () => {
     await user.type(screen.getByLabelText('Client'), 'Client métier')
     await user.type(screen.getByLabelText('Site'), 'Paris-DC1')
     await user.click(screen.getByText('Informations complémentaires (optionnelles)'))
-    await user.type(screen.getByLabelText('Uptime'), '42 days')
+    fireEvent.change(screen.getByLabelText('Uptime'), { target: { value: '2026-08-18' } })
     await user.type(screen.getByLabelText('Règles sans match'), '7')
     await user.type(screen.getByLabelText('Commentaire contexte'), 'HA à confirmer')
     await user.click(screen.getByRole('checkbox', { name: 'HA présent' }))
@@ -61,7 +61,7 @@ describe('Vysion métier v2.2', () => {
     expect(body.get('client')).toBe('Client métier')
     expect(body.get('site')).toBe('Paris-DC1')
     expect(body.get('serial_number')).toBe('FG100')
-    expect(body.get('uptime')).toBe('42 days')
+    expect(body.get('uptime')).toBe('2026-08-18')
     expect(body.get('unmatched_rules')).toBe('7')
     expect(body.get('context_comment')).toBe('HA à confirmer')
     expect(body.has('operator')).toBe(false)

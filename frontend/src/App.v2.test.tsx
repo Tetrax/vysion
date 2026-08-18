@@ -49,7 +49,7 @@ describe('Vysion guided workflow', () => {
     )
     expect(await screen.findByText('preview-lab.example')).toBeInTheDocument()
     expect(screen.getByText('60E')).toBeInTheDocument()
-    expect(screen.getByText('FortiOS 7.2.9')).toBeInTheDocument()
+    expect(screen.getByText('7.2.9')).toBeInTheDocument()
     expect(screen.getByText('internet')).toBeInTheDocument()
   })
 
@@ -104,7 +104,7 @@ describe('Vysion guided workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Continuer vers les options d’audit' }))
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
 
-    expect(await screen.findByLabelText('Synthèse de l’audit')).toHaveTextContent('1 point à traiter')
+    expect(await screen.findByLabelText('Synthèse de l’audit')).toHaveTextContent('Total Checks: 5')
     expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('TOTAL5')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Hostnameparsed-fw')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Modèle100F')
@@ -127,7 +127,7 @@ describe('Vysion guided workflow', () => {
     expect(cards[3]).toHaveTextContent('WIFI-PASS')
     expect(cards[4]).toHaveTextContent('UTM-NA')
     expect(screen.queryByText('SECRET DETAIL')).not.toBeInTheDocument()
-    expect(screen.getByText('Contexte et détails techniques').closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('Détails V2 de l’audit').closest('details')).not.toHaveAttribute('open')
     await user.click(screen.getByRole('button', { name: 'FAIL' }))
     expect(screen.getAllByTestId('finding-card')).toHaveLength(1)
   })
@@ -315,7 +315,7 @@ describe('Vysion guided workflow', () => {
     expect(screen.getByRole('group', { name: 'Interfaces WAN' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Zones' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'SD-WAN' })).toBeInTheDocument()
-    expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+    expect(screen.getAllByRole('checkbox')).toHaveLength(5)
     expect(screen.getByLabelText('WAN wan1')).toBeChecked()
     expect(screen.getByLabelText('WAN zone-only')).not.toBeChecked()
     expect(screen.getByLabelText('WAN sdwan-public')).not.toBeChecked()
@@ -327,7 +327,7 @@ describe('Vysion guided workflow', () => {
     const auditCall = vi.mocked(globalThis.fetch).mock.calls[1]
     const body = (auditCall[1] as RequestInit).body as FormData
     expect(body.getAll('selected_wans')).toEqual(['wan1', 'zone-only', 'sdwan-public'])
-    expect(await screen.findByText(/wan-repo/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Synthèse et résultats' })).toBeInTheDocument()
   })
 
   it('exposes an accessible audit progressbar while the audit request is pending', async () => {
@@ -377,7 +377,7 @@ describe('Vysion guided workflow', () => {
     expect(screen.getByRole('heading', { name: 'Inspecter une configuration' })).toBeInTheDocument()
     expect(screen.getByText('Aucun fichier sélectionné')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Synthèse et résultats' })).not.toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Parcours d’audit' }).querySelector('[aria-current="step"]')).toHaveTextContent('Upload / inspection')
+    expect(screen.queryByRole('navigation', { name: 'Parcours d’audit' })).not.toBeInTheDocument()
   })
 
   it('can resume the inspected file after returning to the upload step', async () => {
@@ -422,6 +422,6 @@ describe('Vysion guided workflow', () => {
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getByRole('img', { name: 'Panthère Vysion' })).toHaveAttribute('src', expect.stringContaining('panther'))
-    expect(screen.getByRole('navigation', { name: 'Parcours d’audit' }).querySelectorAll('[aria-current="step"]')).toHaveLength(1)
+    expect(screen.queryByRole('navigation', { name: 'Parcours d’audit' })).not.toBeInTheDocument()
   })
 })
