@@ -47,8 +47,8 @@ const STEPS: StepDefinition[] = [
   { id: 'results', label: 'Résultats' },
 ]
 const STATUS_ORDER: Record<AuditStatus, number> = { FAIL: 0, ERROR: 0, UNKNOWN: 1, PASS: 2, NOT_APPLICABLE: 3 }
-const DOMAIN_LABELS: Record<string, string> = { system: 'Système', administration: 'Administration / Identity', identity: 'Administration / Identity', iam: 'Administration / Identity', network: 'Réseau', firewall: 'Firewall', vpn: 'VPN', utm: 'UTM' }
-const DOMAIN_ORDER = ['Système', 'Administration / Identity', 'Réseau', 'Firewall', 'VPN', 'UTM', 'Autre']
+const DOMAIN_LABELS: Record<string, string> = { system: 'Système', administration: 'Administration / Identity', identity: 'Administration / Identity', iam: 'Administration / Identity', network: 'Réseau', firewall: 'Firewall', vpn: 'VPN', utm: 'UTM', wifi: 'Wi-Fi' }
+const DOMAIN_ORDER = ['Système', 'Administration / Identity', 'Réseau', 'Firewall', 'VPN', 'UTM', 'Wi-Fi', 'Autre']
 
 function buildWanOptions(preview: Preview): WanOption[] {
   const byName = new Map<string, WanOption>()

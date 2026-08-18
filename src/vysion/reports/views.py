@@ -13,6 +13,7 @@ DOMAIN_LABELS = {
     "firewall": "Firewall",
     "vpn": "VPN",
     "utm": "UTM",
+    "wifi": "Wi-Fi",
 }
 
 

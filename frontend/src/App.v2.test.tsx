@@ -85,6 +85,7 @@ describe('Vysion v2.2.0-dev guided workflow', () => {
       { control_id: 'UTM-NA', title: 'Sans objet', status: 'NOT_APPLICABLE', category: 'utm', severity: 'info', applicability: 'not_applicable', message: 'n/a', affected_objects: [] },
       { control_id: 'FW-UNK', title: 'Incertain', status: 'UNKNOWN', category: 'firewall', severity: 'medium', applicability: 'unknown', message: 'unknown', affected_objects: [] },
       { control_id: 'NET-FAIL', title: 'Violation', status: 'FAIL', category: 'network', severity: 'critical', applicability: 'applicable', message: 'fail', affected_objects: [{ name: 'wan1', object_type: 'interface' }], evidence: ['SECRET DETAIL'] },
+      { control_id: 'WIFI-PASS', title: 'Wi-Fi conforme', status: 'PASS', category: 'wifi', severity: 'low', applicability: 'applicable', message: 'ok', affected_objects: [] },
     ]
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ hostname: 'lab', model: '60E', firmware_version: '7.2.9', interfaces: [], zones: [], sdwan_zones: [] }), { status: 200 }))
@@ -96,18 +97,20 @@ describe('Vysion v2.2.0-dev guided workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Continuer vers les options d’audit' }))
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
 
-    expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('TOTAL4')
+    expect(await screen.findByLabelText('Synthèse des statuts')).toHaveTextContent('TOTAL5')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Règles firewall12')
     expect(screen.getByLabelText('Inventaire de configuration')).toHaveTextContent('Statut inconnu1')
     expect(screen.getByLabelText('Synthèse des statuts')).toHaveTextContent('NOT_APPLICABLE1')
     expect(screen.getByLabelText('Synthèse des sévérités')).toHaveTextContent('Critical1')
     expect(screen.getByLabelText('Synthèse par domaine')).toHaveTextContent('Système')
+    expect(screen.getByLabelText('Synthèse par domaine')).toHaveTextContent('Wi-Fi')
     const cards = screen.getAllByTestId('finding-card')
     expect(cards.map((card) => card.textContent)).toEqual(expect.arrayContaining([expect.stringContaining('NET-FAIL')]))
     expect(cards[0]).toHaveTextContent('NET-FAIL')
     expect(cards[1]).toHaveTextContent('FW-UNK')
     expect(cards[2]).toHaveTextContent('SYS-PASS')
-    expect(cards[3]).toHaveTextContent('UTM-NA')
+    expect(cards[3]).toHaveTextContent('WIFI-PASS')
+    expect(cards[4]).toHaveTextContent('UTM-NA')
     expect(screen.queryByText('SECRET DETAIL')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'FAIL' }))
     expect(screen.getAllByTestId('finding-card')).toHaveLength(1)

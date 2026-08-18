@@ -35,7 +35,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 |---:|---|---|:---:|---|---|
 | 1 | Réseau / firewall | `verifier_vips_extintf_any` | A | `FW-VIP-EXTINTF-ANY-001` | Même détection d’exposition `extintf any`, à rejouer sur fixture V1. |
 | 2 | Réseau / firewall | `verifier_vs_extintf_any` | A | `FW-VSERVER-EXTINTF-ANY-001` | Même détection pour virtual servers. |
-| 3 | Réseau / firewall | `verifier_usage_by_sequence` | C | Nouveau contrôle de séquence/règle | Comptage/ordre historique absent du registre V2. |
+| 3 | Réseau / firewall | `verifier_usage_by_sequence` | A | `FW-BY-SEQUENCE-USAGE-001` | Critères legacy `global-label`, multi-interface ou `any` rejoués structurellement. |
 | 4 | Réseau / objets | `detecter_objets_non_utilises` | A | `CFG-UNUSED-SERVICE-001` | Restitution typed des services réellement orphelins ; la portée est volontairement bornée à la famille service custom/groupe/policy complète. |
 | 5 | Système / administration | `verifier_compte_guest` | A | `IAM-GUEST-ACCOUNT-001` | Absence du compte guest. |
 | 6 | Système / administration | `verifier_compte_admin` | A | `IAM-DEFAULT-ADMIN-001` | Absence du compte administrateur par défaut. |
@@ -69,9 +69,9 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 34 | HA | `verifier_ha_redundance_interfaces` | A | `HA-HEARTBEAT-REDUNDANCY-001` | `hbdev` est projeté avec validation des paires interface/priorité. |
 | 35 | HA | `verifier_ha_override` | A | `HA-OVERRIDE-001` | `disable` ou `enable` avec attente exacte de 30 secondes reproduisent la règle legacy. |
 | 36 | Réseau / firewall | `verifier_ports_deny` | A | `FW-SENSITIVE-PROTOCOL-DENY-001` | Couverture typed du ruleset sensible, y compris deny global `any`→`any` quand LAN/WAN et ports sont certains. |
-| 37 | Réseau | `verifier_utilisation_sdwan` | C | Projection SD-WAN + contrôle d’utilisation | Le parser/projection existe, aucun contrôle V2 enregistré. |
+| 37 | Réseau | `verifier_utilisation_sdwan` | A | `NET-SDWAN-USAGE-001` | Utilisation SD-WAN vérifiée depuis les relations typed et le contexte WAN. |
 | 38 | Réseau / UTM | `verifier_profils_securite_sur_regles` | A | `FW-UTM-PROFILE-BINDING-001` | Liaison des profils utilisés sur les règles. |
-| 39 | UTM | `verifier_mail_filter` | C | Projection mailfilter + contrôle | Aucun équivalent V2. |
+| 39 | UTM | `verifier_mail_filter` | A | `UTM-MAIL-FILTER-USAGE-001` | Usage mailfilter certain reproduit ; mutation/absence incomplète UNKNOWN. |
 | 40 | UTM | `verifier_webfilter_profiles` | A | `UTM-WEBFILTER-001` | Conformité des WebFilter utilisés. |
 | 41 | UTM | `verifier_antivirus_profiles` | A | `UTM-ANTIVIRUS-001` | Conformité des profils Antivirus utilisés. |
 | 42 | UTM | `verifier_dnsfilter_profiles` | A | `UTM-DNSFILTER-001` | Conformité des profils DNS Filter utilisés. |
@@ -87,17 +87,17 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 52 | Reporting / statistiques | `verifier_logs_par_regle` | C | Statistiques de logs par règle | Nécessite données de configuration/runtime séparées. |
 | 53 | Reporting / inventaire | `exporter_utilisateurs_admins` | A | Inventaire administrateurs typé | Feuille Comptes XLSX et JSON canonique, sans secret d'authentification. |
 | 54 | Reporting / statistiques | `compter_regles_activ_ou_desactiv` | A | Statistiques policies | Comptages total/enable/disable/inconnu depuis les policies typées. |
-| 55 | Reporting / statistiques | `collect_schedule_data` | C | Statistiques schedules | Aucun équivalent V2. |
-| 56 | Réseau / firewall | `verifier_ssl_ssh_profiles` | C | Projection SSL/SSH profiles | Aucun contrôle V2 dédié. |
+| 55 | Reporting / statistiques | `collect_schedule_data` | A | `FW-LEGACY-SCHEDULE-INVENTORY-001` | Onetime/recurring/group et compteurs typed à instant opérateur timezone-aware. |
+| 56 | Réseau / firewall | `verifier_ssl_ssh_profiles` | A | `FW-SSL-SSH-PROFILE-001` | Profils utilisés et sous-bloc HTTPS projetés et contrôlés. |
 | 57 | Wi-Fi | `verifier_band_conformite` | A | `WIFI-BAND-001` | Allowlist exacte legacy_v1 sur radios actives. |
 | 58 | Wi-Fi | `verifier_channels_conformite` | A | `WIFI-CHANNELS-001` | Radio 1 exactement 1/6/11, trois tokens. |
 | 59 | Wi-Fi | `verifier_short_guard_interval` | A | `WIFI-SHORT-GUARD-INTERVAL-001` | SGI requis sur radios actives. |
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 52**
+- **A — équivalents identifiés : 57**
 - **B — partiels identifiés : 0**
-- **C — absents identifiés : 7**
+- **C — absents identifiés : 2**
 - Total : **59 / 59**
 - Disposition réellement `MIGRATED` : **57 / 59** (96,6 %)
 
