@@ -382,39 +382,6 @@ def test_all_service_is_not_pass_for_proven_zone_with_missing_interface() -> Non
     assert findings["FW-INTERNET-ALL-SERVICE-001"].status is AuditStatus.UNKNOWN
 
 
-def test_all_service_is_not_pass_for_automatic_scope_with_casefold_interface_collision() -> None:
-    raw = (
-        base_interfaces(include_zone=False)
-        + "config log setting\n    set fwpolicy-implicit-log enable\nend\n"
-        + "config firewall service custom\n"
-        + service_entry("HTTPS", tcp="443")
-        + "end\n"
-        + policy_block(policy_entry(1, source="port1", destination="wan1", services=("HTTPS",)))
-    )
-    configuration = FortiGateParser().parse(raw)
-    duplicate = next(
-        interface for interface in configuration.interfaces if interface.name == "wan1"
-    )
-    configuration = configuration.model_copy(
-        update={
-            "interfaces": configuration.interfaces
-            + (duplicate.model_copy(update={"name": "WAN1"}),)
-        }
-    )
-    context = AuditContext.model_validate(
-        {
-            "wan_selections": [{"name": "automatic", "kind": WanSelectionKind.AUTOMATIC}]
-        }
-    )
-
-    findings = {
-        finding.control_id: finding
-        for finding in AuditEngine(default_registry()).run(configuration, context=context)
-    }
-
-    assert findings["FW-INTERNET-ALL-SERVICE-001"].status is AuditStatus.UNKNOWN
-
-
 def test_all_service_does_not_fail_for_explicit_non_all_accept() -> None:
     raw = (
         base_interfaces()

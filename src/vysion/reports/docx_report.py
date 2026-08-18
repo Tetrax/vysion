@@ -1,300 +1,145 @@
 from io import BytesIO
 
 from docx import Document
-from docx.document import Document as DocumentType
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Inches, Pt, RGBColor
 
-from vysion.audit.models import AuditStatus
+from vysion.audit.models import AffectedObject, EvidenceItem, RiskAssessment
 from vysion.reports.json_report import JsonAuditReport
-from vysion.reports.views import context_rows, display, domain_label, finding_views, status_counts
-
-STATUS_COLORS = {
-    "PASS": "008A4B",
-    "FAIL": "C62828",
-    "UNKNOWN": "B26A00",
-    "NOT_APPLICABLE": "5E6A71",
-    "ERROR": "7B1FA2",
-}
 
 
-def _set_cell_shading(cell, fill: str) -> None:
-    properties = cell._tc.get_or_add_tcPr()
-    shading = properties.find(qn("w:shd"))
-    if shading is None:
-        shading = OxmlElement("w:shd")
-        properties.append(shading)
-    shading.set(qn("w:fill"), fill)
+def _display(value: object) -> str:
+    if value is None or value == "":
+        return "Non renseigné"
+    return str(value)
 
 
-def _set_cell_text(cell, text: object, *, bold: bool = False, color: str | None = None) -> None:
-    cell.text = ""
-    paragraph = cell.paragraphs[0]
-    run = paragraph.add_run(display(text))
-    run.bold = bold
-    if color:
-        run.font.color.rgb = RGBColor.from_string(color)
-    cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-
-
-def _table(document: DocumentType, headers: tuple[str, ...], rows: tuple[tuple[object, ...], ...]):
-    table = document.add_table(rows=1, cols=len(headers))
-    table.style = "Light Shading Accent 1"
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for cell, header in zip(table.rows[0].cells, headers, strict=True):
-        _set_cell_text(cell, header, bold=True, color="FFFFFF")
-        _set_cell_shading(cell, "183B56")
-    for row in rows:
-        cells = table.add_row().cells
-        for cell, value in zip(cells, row, strict=True):
-            _set_cell_text(cell, value)
-    return table
-
-
-def _status_paragraph(document: DocumentType, status: AuditStatus | str) -> None:
-    value = status.value if isinstance(status, AuditStatus) else str(status)
-    paragraph = document.add_paragraph()
-    run = paragraph.add_run(f"Résultat : {value}")
-    run.bold = True
-    run.font.color.rgb = RGBColor.from_string(STATUS_COLORS.get(value, "183B56"))
-
-
-def _configure_document(document: DocumentType, report: JsonAuditReport) -> None:
-    section = document.sections[0]
-    section.top_margin = Inches(0.65)
-    section.bottom_margin = Inches(0.65)
-    section.left_margin = Inches(0.7)
-    section.right_margin = Inches(0.7)
-    normal = document.styles["Normal"]
-    normal.font.name = "Aptos"
-    normal.font.size = Pt(9)
-    document.styles["Title"].font.name = "Aptos Display"
-    document.styles["Title"].font.color.rgb = RGBColor.from_string("183B56")
-    footer = section.footer.paragraphs[0]
-    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.add_run(
-        f"Vysion — rapport confidentiel — {report.report_id}"
-    ).font.size = Pt(8)
-
-
-def _add_cover(document: DocumentType, report: JsonAuditReport) -> None:
-    document.add_paragraph().add_run("VYSION").bold = True
-    title = document.add_paragraph(style="Title")
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title.add_run("Rapport d’audit Vysion")
-    subtitle = document.add_paragraph()
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle.add_run("FortiGate · restitution client et technique").italic = True
-    document.add_paragraph()
-    _table(
-        document,
-        ("Fiche audit", "Valeur"),
-        (
-            ("Client", report.context.client or "Non renseigné"),
-            ("Site", report.context.site or "Non renseigné"),
-            ("Équipement", report.equipment.hostname or "Non renseigné"),
-            ("Modèle", report.equipment.model or "Non renseigné"),
-            (
-                "Numéro de série",
-                report.context.serial_number or report.equipment.serial_number or "Non renseigné",
-            ),
-            ("Version FortiOS", report.equipment.firmware_version or "Non renseigné"),
-            ("Source configuration", report.source_name),
-            ("Rapport", str(report.report_id)),
-            ("Date", report.created_at.strftime("%d/%m/%Y %H:%M UTC")),
-        ),
-    )
-    document.add_paragraph()
-    document.add_heading("Confidentialité", level=2)
-    confidentiality = document.add_paragraph()
-    confidentiality.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = confidentiality.add_run(
-        "CONFIDENTIALITÉ — Diffusion restreinte au destinataire de l’audit"
-    )
-    run.bold = True
-    run.font.color.rgb = RGBColor.from_string("C62828")
-    document.add_paragraph(
-        "Ce document contient des informations de configuration et de sécurité. "
-        "Toute reproduction ou diffusion doit être autorisée par le propriétaire de l’équipement."
-    ).alignment = WD_ALIGN_PARAGRAPH.CENTER
-    document.add_page_break()
-
-
-def _add_context(document: DocumentType, report: JsonAuditReport) -> None:
-    document.add_heading("Contexte", level=1)
-    document.add_paragraph(
-        "Les informations ci-dessous proviennent de la configuration analysée et "
-        "du contexte opérateur saisi. "
-        "Une valeur non renseignée reste volontairement distincte d’une valeur conforme."
-    )
-    _table(document, ("Information", "Valeur"), context_rows(report))
-    document.add_heading("Échelle de risque", level=2)
-    _table(
-        document,
-        ("Niveau", "Lecture client"),
-        (
-            ("Critique", "Compromission ou indisponibilité majeure ; traitement prioritaire."),
-            ("Élevé", "Exposition importante nécessitant une remédiation planifiée rapidement."),
-            ("Moyen", "Risque significatif à réduire dans le cycle de durcissement."),
-            ("Faible / information", "Amélioration ou suivi sans impact immédiat démontré."),
-            (
-                "UNKNOWN",
-                "Les preuves disponibles ne permettent pas de conclure ; "
-                "ne pas assimiler à PASS.",
-            ),
-        ),
+def _context_rows(report: JsonAuditReport) -> tuple[tuple[str, str], ...]:
+    context = report.context
+    provenance = context.operator_provenance
+    return (
+        ("Client", _display(context.client)),
+        ("Site", _display(context.site)),
+        ("WAN sélectionnées", _display(", ".join(context.selected_wans or ()) or None)),
+        ("HA", _display(context.ha)),
+        ("MPLS", _display(context.mpls)),
+        ("Licence UTM", _display(context.utm_license)),
+        ("Provenance", _display(provenance.source if provenance else None)),
+        ("Opérateur", _display(provenance.operator if provenance else None)),
+        ("Méthode", _display(provenance.method if provenance else None)),
     )
 
 
-def _add_summary(document: DocumentType, report: JsonAuditReport) -> None:
-    document.add_heading("Synthèse", level=1)
-    counts = status_counts(report)
-    _table(
-        document,
-        ("Statut", "Nombre"),
-        tuple(
-            (status, counts.get(status, 0))
-            for status in ("FAIL", "PASS", "UNKNOWN", "NOT_APPLICABLE", "ERROR")
-        ),
-    )
-    failing = [view for view in finding_views(report) if view.finding.status is AuditStatus.FAIL]
-    if failing:
-        document.add_paragraph(
-            f"{len(failing)} point(s) nécessite(nt) une action de remédiation. "
-            "La synthèse client ci-dessous expose le problème, l’impact et l’action recommandée ; "
-            "les preuves sont conservées dans la vue technique."
+def _evidence_text(items: tuple[EvidenceItem, ...]) -> str:
+    if not items:
+        return "Non renseigné"
+    return "\n".join(
+        ": ".join(
+            part
+            for part in (
+                item.section,
+                item.entry,
+                item.directive,
+                " ".join(item.tokens) or None,
+                f"ligne {item.line}" if item.line else None,
+                item.certainty.value,
+                "defaulted" if item.defaulted else "explicit",
+            )
+            if part
         )
-    else:
-        document.add_paragraph("Aucun contrôle en échec n’a été relevé dans le périmètre analysé.")
-    _table(
-        document,
-        ("ID", "Problème", "Impact", "Risque", "Action recommandée"),
-        tuple(
-            (
-                view.finding.control_id,
-                view.client_problem,
-                view.impact,
-                view.risk_description,
-                view.recommendation,
-            )
-            for view in failing
-        ),
+        for item in items
     )
 
 
-def _add_inventory(document: DocumentType, report: JsonAuditReport) -> None:
-    equipment = report.equipment
-    document.add_heading("Inventaire de configuration", level=1)
-    document.add_paragraph(
-        "Ces volumes proviennent uniquement des objets effectivement projetés depuis "
-        "la configuration ; aucune métrique runtime n'est estimée."
-    )
-    _table(
-        document,
-        ("Élément", "Volume / état"),
-        (
-            ("Règles firewall", equipment.policy_count),
-            ("Règles firewall actives (explicites)", equipment.policy_enabled_count),
-            ("Règles firewall désactivées (explicites)", equipment.policy_disabled_count),
-            ("Règles firewall statut inconnu", equipment.policy_status_unknown_count),
-            ("Objets service", equipment.service_object_count),
-            ("VIP / groupes VIP / virtual servers", equipment.vip_count),
-            ("Profils de sécurité", equipment.security_profile_count),
-            ("Tunnels IPsec phase 1", equipment.ipsec_tunnel_count),
-            ("SSL-VPN configuré", "Oui" if equipment.ssl_vpn_configured else "Non"),
-            ("HA configuré", "Oui" if equipment.ha_configured else "Non"),
-        ),
-    )
+def _objects_text(objects: tuple[AffectedObject, ...]) -> str:
+    return ", ".join(f"{item.object_type}: {item.name}" for item in objects) or "Non renseigné"
 
 
-def _add_risk_table(document: DocumentType, report: JsonAuditReport) -> None:
-    document.add_heading("Tableau récapitulatif final des risques", level=1)
-    risk_views = [view for view in finding_views(report) if view.finding.status is AuditStatus.FAIL]
-    _table(
-        document,
-        (
-            "ID",
-            "Point audité",
-            "Description du risque",
-            "Vraisemblance",
-            "Impact",
-            "Complexité correction",
-            "Remédiation",
-        ),
-        tuple(
-            (
-                view.finding.control_id,
-                view.finding.title,
-                view.risk_description,
-                view.likelihood,
-                view.impact,
-                view.correction_complexity,
-                view.remediation,
-            )
-            for view in risk_views
-        ),
-    )
-
-
-def _add_finding_detail(document: DocumentType, view) -> None:
-    finding = view.finding
-    document.add_heading(f"{finding.control_id} — {finding.title}", level=2)
-    document.add_paragraph("Vue client").runs[0].bold = True
-    _table(
-        document,
-        ("Problème", "Impact", "Risque", "Action recommandée"),
-        ((view.client_problem, view.impact, view.risk_description, view.recommendation),),
-    )
-    _status_paragraph(document, finding.status)
-    document.add_paragraph("Vue technique").runs[0].bold = True
-    _table(
-        document,
-        ("Champ", "Valeur"),
-        (
-            ("ID", finding.control_id),
-            ("Catégorie", finding.category),
-            ("Priorité", finding.priority.value),
-            ("Sévérité", finding.severity.value),
-            ("Applicabilité", finding.applicability.value),
-            ("Preuve technique", view.proof),
-            ("Objets concernés", view.objects),
-            ("Complexité correction", view.correction_complexity),
-            ("Recommandation", view.recommendation),
-            ("Remédiation", view.remediation),
-            ("Approbation client", display(finding.customer_approval)),
-        ),
+def _risk_text(risk: RiskAssessment | None) -> str:
+    if risk is None:
+        return "Non renseigné"
+    return "\n".join(
+        part
+        for part in (
+            risk.summary,
+            f"Impact: {risk.impact}" if risk.impact else None,
+            f"Probabilité: {risk.likelihood}" if risk.likelihood else None,
+            f"Traitement: {risk.treatment}" if risk.treatment else None,
+        )
+        if part
     )
 
 
 def render_docx(report: JsonAuditReport) -> bytes:
     document = Document()
-    _configure_document(document, report)
-    _add_cover(document, report)
-    _add_context(document, report)
-    document.add_page_break()
-    _add_summary(document, report)
-    document.add_page_break()
-    _add_inventory(document, report)
-    document.add_page_break()
-    document.add_heading("Détail des contrôles", level=1)
-    last_domain = None
-    for index, view in enumerate(finding_views(report)):
-        if index:
-            document.add_page_break()
-        current_domain = domain_label(view.finding)
-        if current_domain != last_domain:
-            document.add_heading(current_domain, level=2)
-            last_domain = current_domain
-        _add_finding_detail(document, view)
-    document.add_page_break()
-    _add_risk_table(document, report)
-    document.add_paragraph()
-    document.add_paragraph(
-        f"FortiGuard : {report.fortiguard.status.value} — {report.fortiguard.detail}"
+    document.core_properties.title = "Rapport d’audit Vysion"
+    document.core_properties.subject = "Audit de configuration FortiGate"
+    document.core_properties.author = "Vysion"
+    document.core_properties.created = report.created_at
+    document.core_properties.modified = report.created_at
+
+    title = document.add_heading("Rapport d’audit Vysion", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    metadata = document.add_table(rows=0, cols=2)
+    metadata.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for label, value in (
+        ("Identifiant", str(report.report_id)),
+        ("Source", report.source_name),
+        ("Créé le", report.created_at.isoformat()),
+        ("Expire le", report.expires_at.isoformat()),
+        ("FortiGuard", report.fortiguard.status.value),
+        ("Détail FortiGuard", report.fortiguard.detail),
+        *_context_rows(report),
+    ):
+        cells = metadata.add_row().cells
+        cells[0].text = label
+        cells[1].text = value
+
+    document.add_heading("Résultats", level=1)
+    headers = (
+        "Contrôle",
+        "Titre",
+        "Catégorie",
+        "Priorité",
+        "Sévérité",
+        "Applicabilité",
+        "Statut",
+        "Constat",
+        "Preuve structurée",
+        "Objets affectés",
+        "Risque",
+        "Recommandation",
+        "Remédiation",
+        "Approbation client",
     )
+    findings = document.add_table(rows=1, cols=len(headers))
+    findings.style = "Table Grid"
+    findings.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for cell, value in zip(findings.rows[0].cells, headers, strict=True):
+        cell.text = value
+
+    for finding in report.findings:
+        cells = findings.add_row().cells
+        values = (
+            finding.control_id,
+            finding.title,
+            finding.category,
+            finding.priority.value,
+            finding.severity.value,
+            finding.applicability.value,
+            finding.status.value,
+            finding.message,
+            _evidence_text(finding.evidence_items),
+            _objects_text(finding.affected_objects),
+            _risk_text(finding.risk),
+            finding.recommendation or "Non renseigné",
+            finding.remediation or "Non renseigné",
+            _display(finding.customer_approval),
+        )
+        for cell, value in zip(cells, values, strict=True):
+            cell.text = value
+
     output = BytesIO()
     document.save(output)
     return output.getvalue()

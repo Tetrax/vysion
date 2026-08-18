@@ -374,72 +374,6 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
     assert tuple(finding["control_id"] for finding in findings) == CONTROL_IDS
 
 
-@pytest.mark.asyncio
-async def test_api_json_docx_xlsx_share_typed_equipment_inventory(tmp_path: Path) -> None:
-    app = create_app(
-        settings=Settings(report_directory=tmp_path),
-        fortiguard=CorrelatedPsirtFortiGuard(),
-    )
-
-    async with api_client(app) as client:
-        response = await client.post(
-            "/api/audits",
-            files={
-                "configuration": (
-                    "anonymized-fortigate.conf",
-                    REALISTIC_FIXTURE.read_bytes(),
-                    "text/plain",
-                )
-            },
-        )
-        assert response.status_code == 201
-        payload = response.json()
-        report_id = payload["report_id"]
-        equipment = payload["equipment"]
-        assert equipment["hostname"] == "edge-lab.example"
-        assert equipment["model"] == "60E"
-        assert equipment["firmware_version"] == "7.2.8"
-        assert equipment["interface_names"] == ["wan1", "port1"]
-        assert equipment["policy_count"] == 2
-        assert equipment["vip_count"] == 2
-
-        docx_response = await client.get(f"/api/reports/{report_id}.docx")
-        xlsx_response = await client.get(f"/api/reports/{report_id}.xlsx")
-
-    assert docx_response.status_code == 200
-    document = Document(BytesIO(docx_response.content))
-    docx_text = "\n".join(
-        [paragraph.text for paragraph in document.paragraphs]
-        + [
-            cell.text
-            for table in document.tables
-            for row in table.rows
-            for cell in row.cells
-        ]
-    )
-    assert "edge-lab.example" in docx_text
-    assert "60E" in docx_text
-    assert "7.2.8" in docx_text
-    assert "Règles firewall" in docx_text
-    assert "2" in docx_text
-
-    assert xlsx_response.status_code == 200
-    workbook = load_workbook(BytesIO(xlsx_response.content), data_only=True)
-    metadata = {
-        row[0]: row[1]
-        for row in workbook["Métadonnées équipement"].iter_rows(values_only=True)
-    }
-    inventory = {
-        row[0]: row[1]
-        for row in workbook["Inventaire configuration"].iter_rows(values_only=True)
-    }
-    assert metadata["Hostname"] == "edge-lab.example"
-    assert metadata["Modèle"] == "60E"
-    assert metadata["Version FortiOS"] == "7.2.8"
-    assert metadata["Interfaces"] == "wan1, port1"
-    assert inventory["Règles firewall"] == 2
-    assert inventory["VIP / groupes VIP / virtual servers"] == 2
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -508,101 +442,6 @@ end
     ] * len(CONTROL_IDS)
 
 
-@pytest.mark.asyncio
-async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
-    tmp_path: Path,
-) -> None:
-    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
-    settings = Settings(report_directory=tmp_path, report_ttl_seconds=60)
-    app = create_app(settings=settings, fortiguard=AvailableFortiGuard(), clock=lambda: now)
-
-    async with api_client(app) as client:
-        response = await client.post(
-            "/api/audits",
-            files={"configuration": ("synthetic.conf", SYNTHETIC_CONFIG, "text/plain")},
-        )
-
-        assert response.status_code == 201
-        assert response.headers["cache-control"] == "no-store, private"
-        payload = response.json()
-        report_id = UUID(payload["report_id"], version=4)
-        assert payload["expires_at"] == (now + timedelta(seconds=60)).isoformat().replace(
-            "+00:00", "Z"
-        )
-        assert payload["fortiguard"]["status"] == "AVAILABLE"
-        statuses = {finding["control_id"]: finding["status"] for finding in payload["findings"]}
-        assert {
-            control_id
-            for control_id, finding_status in statuses.items()
-            if finding_status == "PASS"
-        } == {
-            "SYS-HOSTNAME-001",
-            "NET-WAN-MGMT-001",
-            "IAM-ADMIN-MFA-001",
-            "IAM-DEFAULT-ADMIN-001",
-            "IAM-GUEST-ACCOUNT-001",
-        }
-        assert statuses["IAM-LOCAL-USER-MFA-001"] == "NOT_APPLICABLE"
-        assert payload["findings"][3]["applicability"] == "not_applicable"
-        assert all(
-            finding["applicability"] == "unknown"
-            for finding in payload["findings"]
-            if finding["status"] == "UNKNOWN"
-        )
-        assert all(
-            finding["priority"]
-            == (
-                "P1"
-                if finding["control_id"]
-                in {
-                    "SYS-BACKUP-AUTO-001",
-                    "CFG-REF-INTEGRITY-001",
-                    "SYS-AUTO-INSTALL-USB-001",
-                    "SYS-FORTIMANAGER-SYNC-001",
-                    "SYS-FORTIANALYZER-SYNC-001",
-                    "SYS-ADMIN-HTTPS-PORT-001",
-                    "NET-SIP-ALG-001",
-                    "HA-SESSION-PICKUP-001",
-                    "HA-HEARTBEAT-REDUNDANCY-001",
-                    "HA-OVERRIDE-001",
-                    "HA-CABLING-REDUNDANCY-001",
-                    "UTM-FORTISANDBOX-CLOUD-001",
-                    "UTM-FORTIGUARD-ANYCAST-001",
-                    "NET-SDWAN-USAGE-001",
-                    "FW-BY-SEQUENCE-USAGE-001",
-                    "UTM-MAIL-FILTER-USAGE-001",
-                    "FW-SSL-SSH-PROFILE-001",
-                    "CFG-UNUSED-SERVICE-001",
-                    "IAM-LEGACY-ADMIN-001",
-                    "IAM-LEGACY-PKI-REMOVAL-001",
-                    "IAM-LEGACY-PKI-PRESENCE-001",
-                    "NET-LEGACY-ADMIN-LOOPBACK-001",
-                    "DNS-LEGACY-DATABASE-001",
-                    "NET-GEO-IP-USAGE-001",
-                    "NET-RFC6890-BLACKHOLE-001",
-                    "FW-LEGACY-SCHEDULE-INVENTORY-001",
-                    "WIFI-FORTIAP-OBSOLETE-001",
-                    "WIFI-SSID-LIMIT-001",
-                    "WIFI-RADIO2-40MHZ-001",
-                    "WIFI-DARRP-001",
-                    "WIFI-FREQUENCY-HANDOFF-001",
-                    "WIFI-TIM-001",
-                    "WIFI-BAND-001",
-                    "WIFI-CHANNELS-001",
-                    "WIFI-SHORT-GUARD-INTERVAL-001",
-                }
-                else "P0"
-            )
-            for finding in payload["findings"][1:]
-        )
-        assert (tmp_path / f"{report_id}.json").is_file()
-
-        stored = await client.get(f"/api/reports/{report_id}.json")
-        assert stored.status_code == 200
-        assert stored.headers["content-type"] == "application/json"
-        assert stored.headers["cache-control"] == "no-store, private"
-        assert stored.json() == payload
-
 
 @pytest.mark.asyncio
 async def test_api_exposes_m3_failures_without_hiding_certain_violations(
@@ -630,7 +469,7 @@ async def test_api_exposes_m3_failures_without_hiding_certain_violations(
 
 
 @pytest.mark.asyncio
-async def test_api_json_docx_xlsx_preserve_all_control_ids(
+async def test_api_docx_xlsx_preserve_all_control_ids(
     tmp_path: Path,
 ) -> None:
     app = create_app(
@@ -713,15 +552,15 @@ async def test_api_round_trips_explicit_operator_context_without_false_defaults(
             },
             "client": "Client synthétique",
             "site": "Paris-lab",
-            "operator_comment": None,
             "ha": True,
             "ha_cabling_redundancy": True,
             "mpls": None,
             "utm_license": False,
             "psirt": None,
         }
-        stored = await client.get(f"/api/reports/{payload['report_id']}.json")
-        assert stored.json() == payload
+        assert "operator_comment" not in payload["context"]
+        assert "equipment" not in payload
+        assert "accounts" not in payload
 
 
 @pytest.mark.asyncio
@@ -811,15 +650,7 @@ async def test_api_generates_xlsx_from_the_stored_typed_report(tmp_path: Path) -
         f'attachment; filename="vysion-{report_id}.xlsx"'
     )
     workbook = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
-    assert workbook.sheetnames[:3] == ["Synthèse", "Contrôles", "Contrôles enrichis"]
-    assert {
-        "Audit configuration",
-        "Actions sans accord",
-        "Actions avec accord",
-        "Statistiques",
-        "Comptes",
-        "Métadonnées équipement",
-    } <= set(workbook.sheetnames)
+    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
     summary = {
         str(key): value
         for key, value in workbook["Synthèse"].iter_rows(
@@ -873,7 +704,7 @@ async def test_expired_report_is_deleted_and_returns_404(tmp_path: Path) -> None
         report_path = tmp_path / f"{created['report_id']}.json"
 
         current += timedelta(seconds=61)
-        expired = await client.get(f"/api/reports/{created['report_id']}.json")
+        expired = await client.get(f"/api/reports/{created['report_id']}.docx")
 
         assert expired.status_code == 404
         assert not report_path.exists()

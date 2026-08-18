@@ -10,19 +10,17 @@ from vysion.audit.models import (
     ProofState,
     RuleMatchStatistics,
     UtmLicenseDetails,
-    WanSelection,
     WanSelectionKind,
 )
 from vysion.audit.parser import FortiGateParser
 
 
-def test_operator_context_contains_equipment_facts_and_structured_utm_license() -> None:
+def test_context_keeps_historical_operator_fields_and_structured_utm_license() -> None:
     context = AuditContext(
         client="Client métier",
         site="Paris-DC1",
         serial_number="FGT60E123456789",
         uptime="42 days, 03:12:10",
-        operator_comment="HA à confirmer avec l’exploitant.",
         operator="Orange Business",
         ha=True,
         mpls=False,
@@ -45,7 +43,7 @@ def test_operator_context_contains_equipment_facts_and_structured_utm_license() 
         "manual": False,
     }
     assert context.operator == "Orange Business"
-    assert context.operator_comment == "HA à confirmer avec l’exploitant."
+    assert "operator_comment" not in context.model_dump(mode="json")
 
 
 def test_legacy_utm_boolean_is_kept_as_compatibility_projection() -> None:
@@ -95,13 +93,6 @@ def test_utm_legacy_text_values_are_coerced_before_structured_default(
     )
 
 
-def test_direct_automatic_wan_selection_is_canonicalized_without_warning() -> None:
-    selection = WanSelection(name="automatic", kind=WanSelectionKind.AUTOMATIC)
-
-    assert selection.automatic is True
-    assert selection.model_dump()["automatic"] is True
-
-
 def test_legacy_and_typed_wan_scopes_must_agree() -> None:
     with pytest.raises(ValidationError):
         AuditContext(
@@ -149,21 +140,21 @@ end
     assert configuration.sdwan_zones[0].interfaces[0].name == "wan1"
 
 
-def test_wan_selection_model_distinguishes_interface_zone_and_automatic_scope() -> None:
+def test_wan_selection_model_distinguishes_interface_zone_and_sdwan_scope() -> None:
     context = AuditContext(
         wan_selections=(
             {"name": "wan1", "kind": WanSelectionKind.INTERFACE},
             {"name": "internet", "kind": WanSelectionKind.ZONE, "interfaces": ("wan1",)},
-            {"name": "automatic", "kind": WanSelectionKind.AUTOMATIC, "automatic": True},
+            {"name": "virtual-wan-link", "kind": WanSelectionKind.SDWAN, "interfaces": ("wan1",)},
         )
     )
 
     assert [selection.kind for selection in context.wan_selections or ()] == [
         WanSelectionKind.INTERFACE,
         WanSelectionKind.ZONE,
-        WanSelectionKind.AUTOMATIC,
+        WanSelectionKind.SDWAN,
     ]
-    assert context.selected_wans == ("wan1", "internet", "automatic")
+    assert context.selected_wans == ("wan1", "internet", "virtual-wan-link")
 
 
 def test_status_vocabulary_remains_fail_closed_and_unchanged() -> None:

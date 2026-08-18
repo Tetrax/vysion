@@ -23,7 +23,7 @@ from vysion.audit.models import (
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.reports.docx_report import render_docx
-from vysion.reports.json_report import EquipmentMetadata, JsonAuditReport
+from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
 
 
@@ -78,19 +78,7 @@ def _enriched_report() -> JsonAuditReport:
             mpls=False,
             utm_license=True,
         ),
-        equipment=EquipmentMetadata(
-            hostname="fgt-paris",
-            policy_count=12,
-            policy_enabled_count=9,
-            policy_disabled_count=2,
-            policy_status_unknown_count=1,
-            service_object_count=8,
-            vip_count=3,
-            security_profile_count=6,
-            ipsec_tunnel_count=2,
-            ssl_vpn_configured=True,
-            ha_configured=False,
-        ),
+
         findings=(
             AuditFinding(
                 control_id="NET-WAN-MGMT-001",
@@ -160,16 +148,7 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
         data_only=False,
     )
 
-    assert workbook.sheetnames[:3] == ["Synthèse", "Contrôles", "Contrôles enrichis"]
-    assert {
-        "Audit configuration",
-        "Actions sans accord",
-        "Actions avec accord",
-        "Statistiques",
-        "Comptes",
-        "Métadonnées équipement",
-        "Inventaire configuration",
-    } <= set(workbook.sheetnames)
+    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
     context_values = [cell.value for row in workbook["Synthèse"].iter_rows() for cell in row]
     assert "operator-form" in context_values
     assert "analyst" in context_values
@@ -197,21 +176,7 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
     assert "wan1" in row[9]
     assert "@risk" in row[10]
     assert row[13] == "Non renseigné"
-    assert workbook["Actions sans accord"]["A2"].value == "NET-WAN-MGMT-001"
-    assert workbook["Actions avec accord"].max_row == 1
-    inventory = dict(
-        workbook["Inventaire configuration"].iter_rows(values_only=True)
-    )
-    assert inventory["Règles firewall"] == 12
-    assert inventory["Règles firewall actives (explicites)"] == 9
-    assert inventory["Règles firewall désactivées (explicites)"] == 2
-    assert inventory["Règles firewall statut inconnu"] == 1
-    assert inventory["Objets service"] == 8
-    assert inventory["VIP / groupes VIP / virtual servers"] == 3
-    assert inventory["Profils de sécurité"] == 6
-    assert inventory["Tunnels IPsec phase 1"] == 2
-    assert inventory["SSL-VPN configuré"] == "Oui"
-    assert inventory["HA configuré"] == "Non"
+
 
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
@@ -220,10 +185,11 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
                     raise AssertionError(f"formula-like cell was not escaped: {cell.coordinate}")
 
 
-def test_legacy_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
+def test_structured_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
     finding = _enriched_report().findings[0].model_copy(
         update={
-            "evidence": (
+            "evidence": (),
+            "evidence_items": (
                 EvidenceItem(
                     section="system interface",
                     entry="wan1",
@@ -232,7 +198,6 @@ def test_legacy_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
                     line=42,
                 ),
             ),
-            "evidence_items": (),
         }
     )
     report = _enriched_report().model_copy(update={"findings": (finding,)})

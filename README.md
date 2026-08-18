@@ -104,10 +104,9 @@ Ne jamais versionner :
 
 Les réponses API contenant un rapport imposent `Cache-Control: no-store, private`.
 
-Les exports sont disponibles tant que le rapport JSON canonique n'a pas expiré :
+Les exports historiques sont disponibles tant que le rapport stocké n'a pas expiré :
 
 ```text
-/api/reports/{uuid}.json
 /api/reports/{uuid}.docx
 /api/reports/{uuid}.xlsx
 ```

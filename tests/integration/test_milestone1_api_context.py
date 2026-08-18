@@ -32,7 +32,7 @@ def api_client(app) -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_api_builds_and_persists_context_from_repeatable_and_json_form_fields(
+async def test_api_builds_and_persists_context_from_repeatable_form_fields(
     tmp_path: Path,
 ) -> None:
     app = create_app(settings=Settings(report_directory=tmp_path), fortiguard=AvailableFortiGuard())
@@ -67,10 +67,7 @@ async def test_api_builds_and_persists_context_from_repeatable_and_json_form_fie
 
         assert response.status_code == 201
         payload = response.json()
-        stored = await client.get(f"/api/reports/{payload['report_id']}.json")
 
-    assert stored.status_code == 200
-    assert payload["context"] == stored.json()["context"]
     assert payload["context"]["selected_wans"] == ["wan1", "wan2"]
     assert payload["context"]["client"] == "Client synthétique"
     assert payload["context"]["site"] == "Paris-lab"

@@ -31,7 +31,7 @@ from vysion.audit.registry import default_registry
 from vysion.build_info import VYSION_REVISION, VYSION_VERSION
 from vysion.config import Settings
 from vysion.reports.docx_report import render_docx
-from vysion.reports.json_report import AccountMetadata, EquipmentMetadata, JsonAuditReport
+from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
 from vysion.storage.reports import Clock, JsonReportStore, utc_now
 
@@ -213,17 +213,6 @@ def _selected_wan_scopes(
             zone = sdwan_zones.get(normalized_name.casefold())
             if zone is not None and zone.proof_state is ProofState.PROVEN:
                 resolved_interfaces = _resolve_interface_references(zone.interfaces, interfaces)
-        else:
-            if normalized_name.casefold() != "automatic":
-                raise HTTPException(
-                    status_code=422,
-                    detail="automatic WAN selection must be named automatic",
-                )
-            resolved_interfaces = tuple(
-                interface.name
-                for interface in configuration.interfaces
-                if interface.role is not None and interface.role.casefold() == "wan"
-            )
         selections.append(
             WanSelection(
                 name=normalized_name,
@@ -336,7 +325,6 @@ def _audit_context(
     uptime: str | None,
     unmatched_rules: str | None,
     schedule_reference_instant: str | None,
-    operator_comment: str | None,
     operator: str | None,
     ha: str | None,
     ha_cabling_redundancy: str | None,
@@ -413,7 +401,6 @@ def _audit_context(
         site=site,
         serial_number=serial_number,
         uptime=uptime,
-        operator_comment=operator_comment,
         rule_match_statistics=rule_match_statistics,
         schedule_reference_instant=reference_instant,
         operator=operator,
@@ -474,69 +461,6 @@ def _preview_sdwan_zones(configuration) -> list[dict[str, object]]:
         interfaces,
         sort_interfaces=True,
     )
-
-
-def _equipment_metadata(configuration: FortiGateConfiguration) -> EquipmentMetadata:
-    identity = configuration.device_identity
-    return EquipmentMetadata(
-        hostname=identity.hostname,
-        model=identity.model,
-        firmware_version=identity.firmware_version,
-        serial_number=identity.serial_number,
-        interface_names=tuple(interface.name for interface in configuration.interfaces),
-        zone_names=tuple(zone.name for zone in configuration.zones),
-        sdwan_zone_names=tuple(zone.name for zone in configuration.sdwan_zones),
-        interface_zone_relations=tuple(
-            f"{interface.name} → {interface.zone.name}"
-            for interface in configuration.interfaces
-            if interface.zone is not None
-        ),
-        policy_count=len(configuration.policies),
-        policy_enabled_count=sum(
-            policy.status == "enable" for policy in configuration.policies
-        ),
-        policy_disabled_count=sum(
-            policy.status == "disable" for policy in configuration.policies
-        ),
-        policy_status_unknown_count=sum(
-            policy.status not in {"enable", "disable"} for policy in configuration.policies
-        ),
-        service_object_count=(
-            len(configuration.service_objects) + len(configuration.service_groups)
-        ),
-        vip_count=(
-            len(configuration.vips)
-            + len(configuration.vip_groups)
-            + len(configuration.virtual_servers)
-        ),
-        security_profile_count=(
-            len(configuration.security_profiles) + len(configuration.utm_profiles)
-        ),
-        ipsec_tunnel_count=len(configuration.ipsec_phase1),
-        ssl_vpn_configured=configuration.ssl_vpn_settings is not None,
-        ha_configured=configuration.ha_settings is not None,
-    )
-
-
-def _account_metadata(configuration: FortiGateConfiguration) -> tuple[AccountMetadata, ...]:
-    administrators = tuple(
-        AccountMetadata(
-            name=account.name,
-            kind="administrator",
-            two_factor=account.two_factor,
-            peer_auth=None if account.peer_auth is None else str(account.peer_auth),
-        )
-        for account in configuration.administrators
-    )
-    local_users = tuple(
-        AccountMetadata(
-            name=account.name,
-            kind="local-user",
-            two_factor=account.two_factor,
-        )
-        for account in configuration.local_users
-    )
-    return administrators + local_users
 
 
 def _preview_payload(configuration) -> dict[str, object]:
@@ -633,9 +557,6 @@ def create_app(
         schedule_reference_instant = _optional_form_value(
             form.getlist("schedule_reference_instant"), "schedule_reference_instant"
         )
-        operator_comment = _optional_form_value(
-            form.getlist("context_comment") or form.getlist("comment"), "context_comment"
-        )
         operator = _optional_form_value(form.getlist("operator"), "operator")
         operator_context = _optional_form_value(
             form.getlist("operator_context"), "operator_context"
@@ -683,7 +604,6 @@ def create_app(
             uptime=uptime,
             unmatched_rules=unmatched_rules,
             schedule_reference_instant=schedule_reference_instant,
-            operator_comment=operator_comment,
             operator=operator,
             ha=ha,
             ha_cabling_redundancy=ha_cabling_redundancy,
@@ -721,8 +641,6 @@ def create_app(
             expires_at=created_at + timedelta(seconds=resolved_settings.report_ttl_seconds),
             source_name=configuration.filename or "configuration.conf",
             context=context,
-            equipment=_equipment_metadata(parsed),
-            accounts=_account_metadata(parsed),
             fortiguard=await fortiguard.check(),
             findings=tuple(engine.run(parsed, context=context)),
         )
@@ -733,15 +651,6 @@ def create_app(
             headers={"Cache-Control": "no-store, private"},
         )
 
-    @app.get("/api/reports/{report_id}.json")
-    async def get_json_report(report_id: UUID) -> JSONResponse:
-        report = store.get(report_id)
-        if report is None:
-            raise HTTPException(status_code=404, detail="report not found or expired")
-        return JSONResponse(
-            content=report.model_dump(mode="json"),
-            headers={"Cache-Control": "no-store, private"},
-        )
 
     @app.get("/api/reports/{report_id}.docx")
     async def get_docx_report(report_id: UUID) -> Response:

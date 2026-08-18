@@ -7,42 +7,6 @@ from vysion.adapters.fortiguard import FortiGuardResult
 from vysion.audit.models import AuditContext, AuditFinding
 
 
-class EquipmentMetadata(BaseModel):
-    """Business-safe equipment facts projected from the typed configuration."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    hostname: str | None = None
-    model: str | None = None
-    firmware_version: str | None = None
-    serial_number: str | None = None
-    interface_names: tuple[str, ...] = ()
-    zone_names: tuple[str, ...] = ()
-    sdwan_zone_names: tuple[str, ...] = ()
-    interface_zone_relations: tuple[str, ...] = ()
-    policy_count: int = 0
-    policy_enabled_count: int = 0
-    policy_disabled_count: int = 0
-    policy_status_unknown_count: int = 0
-    service_object_count: int = 0
-    vip_count: int = 0
-    security_profile_count: int = 0
-    ipsec_tunnel_count: int = 0
-    ssl_vpn_configured: bool = False
-    ha_configured: bool = False
-
-
-class AccountMetadata(BaseModel):
-    """Minimal account facts safe to include in the report."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    name: str
-    kind: str
-    two_factor: str | None = None
-    peer_auth: str | None = None
-
-
 class JsonAuditReport(BaseModel):
     """Versioned canonical report; every other renderer consumes this model."""
 
@@ -54,8 +18,6 @@ class JsonAuditReport(BaseModel):
     expires_at: AwareDatetime
     source_name: str
     context: AuditContext = Field(default_factory=AuditContext)
-    equipment: EquipmentMetadata = Field(default_factory=EquipmentMetadata)
-    accounts: tuple[AccountMetadata, ...] = ()
     fortiguard: FortiGuardResult
     findings: tuple[AuditFinding, ...]
 

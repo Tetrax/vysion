@@ -46,32 +46,6 @@ end
     assert "wan1" in {item.name for item in finding.affected_objects}
 
 
-def test_automatic_wan_scope_is_expanded_before_controls_run() -> None:
-    configuration = FortiGateParser().parse(
-        """config system interface
-    edit "wan1"
-        set role wan
-        set allowaccess ping
-    next
-    edit "lan1"
-        set role lan
-        set allowaccess ping
-    next
-end
-"""
-    )
-    context = AuditContext(
-        wan_selections=(
-            {"name": "automatic", "kind": WanSelectionKind.AUTOMATIC, "interfaces": ("wan1",)},
-        )
-    )
-
-    finding = check_wan_management_access(configuration, context)
-
-    assert finding.status.value == "PASS"
-    assert {item.name for item in finding.affected_objects} == {"wan1"}
-
-
 def test_casefold_zone_collision_is_unknown_and_not_resolved_to_last_entry() -> None:
     configuration = FortiGateParser().parse(
         """config system interface

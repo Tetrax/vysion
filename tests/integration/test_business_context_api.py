@@ -80,7 +80,7 @@ async def test_preview_exposes_only_primary_identity_plus_typed_wan_relations(
 
 
 @pytest.mark.asyncio
-async def test_api_persists_business_equipment_context_and_resolves_zone_selection(
+async def test_api_persists_v1_context_and_resolves_zone_selection(
     tmp_path: Path,
 ) -> None:
     app = create_app(settings=Settings(report_directory=tmp_path), fortiguard=AvailableFortiGuard())
@@ -97,8 +97,6 @@ async def test_api_persists_business_equipment_context_and_resolves_zone_selecti
                 "serial_number": "FGT60E123456789",
                 "uptime": "42 days, 03:12:10",
                 "unmatched_rules": "7",
-                "context_comment": "HA à confirmer avec l’exploitant.",
-                "operator": "Orange Business",
                 "ha_context": "true",
                 "mpls_context": "false",
                 "utm_license_status": "active",
@@ -121,8 +119,6 @@ async def test_api_persists_business_equipment_context_and_resolves_zone_selecti
         "source": "operator",
         "method": "Firewall policy Hit Count <= 0",
     }
-    assert context["operator_comment"] == "HA à confirmer avec l’exploitant."
-    assert context["operator"] == "Orange Business"
     assert context["ha"] is True
     assert context["mpls"] is False
     assert context["utm_license_details"] == {
@@ -136,13 +132,13 @@ async def test_api_persists_business_equipment_context_and_resolves_zone_selecti
             "name": "internet",
             "kind": "zone",
             "interfaces": ["wan1"],
-            "automatic": False,
         }
     ]
     assert context["selected_wans"] == ["internet"]
     report_json = response.json()
-    assert report_json["equipment"]["hostname"] == "business-context.example"
-    assert report_json["equipment"]["interface_zone_relations"] == ["wan1 → internet"]
+    assert "operator_comment" not in context
+    assert "equipment" not in report_json
+    assert "accounts" not in report_json
 
 
 @pytest.mark.asyncio

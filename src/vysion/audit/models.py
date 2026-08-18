@@ -176,7 +176,6 @@ class WanSelectionKind(StrEnum):
     INTERFACE = "interface"
     ZONE = "zone"
     SDWAN = "sdwan"
-    AUTOMATIC = "automatic"
 
 
 class WanSelection(BaseModel):
@@ -192,17 +191,6 @@ class WanSelection(BaseModel):
     name: str
     kind: WanSelectionKind
     interfaces: tuple[str, ...] = ()
-    automatic: bool = False
-
-    @model_validator(mode="before")
-    @classmethod
-    def canonicalize_automatic(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            kind = data.get("kind")
-            if kind in {WanSelectionKind.AUTOMATIC, WanSelectionKind.AUTOMATIC.value}:
-                data = dict(data)
-                data["automatic"] = True
-        return data
 
 
 class UtmLicenseStatus(StrEnum):
@@ -334,10 +322,6 @@ class AuditContext(BaseModel):
     site: str | None = Field(default=None, validation_alias=AliasChoices("site", "site_name"))
     serial_number: str | None = None
     uptime: str | None = None
-    operator_comment: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("operator_comment", "comment", "context_comment"),
-    )
     rule_match_statistics: RuleMatchStatistics | None = None
     schedule_reference_instant: AwareDatetime | None = None
     operator: str | None = Field(
