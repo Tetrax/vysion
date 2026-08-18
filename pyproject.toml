@@ -1,6 +1,6 @@
 [project]
 name = "vysion"
-version = "2.2.0.dev0"
+dynamic = ["version"]
 description = "Internal modular FortiGate configuration audit service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -28,6 +28,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vysion"]
+
+[tool.hatch.version]
+path = "VERSION"
+pattern = "^(?P<version>.+)$"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

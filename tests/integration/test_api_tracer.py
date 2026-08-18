@@ -13,6 +13,7 @@ from openpyxl import load_workbook
 from vysion.adapters.fortiguard import FortiGuardResult, FortiGuardStatus
 from vysion.api.app import create_app
 from vysion.audit.models import ExternalObservationStatus, PsirtObservation
+from vysion.build_info import VYSION_REVISION, VYSION_VERSION
 from vysion.config import Settings
 
 SYNTHETIC_CONFIG = b"""\
@@ -889,4 +890,9 @@ async def test_health_reports_application_readiness(tmp_path: Path) -> None:
         response = await client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "vysion", "version": "2.2.0-dev"}
+    assert response.json() == {
+        "status": "ok",
+        "service": "vysion",
+        "version": VYSION_VERSION,
+        "revision": VYSION_REVISION,
+    }

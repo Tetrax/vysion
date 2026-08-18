@@ -1,5 +1,6 @@
 import { FormEvent, useMemo, useRef, useState } from 'react'
 import pantherImage from './assets/panther.jpg'
+import { VYSION_VERSION } from './buildInfo'
 import './app.css'
 
 type AuditStatus = 'PASS' | 'FAIL' | 'UNKNOWN' | 'ERROR' | 'NOT_APPLICABLE'
@@ -301,7 +302,7 @@ function App() {
   const wanOptions = useMemo(() => preview ? buildWanOptions(preview) : [], [preview])
 
   return <div className="app-shell">
-    <header className="hero"><img className="hero-image" src={pantherImage} alt="Panthère Vysion" /><div className="hero-content"><p className="eyebrow">SNS Security · usage interne</p><h1>Vysion <span>v2.2.0-dev</span></h1><p>Audit de configuration FortiGate</p></div></header>
+    <header className="hero"><img className="hero-image" src={pantherImage} alt="Panthère Vysion" /><div className="hero-content"><p className="eyebrow">SNS Security · usage interne</p><h1>Vysion <span>{VYSION_VERSION}</span></h1><p>Audit de configuration FortiGate</p></div></header>
     <main>
       <StepNavigation currentStep={step} />
       <input ref={fileInput} className="visually-hidden" aria-label="Configuration FortiGate" id="configuration" name="configuration" type="file" accept=".conf,.txt,text/plain" onChange={(event) => void selectFile(event.target.files?.[0] ?? null)} />

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
+import { VYSION_VERSION } from './buildInfo'
 
 
 afterEach(() => {
@@ -10,7 +11,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('Vysion v2.2.0-dev guided workflow', () => {
+describe('Vysion guided workflow', () => {
+  it('displays the shared release version', () => {
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: `Vysion ${VYSION_VERSION}` })).toBeInTheDocument()
+  })
+
   it('previews the selected file before showing equipment context', async () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

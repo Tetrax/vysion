@@ -28,13 +28,12 @@ from vysion.audit.models import (
 )
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
+from vysion.build_info import VYSION_REVISION, VYSION_VERSION
 from vysion.config import Settings
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import AccountMetadata, EquipmentMetadata, JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
 from vysion.storage.reports import Clock, JsonReportStore, utc_now
-
-VYSION_VERSION = "2.2.0-dev"
 
 
 def _optional_bool(value: str | None, field_name: str) -> bool | None:
@@ -595,7 +594,12 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "vysion", "version": VYSION_VERSION}
+        return {
+            "status": "ok",
+            "service": "vysion",
+            "version": VYSION_VERSION,
+            "revision": VYSION_REVISION,
+        }
 
     @app.post("/api/audits/preview")
     async def preview_audit(configuration: Annotated[UploadFile, File()]) -> JSONResponse:

@@ -1,7 +1,7 @@
 {
   "name": "vysion-frontend",
   "private": true,
-  "version": "2.2.0-dev",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit -p tsconfig.app.json && vite build",
