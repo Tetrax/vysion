@@ -8,6 +8,10 @@ from vysion.audit.legacy_admin_projection import (
     apply_legacy_admin_projection,
     project_legacy_admin,
 )
+from vysion.audit.legacy_network_projection import (
+    apply_legacy_network_projection,
+    project_legacy_network,
+)
 from vysion.audit.models import (
     Administrator,
     DeviceIdentity,
@@ -173,6 +177,7 @@ _PROJECTED_SECTIONS = {
     "system ha",
     "system fortisandbox",
     "system fortiguard",
+    "router static",
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
@@ -238,6 +243,7 @@ _PROJECTED_KEYS = {
     },
     "system fortisandbox": {"sandbox-region"},
     "system fortiguard": {"fortiguard-anycast"},
+    "router static": {"dstaddr", "blackhole", "distance"},
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),
@@ -376,6 +382,9 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
             "unicast-hb",
             "unicast-hb-peerip",
         }
+    ),
+    "router static": frozenset(
+        {"comment", "device", "gateway", "priority", "status", "vrf"}
     ),
 }
 _PROJECTED_CHILD_KEYS = {
@@ -2119,5 +2128,8 @@ class FortiGateParser:
         configuration = apply_ha_projection(configuration, project_ha(document))
         configuration = apply_legacy_admin_projection(
             configuration, project_legacy_admin(document)
+        )
+        configuration = apply_legacy_network_projection(
+            configuration, project_legacy_network(document)
         )
         return apply_utm_projection(configuration, project_utm(document))

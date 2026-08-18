@@ -29,6 +29,10 @@ from vysion.audit.controls.legacy_admin import (
     check_legacy_pki_presence,
     check_legacy_pki_removal,
 )
+from vysion.audit.controls.legacy_network import (
+    check_legacy_geo_ip_usage,
+    check_legacy_rfc6890_blackhole,
+)
 from vysion.audit.controls.network import check_wan_management_access
 from vysion.audit.controls.network_parity import (
     check_by_sequence_usage,
@@ -118,4 +122,6 @@ def default_registry() -> tuple[Control, ...]:
         check_legacy_pki_presence,
         check_legacy_admin_loopback,
         check_legacy_dns_database,
+        check_legacy_geo_ip_usage,
+        check_legacy_rfc6890_blackhole,
     )

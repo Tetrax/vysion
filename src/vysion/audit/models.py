@@ -305,6 +305,22 @@ class LegacyV1AdminPolicy(BaseModel):
         return self
 
 
+class LegacyV1Rfc6890Policy(BaseModel):
+    """Operator-supplied object aliases used by the historical blackhole rule."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    destination_objects: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def require_destination_objects(self) -> "LegacyV1Rfc6890Policy":
+        if not self.destination_objects or any(
+            not value.strip() for value in self.destination_objects
+        ):
+            raise ValueError("legacy_v1 RFC6890 destinations must be non-empty")
+        return self
+
+
 class AuditContext(BaseModel):
     """Immutable operator/context facts; omitted booleans remain unknown (None)."""
 
@@ -337,6 +353,7 @@ class AuditContext(BaseModel):
     utm_license_details_explicit: bool = Field(default=False, exclude=True)
     psirt: PsirtObservation | None = None
     legacy_v1_admin_policy: LegacyV1AdminPolicy | None = None
+    legacy_v1_rfc6890_policy: LegacyV1Rfc6890Policy | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -429,6 +446,7 @@ class AuditContext(BaseModel):
             "operator",
             "ha_cabling_redundancy",
             "legacy_v1_admin_policy",
+            "legacy_v1_rfc6890_policy",
         ):
             if getattr(self, field_name) is None:
                 serialized.pop(field_name, None)
@@ -590,6 +608,18 @@ class AddressGroup(BaseModel):
     name: str
     members: tuple[ObjectReference, ...] = ()
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class StaticRoute(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    route_id: str
+    destination: ObjectReference | None = None
+    blackhole: bool | None = None
+    distance: int | None = Field(default=None, ge=0, le=255)
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    invalidated_keys: frozenset[str] = Field(default_factory=frozenset)
     proof_state: ProofState = ProofState.UNKNOWN
 
 
@@ -804,6 +834,7 @@ class FortiGateConfiguration(BaseModel):
     address_objects: tuple[AddressObject, ...] = ()
     address_groups: tuple[AddressGroup, ...] = ()
     dns_database_entries: tuple[DnsDatabaseEntry, ...] = ()
+    static_routes: tuple[StaticRoute, ...] = ()
     virtual_servers: tuple[VirtualServer, ...] = ()
     profile_groups: tuple[ProfileGroup, ...] = ()
     log_setting: LogSetting | None = None

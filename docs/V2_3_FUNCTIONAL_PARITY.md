@@ -41,7 +41,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 6 | Système / administration | `verifier_compte_admin` | A | `IAM-DEFAULT-ADMIN-001` | Absence du compte administrateur par défaut. |
 | 7 | VPN | `verifier_vpn_ssl_utilisation` | A | `VPN-SSL-001` | État/usage SSL-VPN typé. |
 | 8 | Réseau / firewall | `verifier_presence_all_port_dans_regles` | A | `FW-INTERNET-ALL-SERVICE-001` | ALL canonique sur policy accept/enable vers une WAN certaine ; deny/disable hors portée, service non résolu UNKNOWN. |
-| 9 | Réseau / firewall | `verifier_utilisation_geo_ip` | C | Nouveau contrôle Geo-IP | Aucun équivalent V2 identifié. |
+| 9 | Réseau / firewall | `verifier_utilisation_geo_ip` | A | `NET-GEO-IP-USAGE-001` | Objets geography, groupes transitifs et policy/WAN projetés avec provenance legacy_v1. |
 | 10 | Réseau / firewall | `verifier_logs_deny_implicit` | A | `FW-IMPLICIT-DENY-LOG-001` | Journalisation du deny implicite. |
 | 11 | Système / lifecycle | `verifier_modele_fortigate_eol` | C | Source/version EOL à définir | Ne pas confondre avec PSIRT ; dépendance externe éventuelle. |
 | 12 | Système | `verifier_auto_install_usb` | A | `SYS-AUTO-INSTALL-USB-001` | Migré dans le premier tracer ; PASS exige les deux directives disable certaines. |
@@ -63,7 +63,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 | 28 | UTM / external services | `verifier_fortisandbox_cloud` | A | `UTM-FORTISANDBOX-CLOUD-001` | Région Europe explicite + licence UTM opérateur sourcée ; absence UNKNOWN. |
 | 29 | UTM / external services | `verifier_anycast_fortiguard` | A | `UTM-FORTIGUARD-ANYCAST-001` | `fortiguard-anycast disable` explicite, sans supposer le défaut. |
 | 30 | UTM / external services | `verifier_mises_a_jour_fortiguard` | A | `UTM-AUTOUPDATE-001` | Statut/fréquence typés ; aucune conformité n’est déduite d’une section absente. |
-| 31 | Réseau / firewall | `verifier_route_blackhole` | C | Projection routes + contexte MPLS/L2L | Dépend de `mpls_l2l`, aucun contrôle V2. |
+| 31 | Réseau / firewall | `verifier_route_blackhole` | A | `NET-RFC6890-BLACKHOLE-001` | Route typed et policy RFC6890 paramétrée, corrélées exclusivement à `AuditContext.mpls`. |
 | 32 | HA | `verifier_ha_redundance_cablage` | A | `HA-CABLING-REDUNDANCY-001` + AuditContext | Observation opérateur sourcée ; reste UNKNOWN quand le backup seul ne peut pas prouver le physique. |
 | 33 | HA | `verifier_ha_session_pickup` | A | `HA-SESSION-PICKUP-001` | Les trois options legacy sont projetées et contrôlées sans raw-text. |
 | 34 | HA | `verifier_ha_redundance_interfaces` | A | `HA-HEARTBEAT-REDUNDANCY-001` | `hbdev` est projeté avec validation des paires interface/priorité. |
@@ -95,11 +95,11 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 
 ## Synthèse courante
 
-- **A — équivalents identifiés : 41**
+- **A — équivalents identifiés : 43**
 - **B — partiels identifiés : 0**
-- **C — absents identifiés : 18**
+- **C — absents identifiés : 16**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **45 / 59** (76,3 %)
+- Disposition réellement `MIGRATED` : **47 / 59** (79,7 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -174,7 +174,7 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 
 | # | Capacité | Disposition | Justification |
 |---:|---|---|---|
-| 52 | Logs par règle | `BLOCKED_EXTERNAL_SOURCE` | Les compteurs de logs sont runtime et absents des backups ; ils restent explicitement non renseignés. |
+| 52 | Logs par règle | `BLOCKED_RUNTIME_DATA` | Les compteurs de logs sont runtime et absents des backups ; ils restent explicitement non renseignés. |
 | 53 | Inventaire administrateurs | `MIGRATED` | Les comptes typés sont exposés dans le JSON canonique et la feuille XLSX Comptes, sans credential. |
 | 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
 | 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | `Policy.schedule` expose seulement le nom référencé. Les namespaces `firewall schedule onetime/recurring/group`, leurs dates, groupes et timezone ne sont ni projetés ni présents dans le corpus ; aucune expiration n'est inventée. |
@@ -187,8 +187,8 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 | 3 | Usage par séquence | `MIGRATED` | `FW-BY-SEQUENCE-USAGE-001` reproduit les trois critères legacy sur le document structurel : `global-label`, plusieurs interfaces, ou `any` dans `srcintf`/`dstintf`. L’absence ou l’ambiguïté reste UNKNOWN. |
 | 4 | Objets inutilisés | `MIGRATED` | `CFG-UNUSED-SERVICE-001` restitue uniquement les services custom/groupes certainement orphelins depuis le graphe typed. Namespace absent/incomplet, collision, mutation, cycle ou résolution incomplète restent UNKNOWN ; famille certaine vide NOT_APPLICABLE. |
 | 8 | Service ALL dans les règles | `MIGRATED` | `FW-INTERNET-ALL-SERVICE-001` rejoué avec sélection WAN typed : ALL canonique sur accept/enable certain produit FAIL ; deny/disable est hors portée ; destination ou service non résolu reste UNKNOWN. Les exemptions historiques spécifiques ne sont pas recopiées. |
-| 9 | Geo-IP | `LEGACY_REVIEW_REQUIRED` | Le parser V2 ne projette pas `firewall address`/`addrgrp` avec `type geography`, et le corpus ne contient aucun cas Geo-IP. Namespace et applicabilité ne sont donc pas prouvables sans élargissement spéculatif. |
-| 31 | Route blackhole | `LEGACY_REVIEW_REQUIRED` | `AuditContext.mpls` est typed, mais `router static` (blackhole, distance, destination) n'est pas projeté et aucun corpus route MPLS/L2L n'existe ; la décision ne peut pas être corrélée sûrement. |
+| 9 | Geo-IP | `MIGRATED` | `NET-GEO-IP-USAGE-001` reproduit l’usage V1 sur source/destination WAN ou `any`; objets geography et groupes transitifs sont typed, cycles/collisions/mutations restent UNKNOWN. |
+| 31 | Route blackhole | `MIGRATED` | `NET-RFC6890-BLACKHOLE-001` reproduit la table V1 route complète/MPLS ; destinations RFC6890 viennent d’une policy typed legacy_v1, jamais d’un nom client codé. |
 | 36 | Ports sensibles interdits | `MIGRATED` | `FW-SENSITIVE-PROTOCOL-DENY-001` résout les ports et groupes typed selon le ruleset versionné. Un deny global `any`→`any` est reconnu uniquement avec LAN/WAN prouvées et couverture complète ; couverture partielle UNKNOWN, accept sensible certain FAIL. |
 
 ## Disposition du tracer réseau SD-WAN

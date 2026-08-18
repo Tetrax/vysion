@@ -47,7 +47,7 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         for reference in configuration.policies[0].object_references
     )
     statuses = {finding.control_id: finding.status for finding in findings}
-    assert len(statuses) == 48
+    assert len(statuses) == 50
     assert statuses == {
         finding.control_id: (
             AuditStatus.FAIL
@@ -76,8 +76,10 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
                 "IAM-LEGACY-PKI-REMOVAL-001",
                 "IAM-LEGACY-PKI-PRESENCE-001",
                 "NET-LEGACY-ADMIN-LOOPBACK-001",
-                "DNS-LEGACY-DATABASE-001",
-            }
+                    "DNS-LEGACY-DATABASE-001",
+                    "NET-GEO-IP-USAGE-001",
+                    "NET-RFC6890-BLACKHOLE-001",
+                }
             else AuditStatus.PASS
         )
         for finding in findings
