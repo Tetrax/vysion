@@ -4,7 +4,6 @@ import re
 
 from vysion.audit.controls._evidence import (
     evidence_for_directive,
-    evidence_for_sdwan_member,
     evidence_for_section,
     section_for,
 )
@@ -22,6 +21,7 @@ from vysion.audit.models import (
     ProofState,
     RiskAssessment,
     StructuralDirective,
+    StructuralDocument,
     StructuralEntry,
     StructuralSection,
     WanSelectionKind,
@@ -30,6 +30,89 @@ from vysion.audit.models import (
 
 _SESSION_HELPER = "system session-helper"
 _SYSTEM_GLOBAL = "system global"
+
+
+def _sdwan_member_directive(
+    document: StructuralDocument,
+    zone_name: str,
+    interface_name: str,
+) -> tuple[str, StructuralDirective] | None:
+    section = section_for(document, "system sdwan")
+    if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
+        return None
+    zone_sections = tuple(
+        child for child in section.children if child.name.casefold() == "zone"
+    )
+    members_sections = tuple(
+        child for child in section.children if child.name.casefold() == "members"
+    )
+    if len(zone_sections) != 1 or len(members_sections) != 1:
+        return None
+    zone_section = zone_sections[0]
+    members_section = members_sections[0]
+    if (
+        zone_section.certainty is not EvidenceCertainty.CERTAIN
+        or members_section.certainty is not EvidenceCertainty.CERTAIN
+    ):
+        return None
+    zone_entries = tuple(
+        entry
+        for entry in zone_section.entries
+        if entry.name.casefold() == zone_name.casefold()
+    )
+    if len(zone_entries) != 1 or zone_entries[0].certainty is not EvidenceCertainty.CERTAIN:
+        return None
+
+    candidates: list[tuple[str, StructuralDirective]] = []
+    for member in members_section.entries:
+        if member.certainty is not EvidenceCertainty.CERTAIN:
+            continue
+        directives = tuple(
+            directive for directive in member.directives if directive.name == "interface"
+        )
+        if (
+            len(directives) != 1
+            or directives[0].certainty is not EvidenceCertainty.CERTAIN
+            or directives[0].mutation
+            or len(directives[0].tokens) != 1
+            or directives[0].tokens[0].casefold() != interface_name.casefold()
+        ):
+            continue
+        zone_directives = tuple(
+            directive for directive in member.directives if directive.name == "zone"
+        )
+        if zone_directives and (
+            len(zone_directives) != 1
+            or zone_directives[0].certainty is not EvidenceCertainty.CERTAIN
+            or zone_directives[0].mutation
+            or len(zone_directives[0].tokens) != 1
+            or zone_directives[0].tokens[0].casefold() != zone_name.casefold()
+        ):
+            continue
+        if not zone_directives and len(zone_section.entries) != 1:
+            continue
+        candidates.append((member.name, directives[0]))
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _evidence_for_sdwan_member(
+    document: StructuralDocument,
+    zone_name: str,
+    interface_name: str,
+) -> EvidenceItem | None:
+    match = _sdwan_member_directive(document, zone_name, interface_name)
+    if match is None:
+        return None
+    member_name, directive = match
+    return EvidenceItem(
+        section="system sdwan -> members",
+        entry=member_name,
+        directive="interface",
+        tokens=directive.tokens,
+        line=directive.line,
+        certainty=directive.certainty,
+        defaulted=directive.defaulted,
+    )
 
 
 def _finding(
@@ -845,7 +928,7 @@ def check_sdwan_usage(
         item
         for key in sorted(required.keys() & members.keys())
         for item in (
-            evidence_for_sdwan_member(
+            _evidence_for_sdwan_member(
                 configuration.document,
                 members[key][0],
                 members[key][1],
