@@ -23,7 +23,9 @@ const report = {
   fortiguard: { status: 'AVAILABLE', detail: 'fixture' },
   findings: [
     { control_id: 'NET-WAN-MGMT-001', title: 'Administration SSH sur interface WAN', status: 'FAIL' },
+    { control_id: 'IAM-ADMIN-MFA-001', title: 'MFA à vérifier', status: 'UNKNOWN' },
     { control_id: 'SYS-HOSTNAME-001', title: 'Hostname conforme', status: 'PASS' },
+    { control_id: 'VPN-SSL-001', title: 'SSL-VPN non configuré', status: 'NOT_APPLICABLE' },
   ],
 }
 function jsonResponse(value: unknown, status = 200) {
@@ -49,7 +51,12 @@ describe('Vysion workflow V1', () => {
 
     expect(await screen.findByText('Administration SSH sur interface WAN')).toBeInTheDocument()
     expect(screen.getByText('Total Checks:')).toBeInTheDocument()
-    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.getByText('4')).toBeInTheDocument()
+    expect(screen.getByText('MFA à vérifier')).toBeInTheDocument()
+    expect(screen.queryByText('Hostname conforme')).not.toBeInTheDocument()
+    expect(screen.queryByText('SSL-VPN non configuré')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('NON CONFORME')).toHaveTextContent('✕')
+    expect(screen.getByLabelText('À VÉRIFIER')).toHaveTextContent('?')
     expect(screen.getByRole('link', { name: 'Download Word Report' })).toHaveAttribute('href', '/api/reports/7bd449c4-ef96-4d72-b4f6-2bc099c982a2.docx')
     expect(screen.getByRole('link', { name: 'Download Excel Report' })).toHaveAttribute('href', '/api/reports/7bd449c4-ef96-4d72-b4f6-2bc099c982a2.xlsx')
     expect(screen.queryByRole('link', { name: 'Download JSON Audit' })).not.toBeInTheDocument()

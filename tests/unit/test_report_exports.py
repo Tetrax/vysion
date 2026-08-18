@@ -22,6 +22,7 @@ from vysion.audit.models import (
 )
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
+from vysion.reports.business_text import business_text_for
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
@@ -139,6 +140,76 @@ def test_docx_renders_v1_client_language_without_engine_fields() -> None:
         "namespace",
     ):
         assert value not in document
+
+
+def test_docx_hides_not_applicable_findings_from_the_business_body() -> None:
+    applicable = _enriched_report().findings[0]
+    not_applicable = AuditFinding(
+        control_id="VPN-SSL-001",
+        title="État et usage explicites du SSL-VPN",
+        status=AuditStatus.NOT_APPLICABLE,
+        applicability=Applicability.NOT_APPLICABLE,
+        message="Le VPN SSL n'est pas utilisé.",
+    )
+    pass_finding = AuditFinding(
+        control_id="NET-SDWAN-USAGE-001",
+        title="Utilisation du SD-WAN",
+        status=AuditStatus.PASS,
+        applicability=Applicability.APPLICABLE,
+        message="Le SD-WAN est correctement utilisé.",
+    )
+    unknown_finding = AuditFinding(
+        control_id="NET-GEO-IP-USAGE-001",
+        title="Utilisation de la GEO-IP",
+        status=AuditStatus.UNKNOWN,
+        applicability=Applicability.APPLICABLE,
+        message="La configuration GEO-IP ne permet pas de conclure.",
+    )
+    report = _enriched_report().model_copy(
+        update={"findings": (applicable, pass_finding, unknown_finding, not_applicable)}
+    )
+
+    with ZipFile(BytesIO(render_docx(report))) as package:
+        document = package.read("word/document.xml").decode("utf-8")
+
+    assert "WAN management" in document
+    assert "Utilisation du SD-WAN" in document
+    assert "Utilisation de la GEO-IP" in document
+    assert "État et usage explicites du SSL-VPN" not in document
+    assert "NON APPLICABLE" not in document
+
+
+def test_docx_uses_v1_business_prose_and_detected_values() -> None:
+    finding = AuditFinding(
+        control_id="FW-INTERNET-ALL-SERVICE-001",
+        title="Services ALL vers Internet",
+        status=AuditStatus.FAIL,
+        applicability=Applicability.APPLICABLE,
+        affected_objects=(AffectedObject(name="23", object_type="policy"),),
+        message=(
+            "Tous les ports sont ouverts dans la règle ID : 23. "
+            "(fortigate-sensitive-protocols 2026-08-13)"
+        ),
+        risk=RiskAssessment(
+            summary="Une politique Internet peut autoriser tous les services.",
+            impact="SIGNIFICATIF",
+            likelihood="TRÈS VRAISEMBLABLE",
+            treatment="RAISONNABLE",
+        ),
+        recommendation="Remplacer ALL par une allowlist de services nécessaire.",
+        remediation="Limiter les services autorisés vers Internet.",
+    )
+    report = _enriched_report().model_copy(update={"findings": (finding,)})
+
+    with ZipFile(BytesIO(render_docx(report))) as package:
+        document = package.read("word/document.xml").decode("utf-8")
+
+    assert "Filtrage des ports au strict minimum pour les flux vers Internet." in document
+    assert "Tous les ports sont ouverts dans la règle ID : 23." in document
+    assert "Ouvrir trop de ports sur un pare-feu expose le réseau" in document
+    assert "fortigate-sensitive-protocols" not in document
+    assert "Vérification de la bonne pratique suivante" not in document
+    assert "met en évidence une non-conformité nécessitant une action corrective" not in document
 
 
 def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> None:
@@ -284,6 +355,14 @@ def test_m5_json_xlsx_keep_finding_ids_but_docx_is_client_facing() -> None:
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
     assert all(control_id not in document for control_id in json_ids)
+    assert all(business_text_for(finding) is not None for finding in report.findings)
+    assert all(
+        finding.title not in document
+        for finding in report.findings
+        if finding.status is AuditStatus.NOT_APPLICABLE
+    )
+    assert "Vérification de la bonne pratique suivante" not in document
+    assert "met en évidence une non-conformité nécessitant une action corrective" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
     xlsx_ids = [

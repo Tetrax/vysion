@@ -12,7 +12,7 @@ from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
 
 
-def test_not_applicable_status_is_preserved_by_json_docx_and_xlsx_exports() -> None:
+def test_not_applicable_status_is_preserved_in_machine_exports_but_hidden_from_docx() -> None:
     created_at = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
     report = JsonAuditReport(
         report_id=uuid4(),
@@ -37,7 +37,8 @@ def test_not_applicable_status_is_preserved_by_json_docx_and_xlsx_exports() -> N
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "NON APPLICABLE" in document
+    assert "Contrôle non applicable" not in document
+    assert "NON APPLICABLE" not in document
     assert "NOT_APPLICABLE" not in document
     assert "not_applicable" not in document
 

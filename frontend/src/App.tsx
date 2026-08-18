@@ -244,7 +244,7 @@ function App() {
   }
 
   const findings = report?.findings ?? []
-  const nonConform = findings.filter((finding) => finding.status !== 'PASS')
+  const nonConform = findings.filter((finding) => finding.status === 'FAIL' || finding.status === 'UNKNOWN')
 
   return <div className="app-shell">
     <header className="hero">
@@ -364,9 +364,12 @@ function App() {
         </div>
 
         {nonConform.length > 0 ? <div className="reports-section">
-          <h3>Check-list de contrôles basiques non conformes</h3>
+          <h3>Contrôles non conformes ou à vérifier</h3>
           <div className="checks-table-wrapper"><table className="checks-table"><thead><tr><th>Contrôle</th><th className="checks-status-col">Statut</th></tr></thead><tbody>
-            {nonConform.map((finding) => <tr key={finding.control_id}><td className="checks-name">{finding.title}</td><td className="checks-status"><span className={`status-icon ${finding.status.toLowerCase()}`} aria-label={finding.status}>{finding.status === 'FAIL' ? '✕' : finding.status === 'UNKNOWN' ? '?' : '!'}</span></td></tr>)}
+            {nonConform.map((finding) => {
+              const statusLabel = finding.status === 'FAIL' ? 'NON CONFORME' : 'À VÉRIFIER'
+              return <tr key={finding.control_id}><td className="checks-name">{finding.title}</td><td className="checks-status"><span className={`status-icon ${finding.status.toLowerCase()}`} aria-label={statusLabel} title={statusLabel}>{finding.status === 'FAIL' ? '✕' : '?'}</span></td></tr>
+            })}
           </tbody></table></div>
         </div> : <div className="reports-section"><h3>Contrôles</h3><div className="info-box">✅ Aucun contrôle non conforme détecté.</div></div>}
 

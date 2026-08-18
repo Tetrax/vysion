@@ -13,6 +13,11 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 from vysion.audit.models import AuditFinding, AuditStatus, DeviceIdentity, RiskAssessment
+from vysion.reports.business_text import (
+    business_risk_for,
+    business_text_for,
+    client_result_for,
+)
 from vysion.reports.json_report import JsonAuditReport
 
 _TEMPLATE = Path(__file__).with_name("templates") / "generique.docx"
@@ -219,57 +224,19 @@ def _domain_for(finding: AuditFinding) -> str:
 
 
 def _point_audited(finding: AuditFinding) -> str:
-    title = finding.title.casefold()
-    if "mfa" in title:
-        return (
-            "Vérification de la présence d'une double authentification sur les comptes "
-            "administrateurs et utilisateurs locaux lorsque cette information est disponible."
-        )
-    if "wan" in title or "administration" in title:
-        return (
-            "Vérification que les services d'administration ne sont pas exposés sur les "
-            "interfaces utilisées pour les flux vers Internet."
-        )
-    if "sensitive" in title or "sensible" in title or "port" in title:
-        return (
-            "Vérification que les flux vers Internet ne permettent pas l'utilisation de "
-            "protocoles ou ports sensibles qui augmenteraient la surface d'attaque."
-        )
-    if "utm" in title or "profil" in title or "license" in title or "licence" in title:
-        return (
-            "Vérification de la configuration des profils de sécurité et de la licence "
-            "nécessaire à leur fonctionnement."
-        )
-    if "sd-wan" in title.casefold():
-        return (
-            "Vérification de l'utilisation du SD-WAN pour les flux associés aux liaisons "
-            "sélectionnées."
-        )
-    if "ha" in title.casefold() or "cluster" in title.casefold():
-        return (
-            "Vérification de la disponibilité et du niveau de redondance du cluster "
-            "FortiGate."
-        )
-    if "vpn" in title.casefold() or "ike" in title.casefold():
-        return "Vérification de la configuration et de l'utilisation des connexions VPN."
-    return f"Vérification de la bonne pratique suivante : {_clean_client_text(finding.title)}."
+    business_text = business_text_for(finding)
+    if business_text is not None:
+        return business_text.point
+    return (
+        "Évaluation de ce point de configuration à partir des éléments réellement "
+        f"observés : {_clean_client_text(finding.title)}."
+    )
 
 
 def _result_explanation(finding: AuditFinding) -> str:
-    title = _clean_client_text(finding.title)
-    if finding.status is AuditStatus.PASS:
-        return f"Le contrôle « {title} » est conforme au regard de la configuration analysée."
-    if finding.status is AuditStatus.FAIL:
-        return (
-            f"Le contrôle « {title} » met en évidence une non-conformité "
-            "nécessitant une action corrective."
-        )
     if finding.status is AuditStatus.NOT_APPLICABLE:
-        return f"Le contrôle « {title} » ne s'applique pas au périmètre analysé."
-    return (
-        f"Le contrôle « {title} » ne permet pas de conclure de manière fiable avec les "
-        "informations disponibles. Aucune non-conformité n'est déclarée sur ce point."
-    )
+        return "Ce point n'est pas applicable au périmètre analysé."
+    return client_result_for(finding)
 
 
 def _normalize_impact(value: str | None) -> str:
@@ -297,15 +264,25 @@ def _add_risk_table(
     risk_number: int,
     finding: AuditFinding,
 ) -> dict[str, str]:
-    likelihood, impact, risk_level, correction = _risk_values(finding.risk)
-    point = _clean_client_text(finding.title)
+    business_text = business_text_for(finding)
+    risk_assessment = business_risk_for(finding)
+    likelihood, impact, risk_level, correction = _risk_values(risk_assessment)
+    point = _clean_client_text(
+        business_text.risk_point if business_text and business_text.risk_point else finding.title
+    )
     description = _clean_client_text(
-        finding.risk.summary
-        if finding.risk
+        business_text.risk_description
+        if business_text and business_text.risk_description
+        else risk_assessment.summary
+        if risk_assessment
         else "La configuration présente une faiblesse de sécurité à corriger."
     )
     remediation = _clean_client_text(
-        finding.remediation or finding.recommendation or "Mettre la configuration en conformité."
+        business_text.remediation
+        if business_text and business_text.remediation
+        else finding.remediation
+        or finding.recommendation
+        or "Mettre la configuration en conformité."
     )
     table = document.add_table(rows=7, cols=2)
     table.style = "Table Grid"
@@ -510,6 +487,11 @@ def render_docx(report: JsonAuditReport) -> bytes:
 
     grouped: dict[str, list[AuditFinding]] = {domain: [] for domain in _DOMAIN_ORDER}
     for finding in report.findings:
+        # NOT_APPLICABLE is a valid engine result, but it is intentionally not
+        # printed as a client report section.  The canonical JSON/XLSX still
+        # retains it and the audit total remains unchanged elsewhere.
+        if finding.status is AuditStatus.NOT_APPLICABLE:
+            continue
         grouped.setdefault(_domain_for(finding), []).append(finding)
 
     risks: list[dict[str, str]] = []
