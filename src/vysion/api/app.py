@@ -1,6 +1,6 @@
 import json
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -336,6 +336,7 @@ def _audit_context(
     serial_number: str | None,
     uptime: str | None,
     unmatched_rules: str | None,
+    schedule_reference_instant: str | None,
     operator_comment: str | None,
     operator: str | None,
     ha: str | None,
@@ -390,6 +391,21 @@ def _audit_context(
         if unmatched_value is not None
         else None
     )
+    reference_instant = None
+    if schedule_reference_instant is not None:
+        try:
+            reference_instant = datetime.fromisoformat(
+                schedule_reference_instant.replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="invalid schedule_reference_instant"
+            ) from exc
+        if reference_instant.utcoffset() is None:
+            raise HTTPException(
+                status_code=422,
+                detail="schedule_reference_instant must include a timezone offset",
+            )
     return AuditContext(
         selected_wans=selected,
         wan_selections=typed_selections,
@@ -400,6 +416,7 @@ def _audit_context(
         uptime=uptime,
         operator_comment=operator_comment,
         rule_match_statistics=rule_match_statistics,
+        schedule_reference_instant=reference_instant,
         operator=operator,
         utm_license_details=license_details,
         **booleans,
@@ -609,6 +626,9 @@ def create_app(
         unmatched_rules = _optional_form_value(
             form.getlist("unmatched_rules"), "unmatched_rules"
         )
+        schedule_reference_instant = _optional_form_value(
+            form.getlist("schedule_reference_instant"), "schedule_reference_instant"
+        )
         operator_comment = _optional_form_value(
             form.getlist("context_comment") or form.getlist("comment"), "context_comment"
         )
@@ -658,6 +678,7 @@ def create_app(
             serial_number=serial_number,
             uptime=uptime,
             unmatched_rules=unmatched_rules,
+            schedule_reference_instant=schedule_reference_instant,
             operator_comment=operator_comment,
             operator=operator,
             ha=ha,

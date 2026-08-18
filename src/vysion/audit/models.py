@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import (
     AliasChoices,
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -338,6 +339,7 @@ class AuditContext(BaseModel):
         validation_alias=AliasChoices("operator_comment", "comment", "context_comment"),
     )
     rule_match_statistics: RuleMatchStatistics | None = None
+    schedule_reference_instant: AwareDatetime | None = None
     operator: str | None = Field(
         default=None,
         validation_alias=AliasChoices("operator", "network_operator", "operator_name"),
@@ -443,6 +445,7 @@ class AuditContext(BaseModel):
             "serial_number",
             "uptime",
             "rule_match_statistics",
+            "schedule_reference_instant",
             "operator",
             "ha_cabling_redundancy",
             "legacy_v1_admin_policy",
@@ -554,6 +557,38 @@ class Policy(BaseModel):
     @property
     def id(self) -> str:
         return self.policy_id
+
+
+class OnetimeSchedule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    end: datetime | None = None
+    parsed_keys: frozenset[str] = Field(default_factory=frozenset)
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class RecurringSchedule(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class ScheduleGroup(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    members: tuple[ObjectReference, ...] = ()
+    proof_state: ProofState = ProofState.UNKNOWN
+
+
+class ScheduleCounts(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    always: int = Field(ge=0)
+    active: int = Field(ge=0)
+    expired: int = Field(ge=0)
 
 
 class PortRange(BaseModel):
@@ -827,6 +862,9 @@ class FortiGateConfiguration(BaseModel):
     zones: tuple[Zone, ...] = ()
     sdwan_zones: tuple[Zone, ...] = ()
     policies: tuple[Policy, ...] = ()
+    onetime_schedules: tuple[OnetimeSchedule, ...] = ()
+    recurring_schedules: tuple[RecurringSchedule, ...] = ()
+    schedule_groups: tuple[ScheduleGroup, ...] = ()
     service_objects: tuple[ServiceObject, ...] = ()
     service_groups: tuple[ServiceObject, ...] = ()
     vips: tuple[Vip, ...] = ()
@@ -873,6 +911,7 @@ class AuditFinding(BaseModel):
     remediation: str | None = None
     customer_approval: bool | None = None
     rule_provenance: str | None = None
+    schedule_counts: ScheduleCounts | None = None
 
     @field_validator("affected_objects", mode="before")
     @classmethod

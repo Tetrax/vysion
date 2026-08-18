@@ -30,6 +30,7 @@ from vysion.audit.models import (
     StructuralSection,
     Zone,
 )
+from vysion.audit.schedule_projection import apply_schedule_projection, project_schedules
 from vysion.audit.utm_projection import apply_utm_projection, project_utm
 from vysion.audit.vpn_projection import apply_vpn_projection, project_vpn
 
@@ -45,6 +46,9 @@ _CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
     "user ldap",
     "vpn ipsec phase1-interface",
     "vpn ipsec phase2-interface",
+    "firewall schedule onetime",
+    "firewall schedule recurring",
+    "firewall schedule group",
 }
 _ALLOWED_CONTROLS = {"\n", "\r", "\t"}
 _RELEVANT_KEYS = {
@@ -178,6 +182,9 @@ _PROJECTED_SECTIONS = {
     "system fortisandbox",
     "system fortiguard",
     "router static",
+    "firewall schedule onetime",
+    "firewall schedule recurring",
+    "firewall schedule group",
 }
 _PROJECTED_KEYS = {
     "system zone": {"interface"},
@@ -244,6 +251,9 @@ _PROJECTED_KEYS = {
     "system fortisandbox": {"sandbox-region"},
     "system fortiguard": {"fortiguard-anycast"},
     "router static": {"dstaddr", "blackhole", "distance"},
+    "firewall schedule onetime": {"end"},
+    "firewall schedule recurring": {"day", "start", "end"},
+    "firewall schedule group": {"member"},
 }
 _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "system zone": frozenset({"intrazone"}),
@@ -386,6 +396,9 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "router static": frozenset(
         {"comment", "device", "gateway", "priority", "status", "vrf"}
     ),
+    "firewall schedule onetime": frozenset({"color", "start"}),
+    "firewall schedule recurring": frozenset({"color"}),
+    "firewall schedule group": frozenset({"color"}),
 }
 _PROJECTED_CHILD_KEYS = {
     "zone": {"interface", "member"},
@@ -2124,6 +2137,7 @@ class FortiGateParser:
             parsed_value_sections=frozenset({"system global"} if hostname_proven else set()),
         )
         configuration = apply_firewall_projection(configuration, firewall_projection)
+        configuration = apply_schedule_projection(configuration, project_schedules(document))
         configuration = apply_vpn_projection(configuration, project_vpn(document))
         configuration = apply_ha_projection(configuration, project_ha(document))
         configuration = apply_legacy_admin_projection(

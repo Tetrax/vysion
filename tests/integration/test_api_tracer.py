@@ -90,6 +90,7 @@ CONTROL_IDS = (
     "DNS-LEGACY-DATABASE-001",
     "NET-GEO-IP-USAGE-001",
     "NET-RFC6890-BLACKHOLE-001",
+    "FW-LEGACY-SCHEDULE-INVENTORY-001",
 )
 
 M3_FAIL_CONFIG = b"""\
@@ -346,7 +347,8 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "NET-LEGACY-ADMIN-LOOPBACK-001",
         "DNS-LEGACY-DATABASE-001",
         "NET-GEO-IP-USAGE-001",
-        "NET-RFC6890-BLACKHOLE-001",
+            "NET-RFC6890-BLACKHOLE-001",
+            "FW-LEGACY-SCHEDULE-INVENTORY-001",
     ):
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-UNUSED-SERVICE-001")] = "UNKNOWN"
@@ -500,7 +502,8 @@ async def test_api_stores_a_typed_json_report_under_uuid_and_serves_it(
                     "NET-LEGACY-ADMIN-LOOPBACK-001",
                     "DNS-LEGACY-DATABASE-001",
                     "NET-GEO-IP-USAGE-001",
-                    "NET-RFC6890-BLACKHOLE-001",
+                        "NET-RFC6890-BLACKHOLE-001",
+                        "FW-LEGACY-SCHEDULE-INVENTORY-001",
                     }
                 else "P0"
             )

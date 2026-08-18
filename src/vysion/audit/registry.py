@@ -42,6 +42,7 @@ from vysion.audit.controls.network_parity import (
 )
 from vysion.audit.controls.object_usage import check_unused_service_objects
 from vysion.audit.controls.references import check_reference_integrity
+from vysion.audit.controls.schedules import check_legacy_schedule_inventory
 from vysion.audit.controls.system import check_automatic_revision_backups, check_hostname
 from vysion.audit.controls.system_parity import (
     check_admin_https_port,
@@ -124,4 +125,5 @@ def default_registry() -> tuple[Control, ...]:
         check_legacy_dns_database,
         check_legacy_geo_ip_usage,
         check_legacy_rfc6890_blackhole,
+        check_legacy_schedule_inventory,
     )

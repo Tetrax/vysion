@@ -11,7 +11,7 @@
 - V1 oracle read-only : `/home/tetrax/workspace/vysion/audit-fgt-vysion`
 - Fonction oracle : `backend/app/audit/legacy_functions.py::auditer`
 - Extraction déterministe : **59 appels métier distincts**, vérifiés par AST Python 3.12
-- Registre V2 observé : **43 contrôles**, préfixe historique stable, aucun `ENGINE-*`
+- Registre V2 observé : **51 contrôles**, préfixe historique stable, aucun `ENGINE-*`
 - V1 `legacy_functions.py` n’est pas parsable par Python 3.11 à cause d’une f-string PEP 701 ; Python 3.12.3 l’analyse correctement. Aucun code V1 n’est exécuté dans cette comparaison.
 - V2 possède au démarrage cinq fichiers P1 non committés, conservés hors de cette migration :
   - `src/vysion/audit/controls/_evidence.py`
@@ -99,7 +99,7 @@ Ces catégories sont l’inventaire initial. Elles deviennent ensuite : `MIGRATE
 - **B — partiels identifiés : 0**
 - **C — absents identifiés : 16**
 - Total : **59 / 59**
-- Disposition réellement `MIGRATED` : **47 / 59** (79,7 %)
+- Disposition réellement `MIGRATED` : **48 / 59** (81,4 %)
 
 Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproductibles à partir de cette table. Une capacité A n’est pas encore déclarée `MIGRATED` tant qu’elle n’a pas été rejouée sur une configuration synthétique réaliste et comparée à la sortie V1 observable.
 
@@ -174,10 +174,10 @@ Les comptes sont calculés sur la colonne `V2 actuel` et doivent rester reproduc
 
 | # | Capacité | Disposition | Justification |
 |---:|---|---|---|
-| 52 | Logs par règle | `BLOCKED_RUNTIME_DATA` | Les compteurs de logs sont runtime et absents des backups ; ils restent explicitement non renseignés. |
+| 52 | Logs par règle | `BLOCKED_RUNTIME_DATA` | Les compteurs sont des données runtime absentes des backups : aucun compteur n'est inventé. L'observation optionnelle `RuleMatchStatistics` est typed, bornée, de provenance opérateur/runtime/API et traverse le JSON canonique, l'API, l'UI, le DOCX et le XLSX. |
 | 53 | Inventaire administrateurs | `MIGRATED` | Les comptes typés sont exposés dans le JSON canonique et la feuille XLSX Comptes, sans credential. |
 | 54 | Statistiques de règles | `MIGRATED` | Total, enable explicite, disable explicite et statut inconnu sont communs au JSON, DOCX et XLSX. |
-| 55 | Inventaire schedules | `LEGACY_REVIEW_REQUIRED` | `Policy.schedule` expose seulement le nom référencé. Les namespaces `firewall schedule onetime/recurring/group`, leurs dates, groupes et timezone ne sont ni projetés ni présents dans le corpus ; aucune expiration n'est inventée. |
+| 55 | Inventaire schedules | `MIGRATED` | `FW-LEGACY-SCHEDULE-INVENTORY-001` reproduit le comptage V1 (`always` inclut le deny implicite, recurring actif, onetime comparé à l'instant opérateur timezone-aware, groupe expiré dès qu'un membre onetime l'est). Les namespaces et références sont typed ; absence d'instant, datetime naïf, mutation, collision ou référence incomplète échouent en UNKNOWN/validation, avec provenance `legacy_v1`. |
 | 56 | Profils SSL/SSH | `MIGRATED` | `FW-SSL-SSH-PROFILE-001` résout les profils utilisés et valide le sous-bloc typed `https` aux seuils FortiOS exacts de V1 ; mutation/collision/résolution incomplète UNKNOWN. |
 
 ## Dispositions explicites du lot réseau

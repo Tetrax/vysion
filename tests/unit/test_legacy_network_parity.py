@@ -144,5 +144,5 @@ def test_blackhole_is_unknown_for_mutation_collision_or_missing_policy() -> None
 
 def test_registry_appends_network_legacy_controls_in_stable_order() -> None:
     ids = [getattr(control, "control_id", "") for control in default_registry()]
-    assert ids[-2:] == [GEO_ID, BLACKHOLE_ID]
-    assert len(ids) == 50
+    assert ids[-3:-1] == [GEO_ID, BLACKHOLE_ID]
+    assert len(ids) == 51
