@@ -114,31 +114,31 @@ def _enriched_report() -> JsonAuditReport:
     )
 
 
-def test_docx_renders_context_and_all_enriched_finding_fields_from_json_report() -> None:
-    with ZipFile(BytesIO(render_docx(_enriched_report()))) as package:
+def test_docx_renders_v1_client_language_without_engine_fields() -> None:
+    finding = _enriched_report().findings[0].model_copy(
+        update={"remediation": "Retirer admin des namespaces concernés"}
+    )
+    report = _enriched_report().model_copy(update={"findings": (finding,)})
+    with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
 
+    assert "Audit de configuration" in document
+    assert "Point audité :" in document
+    assert "Résultat :" in document
+    assert "NON CONFORME" in document
     for value in (
         "operator-form",
         "analyst",
-        "client",
-        "site",
-        "wan1",
-        "network",
         "P0",
-        "high",
         "applicable",
         "allowaccess",
-        "interface",
         "@risk",
-        "impact",
-        "high",
-        "treat",
         "+recommendation",
-        "remediation",
-        "Non renseigné",
+        "evidence_items",
+        "line=3",
+        "namespace",
     ):
-        assert value in document
+        assert value not in document
 
 
 def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> None:
@@ -185,7 +185,7 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
                     raise AssertionError(f"formula-like cell was not escaped: {cell.coordinate}")
 
 
-def test_structured_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
+def test_structured_evidence_item_stays_in_xlsx_not_client_docx() -> None:
     finding = _enriched_report().findings[0].model_copy(
         update={
             "evidence": (),
@@ -204,8 +204,8 @@ def test_structured_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "allowaccess" in document
-    assert "ligne 42" in document
+    assert "allowaccess" not in document
+    assert "ligne 42" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), data_only=False)
     proof = workbook["Contrôles enrichis"]["I2"].value
@@ -214,7 +214,7 @@ def test_structured_evidence_item_is_rendered_across_docx_and_xlsx() -> None:
     assert "ligne 42" in proof
 
 
-def test_m5_json_docx_xlsx_share_all_finding_ids() -> None:
+def test_m5_json_xlsx_keep_finding_ids_but_docx_is_client_facing() -> None:
     fixture = Path(__file__).parents[1] / "fixtures" / "anonymized_fortigate_export.conf"
     configuration = FortiGateParser().parse(fixture.read_text(encoding="utf-8"))
     findings = AuditEngine(default_registry()).run(configuration)
@@ -283,7 +283,7 @@ def test_m5_json_docx_xlsx_share_all_finding_ids() -> None:
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert all(control_id in document for control_id in json_ids)
+    assert all(control_id not in document for control_id in json_ids)
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
     xlsx_ids = [

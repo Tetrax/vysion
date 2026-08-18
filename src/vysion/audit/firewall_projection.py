@@ -57,6 +57,9 @@ _SERVICE_KEYS = frozenset(
     {"tcp-portrange", "udp-portrange", "member", "protocol", "protocol-number"}
 )
 _VIP_KEYS = frozenset({"extintf", "extip", "mappedip", "type"})
+_VALID_VIP_TYPES = frozenset(
+    {"static-nat", "server-load-balance", "dns-translation", "fqdn"}
+)
 _PROFILE_GROUP_KEYS = frozenset(
     {
         "webfilter-profile",
@@ -76,6 +79,7 @@ _PROFILE_SECTIONS = {
     "firewall ssl-ssh-profile",
     "firewall profile-protocol-options",
     "firewall webfilter profile",
+    "firewall voip profile",
     "firewall ips sensor",
     "firewall antivirus profile",
     "firewall dnsfilter profile",
@@ -361,13 +365,19 @@ def _project_service(entry: StructuralEntry, service_type: str) -> ServiceObject
     protocol_shape_valid = True
     has_explicit_port_ranges = bool(tcp or udp)
     if normalized_protocol == "all":
-        protocol_shape_valid = not has_explicit_port_ranges
-        tcp = (PortRange(start=0, end=65535),)
-        udp = (PortRange(start=0, end=65535),)
+        # FortiOS exports both forms: an unconstrained ALL service and an
+        # ALL service with an explicit full-range tcp/udp definition.
+        if not has_explicit_port_ranges:
+            tcp = (PortRange(start=0, end=65535),)
+            udp = (PortRange(start=0, end=65535),)
     elif normalized_protocol in {"icmp", "icmp6"}:
         protocol_shape_valid = not has_explicit_port_ranges
     elif normalized_protocol == "ip":
-        protocol_valid = protocol_number_valid and protocol_number is not None
+        if entry.name.casefold() == "all" and protocol_number is None:
+            tcp = (PortRange(start=0, end=65535),)
+            udp = (PortRange(start=0, end=65535),)
+        else:
+            protocol_valid = protocol_number_valid and protocol_number is not None
         protocol_shape_valid = not has_explicit_port_ranges
         if protocol_number == 6:
             tcp = (PortRange(start=0, end=65535),)
@@ -413,9 +423,26 @@ def _project_service(entry: StructuralEntry, service_type: str) -> ServiceObject
 def _project_vip(entry: StructuralEntry) -> Vip | VirtualServer:
     directives = _certain_directives(entry, _VIP_KEYS)
     extintf = _tokens(directives, "extintf")
+    extip_values = _tokens(directives, "extip")
+    extip = _single(directives, "extip")
+    extip_cardinality_valid = len(extip_values) <= 1
+    vip_type_values = _tokens(directives, "type")
     vip_type = _single(directives, "type")
+    vip_type_valid = (
+        "type" not in entry.invalidated_keys
+        and (
+            not vip_type_values
+            or (
+                len(vip_type_values) == 1
+                and vip_type_values[0].casefold() in _VALID_VIP_TYPES
+            )
+        )
+    )
+    realserver_children = tuple(
+        child for child in entry.children if child.name.casefold() == "realservers"
+    )
+    servers = _realservers(entry)
     if vip_type is not None and vip_type.casefold() == "server-load-balance":
-        servers = _realservers(entry)
         return VirtualServer(
             name=entry.name,
             extintf=extintf,
@@ -427,6 +454,8 @@ def _project_vip(entry: StructuralEntry) -> Vip | VirtualServer:
             proof_state=(
                 ProofState.PROVEN
                 if entry.certainty is EvidenceCertainty.CERTAIN
+                and vip_type_valid
+                and extip_cardinality_valid
                 and "extintf" in directives
                 and bool(servers)
                 and all(server.proof_state is ProofState.PROVEN for server in servers)
@@ -436,7 +465,7 @@ def _project_vip(entry: StructuralEntry) -> Vip | VirtualServer:
     return Vip(
         name=entry.name,
         extintf=extintf,
-        extip=_single(directives, "extip"),
+        extip=extip,
         mappedip=_tokens(directives, "mappedip"),
         vip_type=vip_type,
         parsed_keys=frozenset(directives)
@@ -445,6 +474,9 @@ def _project_vip(entry: StructuralEntry) -> Vip | VirtualServer:
         proof_state=(
             ProofState.PROVEN
             if entry.certainty is EvidenceCertainty.CERTAIN
+            and vip_type_valid
+            and extip_cardinality_valid
+            and not realserver_children
             and all(key in directives for key in ("extintf", "extip", "mappedip"))
             else ProofState.UNKNOWN
         ),

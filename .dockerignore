@@ -20,4 +20,5 @@ tests
 *.conf
 !deploy/nginx.conf
 *.docx
+!src/vysion/reports/templates/*.docx
 *.xlsx

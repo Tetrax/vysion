@@ -160,6 +160,67 @@ end
     assert configuration.sdwan_zones[0].proof_state.value == "proven"
 
 
+def test_sdwan_zone_survives_non_membership_options_and_child_blocks() -> None:
+    configuration = FortiGateParser().parse(
+        """config system interface
+    edit "wan1"
+        set role wan
+        set allowaccess ping
+    next
+    edit "wan2"
+        set role wan
+        set allowaccess ping
+    next
+end
+config system sdwan
+    set status enable
+    set load-balance-mode source-ip-based
+    set release-specific-option enable
+    config zone
+        edit "Z-INTERSITE"
+        next
+    end
+    config members
+        edit 1
+            set interface "wan1"
+            set gateway 192.0.2.1
+        next
+        edit 2
+            set interface "wan2"
+        next
+    end
+    config health-check
+        edit "inter-site"
+            set server "192.0.2.1"
+            set members 1 2
+            set update-static-route disable
+        next
+    end
+    config service
+        edit 1
+            set name "inter-site"
+            set mode sla
+            set dst "all"
+            set src "all"
+            set health-check "inter-site"
+            set priority-members 1 2
+            set priority-zone "Z-INTERSITE"
+        next
+    end
+end
+"""
+    )
+
+    sdwan = configuration.sdwan_zones[0]
+
+    sdwan_section = configuration.document.section("system sdwan")
+    assert sdwan_section is not None
+    assert sdwan_section.certainty.value == "certain"
+    assert sdwan.name == "Z-INTERSITE"
+    assert [reference.name for reference in sdwan.interfaces] == ["wan1", "wan2"]
+    assert sdwan.proof_state.value == "proven"
+
+
 def test_nested_sdwan_zone_with_unknown_child_is_unknown() -> None:
     configuration = FortiGateParser().parse(
         """config system interface

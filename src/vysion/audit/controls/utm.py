@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 
 from vysion.audit.models import (
     AffectedObject,
@@ -98,6 +99,8 @@ def _license_evidence(
 def check_utm_license(
     configuration: FortiGateConfiguration,
     context: AuditContext | None = None,
+    *,
+    clock: Callable[[], datetime] | None = None,
 ) -> AuditFinding:
     del configuration
     proven = _license_is_proven(context)
@@ -119,32 +122,41 @@ def check_utm_license(
 
     assert context is not None
     licensed = context.utm_license is True
+    expiration = (
+        context.utm_license_details.expiration_date
+        if context.utm_license_details is not None
+        else None
+    )
+    today = (clock() if clock is not None else datetime.now(UTC)).date()
+    expired = bool(licensed and expiration is not None and expiration < today)
+    status = AuditStatus.PASS if licensed and not expired else AuditStatus.FAIL
     return _finding(
         control_id="UTM-LICENSE-001",
         title="Licence UTM déclarée et traçable",
-        status=AuditStatus.PASS if licensed else AuditStatus.FAIL,
+        status=status,
         applicability=Applicability.APPLICABLE,
         evidence=(
             f"Licence UTM explicitement déclarée {str(licensed).casefold()} "
             f"par {context.operator_provenance.source}."
+            + (f" expiration={expiration.isoformat()}" if expiration else "")
         ,),
         evidence_items=(
             _license_evidence(context, certainty=EvidenceCertainty.CERTAIN),
         ),
         affected_objects=(),
         message=(
-            "La licence UTM est explicitement déclarée active."
-            if licensed
-            else "La licence UTM est explicitement déclarée inactive."
+            "La licence UTM est explicitement déclarée active et non expirée."
+            if status is AuditStatus.PASS
+            else "La licence UTM est inactive ou sa date de fin est dépassée."
         ),
         recommendation=(
-            "Conserver la provenance de la déclaration de licence."
-            if licensed
+            "Conserver la provenance et la date de fin de licence."
+            if status is AuditStatus.PASS
             else "Activer ou renouveler la licence UTM requise."
         ),
         remediation=(
             "Aucune remédiation immédiate."
-            if licensed
+            if status is AuditStatus.PASS
             else "Régulariser la licence puis relancer l'audit."
         ),
     )
@@ -189,6 +201,27 @@ def check_utm_autoupdate(
         )
 
     section = configuration.document.section("system autoupdate schedule")
+    if section is None and configuration.complete_backup:
+        return _finding(
+            control_id=control_id,
+            title=title,
+            status=AuditStatus.PASS,
+            applicability=Applicability.APPLICABLE,
+            evidence=("Backup complet : FortiOS applique la fréquence automatique par défaut.",),
+            evidence_items=(
+                EvidenceItem(
+                    section="system autoupdate schedule",
+                    certainty=EvidenceCertainty.CERTAIN,
+                ),
+            ),
+            affected_objects=(),
+            message=(
+                "Les mises à jour FortiGuard suivent le défaut automatique V1 "
+                "en l'absence de surcharge."
+            ),
+            recommendation="Conserver le défaut ou déclarer explicitement la planification.",
+            remediation="Aucune remédiation immédiate.",
+        )
     structurally_valid = bool(
         section is not None
         and section.certainty is EvidenceCertainty.CERTAIN

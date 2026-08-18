@@ -54,6 +54,13 @@ def test_utm_external_missing_or_unlicensed_evidence_never_passes() -> None:
         assert findings["UTM-FORTIGUARD-ANYCAST-001"].status is not AuditStatus.PASS
 
 
+def test_utm_external_unlicensed_is_a_legacy_failure_not_not_applicable() -> None:
+    findings = _findings(UTM_EXTERNAL_STRONG, licensed=False)
+
+    assert findings["UTM-FORTISANDBOX-CLOUD-001"].status is AuditStatus.FAIL
+    assert findings["UTM-FORTIGUARD-ANYCAST-001"].status is AuditStatus.FAIL
+
+
 def test_mail_filter_usage_is_a_certain_failure_through_registry() -> None:
     raw = """config firewall policy
     edit 10

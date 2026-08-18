@@ -37,8 +37,9 @@ def test_not_applicable_status_is_preserved_by_json_docx_and_xlsx_exports() -> N
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "NOT_APPLICABLE" in document
-    assert "not_applicable" in document
+    assert "NON APPLICABLE" in document
+    assert "NOT_APPLICABLE" not in document
+    assert "not_applicable" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
     enriched = list(workbook["Contrôles enrichis"].iter_rows(values_only=True))

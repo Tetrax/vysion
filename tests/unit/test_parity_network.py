@@ -34,6 +34,41 @@ def test_sip_alg_disabled_is_proven_from_typed_sections() -> None:
     assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
 
 
+def test_sip_mode_in_system_settings_is_proven() -> None:
+    raw = """config system settings
+    set default-voip-alg-mode kernel-helper-based
+end
+config system session-helper
+    edit 1
+        set name ftp
+    next
+end
+"""
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.PASS
+    assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+def test_sip_session_helper_entry_with_port_is_still_proven() -> None:
+    raw = """config system global
+    set default-voip-alg-mode kernel-helper-based
+end
+config system session-helper
+    edit 1
+        set name ftp
+        set protocol 6
+        set port 21
+    next
+end
+"""
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.PASS
+
+
 def test_sip_session_helper_is_a_certain_failure() -> None:
     raw = """config system global
     set default-voip-alg-mode kernel-helper-based

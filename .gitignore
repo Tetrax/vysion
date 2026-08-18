@@ -18,6 +18,7 @@ frontend/vite.config.d.ts
 !deploy/nginx.conf
 !tests/fixtures/anonymized_fortigate_export.conf
 *.docx
+!src/vysion/reports/templates/*.docx
 *.xlsx
 *.crt
 *.key

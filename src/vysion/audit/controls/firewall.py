@@ -295,7 +295,8 @@ def _zone_members_roles(configuration: FortiGateConfiguration, zone_name: str) -
             return None
         interface_role = _role(interface)
         if interface_role is None:
-            return None
+            roles.add("lan")
+            continue
         roles.add(interface_role)
     return roles
 
@@ -466,11 +467,20 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
         "Fournir une section log setting certaine avec fwpolicy-implicit-log enable.",
     )
     if section is None or configuration.log_setting is None:
+        status = (
+            AuditStatus.FAIL
+            if configuration.complete_backup and section is None
+            else AuditStatus.UNKNOWN
+        )
         return _finding(
             control_id=control_id,
             title=title,
-            status=AuditStatus.UNKNOWN,
-            applicability=Applicability.UNKNOWN,
+            status=status,
+            applicability=(
+                Applicability.APPLICABLE
+                if status is AuditStatus.FAIL
+                else Applicability.UNKNOWN
+            ),
             evidence=("log setting: section ou directive absente",),
             evidence_items=(
                 _section_evidence(
@@ -478,7 +488,11 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
                 ),
             ),
             affected_objects=(),
-            message="La directive fwpolicy-implicit-log n'est pas prouvée.",
+            message=(
+                "La directive fwpolicy-implicit-log est absente du backup complet."
+                if status is AuditStatus.FAIL
+                else "La directive fwpolicy-implicit-log n'est pas prouvée."
+            ),
             risk=base_risk,
             recommendation="Activer explicitement fwpolicy-implicit-log.",
             remediation="Compléter l'export de log setting puis relancer l'audit.",
@@ -510,17 +524,32 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
         configuration.log_setting.proof_state is not ProofState.PROVEN
         or configuration.log_setting.implicit_deny_log != "enable"
     ):
+        status = (
+            AuditStatus.FAIL
+            if configuration.complete_backup
+            and configuration.log_setting.proof_state is ProofState.PROVEN
+            and configuration.log_setting.implicit_deny_log is None
+            else AuditStatus.UNKNOWN
+        )
         return _finding(
             control_id=control_id,
             title=title,
-            status=AuditStatus.UNKNOWN,
-            applicability=Applicability.UNKNOWN,
+            status=status,
+            applicability=(
+                Applicability.APPLICABLE
+                if status is AuditStatus.FAIL
+                else Applicability.UNKNOWN
+            ),
             evidence=("fwpolicy-implicit-log: valeur absente, inconnue ou ambiguë",),
             evidence_items=(
                 _directive_evidence(configuration, "log setting", "fwpolicy-implicit-log"),
             ),
             affected_objects=(),
-            message="La valeur enable de fwpolicy-implicit-log ne peut pas être établie.",
+            message=(
+                "La directive fwpolicy-implicit-log est absente du backup complet."
+                if status is AuditStatus.FAIL
+                else "La valeur enable de fwpolicy-implicit-log ne peut pas être établie."
+            ),
             risk=base_risk,
             recommendation="Fournir une directive fwpolicy-implicit-log enable certaine.",
             remediation="Corriger les mutations ou conflits puis relancer l'audit.",
@@ -1182,7 +1211,10 @@ def _service_coverage(
     *,
     seen: frozenset[str] = frozenset(),
 ) -> _PortCoverage:
-    if name in seen or name.casefold() == "all":
+    if name.casefold() == "all":
+        full_range = (PortRange(start=0, end=65535),)
+        return _PortCoverage(known=True, tcp=full_range, udp=full_range)
+    if name in seen:
         return _PortCoverage(known=False)
     catalog = configuration.service_objects + configuration.service_groups
     exact = tuple(service for service in catalog if service.name == name)

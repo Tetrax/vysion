@@ -87,9 +87,12 @@ function App() {
   const [licenseEndDate, setLicenseEndDate] = useState('')
   const [uptime, setUptime] = useState('')
   const [unmatchedRules, setUnmatchedRules] = useState('0')
-  const [ha, setHa] = useState<TriState>('')
-  const [mpls, setMpls] = useState<TriState>('')
-  const [utmLicense, setUtmLicense] = useState<TriState>('')
+  // The V1 options are boolean answers: an unchecked box is an explicit
+  // negative, not an omitted/unknown answer. Keep the same visual control
+  // while preserving that distinction in the submitted context.
+  const [ha, setHa] = useState<TriState>('false')
+  const [mpls, setMpls] = useState<TriState>('false')
+  const [utmLicense, setUtmLicense] = useState<TriState>('false')
   const [selectedWanScopes, setSelectedWanScopes] = useState<WanScope[]>([])
   const requestGeneration = useRef(0)
   const progressTimer = useRef<number | null>(null)
@@ -125,9 +128,9 @@ function App() {
     setLicenseEndDate('')
     setUptime('')
     setUnmatchedRules('0')
-    setHa('')
-    setMpls('')
-    setUtmLicense('')
+    setHa('false')
+    setMpls('false')
+    setUtmLicense('false')
     if (!selected) return
 
     setPreviewing(true)
@@ -171,7 +174,7 @@ function App() {
     if (licenseEndDate) form.append('utm_license_expiration', licenseEndDate)
     if (uptime) form.append('uptime', uptime)
     if (unmatchedRules) form.append('unmatched_rules', unmatchedRules)
-    if (ha) form.append('ha_context', ha)
+    if (ha) form.append('ha_cabling_redundancy', ha)
     if (mpls) form.append('mpls_context', mpls)
     if (utmLicense) {
       form.append('utm_license', utmLicense)
@@ -221,9 +224,9 @@ function App() {
     setLicenseEndDate('')
     setUptime('')
     setUnmatchedRules('0')
-    setHa('')
-    setMpls('')
-    setUtmLicense('')
+    setHa('false')
+    setMpls('false')
+    setUtmLicense('false')
     if (fileInput.current) fileInput.current.value = ''
   }
 
@@ -335,9 +338,9 @@ function App() {
         <section className="step" aria-label="Options d’audit">
           <h2 aria-label="Options d’audit">Etape 4 : Options d'audit</h2>
           <div className="options-form">
-            <label className="checkbox-item"><input aria-label="Licence UTM active" type="checkbox" checked={utmLicense === 'true'} onChange={(event) => setUtmLicense(event.target.checked ? 'true' : '')} /><span>Licence UTM Valide</span></label>
-            <label className="checkbox-item"><input aria-label="MPLS / L2L présent" type="checkbox" checked={mpls === 'true'} onChange={(event) => setMpls(event.target.checked ? 'true' : '')} /><span>Lien MPLS ou L2L</span></label>
-            <label className="checkbox-item"><input aria-label="HA présent" type="checkbox" checked={ha === 'true'} onChange={(event) => setHa(event.target.checked ? 'true' : '')} /><span>Redondance câblage HA</span></label>
+            <label className="checkbox-item"><input aria-label="Licence UTM active" type="checkbox" checked={utmLicense === 'true'} onChange={(event) => setUtmLicense(event.target.checked ? 'true' : 'false')} /><span>Licence UTM Valide</span></label>
+            <label className="checkbox-item"><input aria-label="MPLS / L2L présent" type="checkbox" checked={mpls === 'true'} onChange={(event) => setMpls(event.target.checked ? 'true' : 'false')} /><span>Lien MPLS ou L2L</span></label>
+            <label className="checkbox-item"><input aria-label="HA présent" type="checkbox" checked={ha === 'true'} onChange={(event) => setHa(event.target.checked ? 'true' : 'false')} /><span>Redondance câblage HA</span></label>
             <label className="checkbox-item number-item"><div><span>Nombre de règles sans match</span><div className="field-hint">Filtrez sur <strong>'&lt;=0'</strong> sur la colonne <strong>"Hit Count"</strong> des Firewall policies</div></div><input aria-label="Règles sans match options" type="number" min={0} step={1} value={unmatchedRules} onChange={(event) => setUnmatchedRules(event.target.value)} /></label>
           </div>
           <div className="button-group">

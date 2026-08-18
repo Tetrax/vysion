@@ -122,7 +122,7 @@ def test_blackhole_v1_truth_table_through_real_pipeline(
     assert findings[BLACKHOLE_ID].rule_provenance == "legacy_v1"
 
 
-def test_blackhole_is_unknown_for_mutation_collision_or_missing_policy() -> None:
+def test_blackhole_is_unknown_for_mutation_or_collision_and_uses_v1_default_target() -> None:
     mutated = ROUTE.replace("set distance 254", "append distance 254")
     collision = ROUTE + ROUTE.replace("edit 100", "edit 101")
     policy = {"destination_objects": ("rfc6890-set",)}
@@ -139,7 +139,7 @@ def test_blackhole_is_unknown_for_mutation_collision_or_missing_policy() -> None
         ].status
         is AuditStatus.UNKNOWN
     )
-    assert _audit(ROUTE, AuditContext(mpls=False))[1][BLACKHOLE_ID].status is AuditStatus.UNKNOWN
+    assert _audit(ROUTE, AuditContext(mpls=False))[1][BLACKHOLE_ID].status is AuditStatus.FAIL
 
 
 def test_registry_appends_network_legacy_controls_in_stable_order() -> None:

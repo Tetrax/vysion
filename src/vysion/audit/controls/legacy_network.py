@@ -12,9 +12,11 @@ from vysion.audit.models import (
     FortiGateConfiguration,
     ProofState,
     RiskAssessment,
+    WanSelectionKind,
 )
 
 _PROVENANCE = "legacy_v1"
+_DEFAULT_V1_RFC6890_POLICY = ("RFC-6890_Unreachable-Subnets",)
 
 
 def _finding(
@@ -69,6 +71,24 @@ def _unknown(control_id: str, title: str, section: str, reason: str) -> AuditFin
     )
 
 
+def _selected_interface_names(
+    configuration: FortiGateConfiguration,
+    context: AuditContext | None,
+) -> tuple[str, ...] | None:
+    """Expand typed V1 WAN selections back to physical interface names."""
+    if context is None:
+        return None
+    if context.wan_selections is None:
+        return context.selected_wans
+    selected: list[str] = []
+    for selection in context.wan_selections:
+        if selection.kind is WanSelectionKind.INTERFACE:
+            selected.append(selection.name)
+        else:
+            selected.extend(selection.interfaces)
+    return tuple(dict.fromkeys(selected))
+
+
 def _graph_has_cycle(groups: dict[str, object]) -> bool:
     visited: set[str] = set()
     active: set[str] = set()
@@ -97,7 +117,7 @@ def check_legacy_geo_ip_usage(
 ) -> AuditFinding:
     control_id = "NET-GEO-IP-USAGE-001"
     title = "Utilisation du filtrage Geo-IP"
-    selected = context.selected_wans if context is not None else None
+    selected = _selected_interface_names(configuration, context)
     address_section = configuration.document.section("firewall address")
     group_section = configuration.document.section("firewall addrgrp")
     policy_section = configuration.document.section("firewall policy")
@@ -192,8 +212,11 @@ def check_legacy_rfc6890_blackhole(
     if context is None or context.mpls is None:
         return _unknown(control_id, title, "router static", "Contexte MPLS/L2L non renseigné.")
     policy = context.legacy_v1_rfc6890_policy
-    if policy is None:
-        return _unknown(control_id, title, "router static", "Policy RFC6890 legacy_v1 absente.")
+    destinations = (
+        tuple(policy.destination_objects)
+        if policy is not None
+        else _DEFAULT_V1_RFC6890_POLICY
+    )
     section = configuration.document.section("router static")
     if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
         return _unknown(
@@ -203,7 +226,7 @@ def check_legacy_rfc6890_blackhole(
         return _unknown(
             control_id, title, "router static", "Route mutée, invalide ou en collision."
         )
-    destinations = {name.casefold() for name in policy.destination_objects}
+    destinations = {name.casefold() for name in destinations}
     complete = tuple(
         route
         for route in configuration.static_routes

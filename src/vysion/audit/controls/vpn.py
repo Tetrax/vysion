@@ -257,7 +257,13 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
 
     usage_keys = {"source-interface", "source-address", "default-portal"}
     certain_usage = usage_keys & set(settings.parsed_keys)
-    status_certain = "status" in settings.parsed_keys
+    # A materialized FortiOS default is not a V1 observation. The legacy
+    # control only treated explicit usage/state as evidence; a defaulted
+    # enable must not become a false FAIL.
+    status_certain = (
+        "status" in settings.parsed_keys
+        and "status" not in settings.defaulted_keys
+    )
     status = settings.status
 
     if status_certain and status == "disable":
@@ -359,6 +365,34 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
             risk=_ssl_risk(),
             recommendation="Désactiver SSL-VPN si aucun besoin approuvé n'existe.",
             remediation="Appliquer set status disable et retirer les directives d'usage inutiles.",
+        )
+
+    if (
+        not status_certain
+        and not certain_usage
+        and settings.proof_state is ProofState.PROVEN
+        and section.certainty is EvidenceCertainty.CERTAIN
+    ):
+        return _finding(
+            control_id=control_id,
+            title=title,
+            status=AuditStatus.PASS,
+            applicability=Applicability.NOT_APPLICABLE,
+            evidence=("SSL-VPN : aucune utilisation V1 certaine détectée",),
+            evidence_items=(_directive(configuration, "vpn ssl settings", "status"),),
+            affected_objects=(),
+            message="Le VPN SSL n'est pas utilisé selon la règle historique V1.",
+            risk=_risk(
+                "Aucune utilisation SSL-VPN certaine n'est observée.",
+                "La surface d'accès distant reste limitée par la configuration observée.",
+                "faible",
+                "Conserver l'absence de source-interface tant que SSL-VPN n'est pas requis.",
+            ),
+            recommendation=(
+                "Conserver l'absence de source-interface SSL-VPN "
+                "si le service reste inutilisé."
+            ),
+            remediation="Aucune remédiation immédiate.",
         )
 
     return _finding(

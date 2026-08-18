@@ -117,6 +117,9 @@ def test_representative_configuration_crosses_parser_registry_and_typed_engine()
                 "IAM-DEFAULT-ADMIN-001": AuditStatus.PASS,
                 "IAM-GUEST-ACCOUNT-001": AuditStatus.PASS,
                 "SYS-ADMIN-HTTPS-PORT-001": AuditStatus.PASS,
+                "IAM-LEGACY-ADMIN-001": AuditStatus.FAIL,
+                "IAM-LEGACY-PKI-REMOVAL-001": AuditStatus.PASS,
+                "IAM-LEGACY-PKI-PRESENCE-001": AuditStatus.FAIL,
             }.get(control_id, AuditStatus.UNKNOWN)
         )
         for control_id in CONTROL_IDS
@@ -188,6 +191,7 @@ end
     passing = {
         "IAM-DEFAULT-ADMIN-001",
         "IAM-GUEST-ACCOUNT-001",
+        "IAM-LEGACY-PKI-REMOVAL-001",
     }
     assert all(
         status
@@ -196,6 +200,8 @@ end
             if control_id == "IAM-LOCAL-USER-MFA-001"
             else AuditStatus.PASS
             if control_id in passing
+            else AuditStatus.FAIL
+            if control_id in {"IAM-LEGACY-ADMIN-001", "IAM-LEGACY-PKI-PRESENCE-001"}
             else AuditStatus.UNKNOWN
         )
         for control_id, status in statuses.items()

@@ -58,6 +58,25 @@ describe('Vysion workflow V1', () => {
     }
   })
 
+  it('submits unchecked V1 context options as explicit negatives', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse(preview))
+      .mockResolvedValueOnce(jsonResponse(report, 201))
+    render(<App />)
+
+    await uploadAndAudit(user)
+
+    const body = fetchSpy.mock.calls[1][1]?.body
+    expect(body).toBeInstanceOf(FormData)
+    const form = body as FormData
+    expect(form.get('ha_cabling_redundancy')).toBe('false')
+    expect(form.get('ha_context')).toBeNull()
+    expect(form.get('mpls_context')).toBe('false')
+    expect(form.get('utm_license')).toBe('false')
+    expect(form.get('utm_license_status')).toBe('inactive')
+  })
+
   it('shows the API validation message and returns to the options step', async () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, 'fetch')

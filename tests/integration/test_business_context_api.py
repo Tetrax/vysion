@@ -120,6 +120,7 @@ async def test_api_persists_v1_context_and_resolves_zone_selection(
         "method": "Firewall policy Hit Count <= 0",
     }
     assert context["ha"] is True
+    assert "ha_cabling_redundancy" not in context
     assert context["mpls"] is False
     assert context["utm_license_details"] == {
         "status": "active",

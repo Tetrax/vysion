@@ -351,9 +351,6 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         "UTM-FORTISANDBOX-CLOUD-001",
         "UTM-FORTIGUARD-ANYCAST-001",
         "NET-SDWAN-USAGE-001",
-        "IAM-LEGACY-ADMIN-001",
-        "IAM-LEGACY-PKI-REMOVAL-001",
-        "IAM-LEGACY-PKI-PRESENCE-001",
         "NET-LEGACY-ADMIN-LOOPBACK-001",
         "DNS-LEGACY-DATABASE-001",
         "NET-GEO-IP-USAGE-001",
@@ -364,6 +361,9 @@ async def test_api_accepts_anonymized_realistic_fortigate_export(tmp_path: Path)
         expected_statuses[CONTROL_IDS.index(control_id)] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("CFG-UNUSED-SERVICE-001")] = "UNKNOWN"
     expected_statuses[CONTROL_IDS.index("FW-BY-SEQUENCE-USAGE-001")] = "FAIL"
+    expected_statuses[CONTROL_IDS.index("IAM-LEGACY-ADMIN-001")] = "FAIL"
+    expected_statuses[CONTROL_IDS.index("IAM-LEGACY-PKI-REMOVAL-001")] = "PASS"
+    expected_statuses[CONTROL_IDS.index("IAM-LEGACY-PKI-PRESENCE-001")] = "FAIL"
     assert [finding["status"] for finding in findings] == expected_statuses
     assert all(
         finding["evidence_items"]
@@ -469,7 +469,7 @@ async def test_api_exposes_m3_failures_without_hiding_certain_violations(
 
 
 @pytest.mark.asyncio
-async def test_api_docx_xlsx_preserve_all_control_ids(
+async def test_api_docx_uses_v1_client_language_without_technical_control_ids(
     tmp_path: Path,
 ) -> None:
     app = create_app(
@@ -505,7 +505,20 @@ async def test_api_docx_xlsx_preserve_all_control_ids(
         + [cell.text for table in document.tables for row in table.rows for cell in row.cells]
     )
     docx_ids = re.findall(r"\b[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+-\d{3}\b", docx_text)
-    assert set(docx_ids) == set(expected_ids)
+    assert docx_ids == []
+    assert "Audit de configuration" in docx_text
+    assert "edge-lab.example" in docx_text
+    assert "7.2.8" in docx_text
+    assert "60E" in docx_text
+    assert "Confidentialité" in docx_text
+    assert "Table des matières" in docx_text
+    assert "Point audité :" in docx_text
+    assert "Résultat :" in docx_text
+    assert "Preuve structurée" not in docx_text
+    assert "rule_version" not in docx_text
+    assert "defaulted" not in docx_text
+    assert "ambiguous" not in docx_text
+    assert "line_numbers" not in docx_text
 
     workbook = load_workbook(BytesIO(xlsx_response.content), read_only=True, data_only=True)
     xlsx_ids = [
@@ -614,13 +627,13 @@ async def test_api_generates_docx_from_the_stored_typed_report(tmp_path: Path) -
     )
     with ZipFile(BytesIO(response.content)) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "Rapport d’audit Vysion" in document
-    assert "synthetic.conf" in document
-    assert "SYS-HOSTNAME-001" in document
-    assert "IAM-LOCAL-USER-MFA-001" in document
-    assert "IAM-DEFAULT-ADMIN-001" in document
-    assert "IAM-GUEST-ACCOUNT-001" in document
-    assert "AVAILABLE" in document
+    assert "Audit de configuration" in document
+    assert "Caractéristiques" in document
+    assert "Point audité :" in document
+    assert "Résultat :" in document
+    assert "SYS-HOSTNAME-001" not in document
+    assert "IAM-LOCAL-USER-MFA-001" not in document
+    assert "AVAILABLE" not in document
 
 
 @pytest.mark.asyncio

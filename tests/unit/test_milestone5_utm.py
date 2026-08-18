@@ -1,7 +1,13 @@
-from __future__ import annotations
+from datetime import UTC, date, datetime
 
+from vysion.audit.controls.utm import check_utm_license
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditContext, AuditStatus, ContextProvenance
+from vysion.audit.models import (
+    AuditContext,
+    AuditStatus,
+    ContextProvenance,
+    UtmLicenseDetails,
+)
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 
@@ -57,6 +63,29 @@ def test_m5_utm_license_false_with_provenance_fails() -> None:
     ].status is AuditStatus.FAIL
 
 
+def test_m5_utm_license_expiration_uses_injected_clock() -> None:
+    configuration = FortiGateParser().parse("config system global\nend\n")
+    context = AuditContext(
+        utm_license=True,
+        operator_provenance=ContextProvenance(source="unit-test", method="license-check"),
+        utm_license_details=UtmLicenseDetails(expiration_date=date(2026, 8, 18)),
+    )
+
+    expired = check_utm_license(
+        configuration,
+        context,
+        clock=lambda: datetime(2026, 8, 19, tzinfo=UTC),
+    )
+    valid = check_utm_license(
+        configuration,
+        context,
+        clock=lambda: datetime(2026, 8, 17, tzinfo=UTC),
+    )
+
+    assert expired.status is AuditStatus.FAIL
+    assert valid.status is AuditStatus.PASS
+
+
 def test_m5_utm_license_missing_or_without_provenance_is_unknown() -> None:
     raw = "config system global\nend\n"
 
@@ -69,6 +98,18 @@ def test_m5_utm_license_missing_or_without_provenance_is_unknown() -> None:
 def autoupdate(*directives: str) -> str:
     body = "\n".join(f"    {directive}" for directive in directives)
     return f"config system autoupdate schedule\n{body}\nend\n"
+
+
+def test_m5_autoupdate_missing_in_complete_backup_uses_v1_default() -> None:
+    raw = """#config-version=FGT60E-7.4.1-FW-build2577-240514:opmode=0:vdom=0
+#buildno=2577
+#global_vdom=1
+#conf_file_ver=1
+config system global
+end
+"""
+
+    assert audit(raw)["UTM-AUTOUPDATE-001"].status is AuditStatus.PASS
 
 
 def test_m5_autoupdate_explicit_automatic_passes() -> None:

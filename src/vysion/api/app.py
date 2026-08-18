@@ -641,6 +641,7 @@ def create_app(
             expires_at=created_at + timedelta(seconds=resolved_settings.report_ttl_seconds),
             source_name=configuration.filename or "configuration.conf",
             context=context,
+            device_identity=parsed.device_identity,
             fortiguard=await fortiguard.check(),
             findings=tuple(engine.run(parsed, context=context)),
         )

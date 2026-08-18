@@ -61,6 +61,57 @@ end
 """
 
 
+def test_builtin_all_service_is_known_full_sensitive_coverage() -> None:
+    raw = _fixture(
+        tcp="88 389 636 445 137-139",
+        udp="88 389 1812-1813 137-139",
+    ).replace(
+        '    next\nend\nconfig firewall service group',
+        '    next\n'
+        '    edit "ALL"\n'
+        '        set protocol IP\n'
+        '    next\n'
+        'end\n'
+        'config firewall service group',
+    ).replace("set action deny", "set action accept").replace(
+        'set service "Ports-Deny"', 'set service "ALL"'
+    )
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.FAIL
+
+
+def test_builtin_all_service_deny_is_known_full_sensitive_coverage() -> None:
+    raw = _fixture(
+        tcp="88 389 636 445 137-139",
+        udp="88 389 1812-1813 137-139",
+    ).replace(
+        '    next\nend\nconfig firewall service group',
+        '    next\n'
+        '    edit "ALL"\n'
+        '        set protocol IP\n'
+        '    next\n'
+        'end\n'
+        'config firewall service group',
+    ).replace('set service "Ports-Deny"', 'set service "ALL"')
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.PASS
+
+
+def test_builtin_all_without_custom_catalog_entry_is_known_full_coverage() -> None:
+    raw = _fixture(
+        tcp="88 389 636 445 137-139",
+        udp="88 389 1812-1813 137-139",
+    ).replace('set service "Ports-Deny"', 'set service "ALL"')
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.PASS
+
+
 def test_global_any_deny_with_complete_typed_ports_covers_lan_to_wan() -> None:
     finding = _finding(
         _fixture(
@@ -75,6 +126,35 @@ def test_global_any_deny_with_complete_typed_ports_covers_lan_to_wan() -> None:
     assert SENSITIVE_PROTOCOL_RULESET_ID in finding.message
     assert SENSITIVE_PROTOCOL_RULESET_VERSION in evidence_text
     assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
+
+
+
+def test_proven_zone_member_without_explicit_role_is_lan() -> None:
+    raw = _fixture(
+        tcp="88 389 636 445 137-139",
+        udp="88 389 1812-1813 137-139",
+    ).replace(
+        'config firewall policy\n',
+        'config system zone\n'
+        '    edit "LAN"\n'
+        '        set interface "lan1"\n'
+        '    next\n'
+        'end\n'
+        'config firewall policy\n',
+    ).replace(
+        '    edit "lan1"\n        set role lan\n',
+        '    edit "lan1"\n'
+        '        set ip 192.0.2.1/24\n'
+        '        set allowaccess ping\n',
+    ).replace(
+        'set srcintf "any"', 'set srcintf "LAN"'
+    ).replace(
+        'set dstintf "any"', 'set dstintf "wan1"'
+    )
+
+    finding = _finding(raw)
+
+    assert finding.status is AuditStatus.PASS
 
 
 def test_global_any_deny_with_partial_ports_is_not_a_false_pass() -> None:

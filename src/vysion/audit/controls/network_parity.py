@@ -30,6 +30,7 @@ from vysion.audit.models import (
 
 _SESSION_HELPER = "system session-helper"
 _SYSTEM_GLOBAL = "system global"
+_SYSTEM_SETTINGS = "system settings"
 
 
 def _sdwan_member_directive(
@@ -235,7 +236,11 @@ def _session_state(
         if (
             entry.certainty is not EvidenceCertainty.CERTAIN
             or entry.children
-            or len(entry.directives) != 1
+            or any(
+                directive.mutation
+                or directive.certainty is not EvidenceCertainty.CERTAIN
+                for directive in entry.directives
+            )
         ):
             uncertain = True
             evidence.append(
@@ -283,14 +288,49 @@ def _session_state(
 
 def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
     global_section = section_for(configuration.document, _SYSTEM_GLOBAL)
-    mode = _one_value(global_section, "default-voip-alg-mode")
-    global_certain = bool(
-        global_section is not None
-        and global_section.certainty is EvidenceCertainty.CERTAIN
-        and not global_section.entries
-        and not global_section.children
+    settings_section = section_for(configuration.document, _SYSTEM_SETTINGS)
+    mode_candidates = tuple(
+        (section_name, value)
+        for section_name, section in (
+            (_SYSTEM_GLOBAL, global_section),
+            (_SYSTEM_SETTINGS, settings_section),
+        )
+        for value in (_one_value(section, "default-voip-alg-mode"),)
+        if value is not None
     )
+    mode = mode_candidates[0][1] if len(mode_candidates) == 1 else None
+    mode_section = mode_candidates[0][0] if len(mode_candidates) == 1 else None
     session_certain, sip_found, session_evidence = _session_state(configuration)
+
+    # V1 treats a complete backup with no session-helper namespace as an
+    # empty namespace, and a missing default-voip-alg-mode as a finding. Do
+    # not manufacture UNKNOWN from those directly observable conditions.
+    if (
+        configuration.complete_backup
+        and mode is None
+    ):
+        return _finding(
+            status=AuditStatus.FAIL,
+            evidence=("default-voip-alg-mode absent du backup complet",),
+            evidence_items=(
+                evidence_for_directive(
+                    configuration.document,
+                    _SYSTEM_GLOBAL,
+                    "default-voip-alg-mode",
+                    certainty=EvidenceCertainty.CERTAIN,
+                ),
+            ),
+            message="La directive default-voip-alg-mode est absente.",
+            recommendation="Configurer default-voip-alg-mode kernel-helper-based.",
+            remediation="Ajouter la directive ALG VoIP puis relancer l'audit.",
+            risk_summary="Le mode ALG VoIP n'est pas explicitement durci.",
+        )
+
+    if configuration.complete_backup and not session_certain:
+        session_section = section_for(configuration.document, _SESSION_HELPER)
+        if session_section is None:
+            session_certain = True
+            session_evidence = ()
 
     if sip_found:
         sip_evidence = tuple(item for item in session_evidence if item.entry is not None)
@@ -310,7 +350,7 @@ def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
     if mode is not None and mode[0] != "kernel-helper-based":
         mode_evidence = evidence_for_directive(
             configuration.document,
-            _SYSTEM_GLOBAL,
+            mode_section or _SYSTEM_GLOBAL,
             "default-voip-alg-mode",
         )
         return _finding(
@@ -323,15 +363,13 @@ def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
             risk_summary="Le mode ALG VoIP explicite n’est pas conforme à la règle legacy.",
         )
 
-    if not global_certain or mode is None or not session_certain:
+    if mode is None or not session_certain:
         unknown_evidence = list(session_evidence)
-        if global_section is None:
-            unknown_evidence.append(evidence_for_section(configuration.document, _SYSTEM_GLOBAL))
-        elif mode is None:
+        if mode is None:
             unknown_evidence.append(
                 evidence_for_directive(
                     configuration.document,
-                    _SYSTEM_GLOBAL,
+                    mode_section or _SYSTEM_GLOBAL,
                     "default-voip-alg-mode",
                 )
             )
@@ -354,7 +392,7 @@ def check_sip_alg(configuration: FortiGateConfiguration) -> AuditFinding:
         evidence_items=(
             evidence_for_directive(
                 configuration.document,
-                _SYSTEM_GLOBAL,
+                mode_section or _SYSTEM_GLOBAL,
                 "default-voip-alg-mode",
             ),
             *session_evidence,
@@ -879,6 +917,11 @@ def check_sdwan_usage(
     collisions: set[str] = set()
     uncertainty = bool(section.directives and not section.children)
     for zone in configuration.sdwan_zones:
+        # V1 ignores declared SD-WAN zones with no member relation. They are
+        # not evidence of an ambiguous membership; only zones carrying an
+        # interface can affect the WAN coverage decision.
+        if not zone.interfaces:
+            continue
         key = zone.name.casefold()
         if key in zones or key in collisions:
             zones.pop(key, None)

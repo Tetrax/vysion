@@ -95,6 +95,50 @@ end
 """
 
 
+
+
+_COMPLETE_VERSION = (
+    "#config-version=FGT60E-7.4.8-FW-build0000-000000:"
+    "opmode=0:vdom=0:user=admin"
+)
+COMPLETE_ABSENT_OPTIONAL_NAMESPACES = f"""{_COMPLETE_VERSION}
+#buildno=0000
+#global_vdom=1
+#conf_file_ver=1
+config system interface
+    edit "loopback"
+        set type loopback
+    next
+end
+config firewall address
+    edit "unrelated-range"
+        set type iprange
+        set start-ip 192.0.2.10
+        set end-ip 192.0.2.20
+        set color 3
+        set allow-routing enable
+    next
+end
+config firewall policy
+    edit 1
+        set srcintf "loopback"
+        set dstintf "loopback"
+        set srcaddr "unrelated-range"
+        set dstaddr "unrelated-range"
+        set action deny
+        set service "HTTPS"
+    next
+end
+"""
+
+
+def test_complete_backup_missing_legacy_namespaces_is_a_certain_negative() -> None:
+    findings = _audit(COMPLETE_ABSENT_OPTIONAL_NAMESPACES)
+
+    assert findings["NET-LEGACY-ADMIN-LOOPBACK-001"].status is AuditStatus.FAIL
+    assert findings["DNS-LEGACY-DATABASE-001"].status is AuditStatus.FAIL
+
+
 @pytest.mark.parametrize("control_id", CONTROL_IDS)
 def test_legacy_admin_controls_pass_through_parser_engine_registry(control_id: str) -> None:
     finding = _audit(PASS_CONFIG, _context())[control_id]
@@ -138,11 +182,22 @@ def test_legacy_admin_controls_fail_through_parser_engine_registry(
     assert _audit(config, _context())[control_id].status is AuditStatus.FAIL
 
 
-@pytest.mark.parametrize("control_id", CONTROL_IDS)
-def test_legacy_admin_controls_are_unknown_without_operator_policy(control_id: str) -> None:
+@pytest.mark.parametrize(
+    ("control_id", "expected"),
+    (
+        ("IAM-LEGACY-ADMIN-001", AuditStatus.FAIL),
+        ("IAM-LEGACY-PKI-REMOVAL-001", AuditStatus.PASS),
+        ("IAM-LEGACY-PKI-PRESENCE-001", AuditStatus.FAIL),
+        ("NET-LEGACY-ADMIN-LOOPBACK-001", AuditStatus.FAIL),
+        ("DNS-LEGACY-DATABASE-001", AuditStatus.FAIL),
+    ),
+)
+def test_legacy_admin_controls_use_the_v1_policy_without_operator_context(
+    control_id: str, expected: AuditStatus
+) -> None:
     finding = _audit(PASS_CONFIG)[control_id]
 
-    assert finding.status is AuditStatus.UNKNOWN
+    assert finding.status is expected
     assert finding.rule_provenance == "legacy_v1"
 
 

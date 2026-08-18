@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from vysion.audit.models import (
     Applicability,
     AuditContext,
@@ -79,7 +81,14 @@ def check_legacy_schedule_inventory(
             "Le namespace firewall policy est certainement vide.",
             ScheduleCounts(always=1, active=0, expired=0),
         )
-    if context is None or context.schedule_reference_instant is None:
+    reference = (
+        context.schedule_reference_instant
+        if context is not None
+        else datetime.now(UTC)
+        if configuration.complete_backup
+        else None
+    )
+    if reference is None:
         return _result(AuditStatus.UNKNOWN, "Instant de référence opérateur absent.")
 
     objects = (
@@ -115,8 +124,6 @@ def check_legacy_schedule_inventory(
     onetime = {item.name.casefold(): item for item in configuration.onetime_schedules}
     recurring = {item.name.casefold() for item in configuration.recurring_schedules}
     groups = {item.name.casefold(): item for item in configuration.schedule_groups}
-    reference = context.schedule_reference_instant
-
     visiting: set[str] = set()
     visited: set[str] = set()
 

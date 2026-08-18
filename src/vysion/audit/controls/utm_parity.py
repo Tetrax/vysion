@@ -40,7 +40,9 @@ def _finding(
         priority=AuditPriority.P1,
         severity=AuditSeverity.MEDIUM,
         applicability=(
-            Applicability.APPLICABLE
+            Applicability.NOT_APPLICABLE
+            if status is AuditStatus.NOT_APPLICABLE
+            else Applicability.APPLICABLE
             if status in {AuditStatus.PASS, AuditStatus.FAIL}
             else Applicability.UNKNOWN
         ),

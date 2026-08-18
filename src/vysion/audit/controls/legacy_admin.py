@@ -19,6 +19,29 @@ from vysion.audit.models import (
 )
 
 _PROVENANCE = "legacy_v1"
+_DEFAULT_V1_POLICY = LegacyV1AdminPolicy(
+    local_admin_names=(
+        "admin-sns",
+        "sns-admin",
+        "admin_sns",
+        "adm_sns",
+        "sns_admin",
+        "snsadmin",
+        "adminsns",
+        "admin.sns",
+        "sns.admin",
+        "adm.sns",
+        "sns.adm",
+        "sns",
+        "admin-SNS",
+    ),
+    local_admin_mfa_email="support@sns-security.fr",
+    pki_peer_group="sns-pki-admin-group",
+    deprecated_pki_account="sns",
+    required_pki_account="pki-sns",
+    administration_fqdn="ip.sns-security.fr",
+    dns_database_entry="ip.sns-security.fr",
+)
 
 
 def _finding(
@@ -55,13 +78,21 @@ def _finding(
 
 
 def _policy(context: AuditContext | None) -> LegacyV1AdminPolicy | None:
-    if (
-        context is None
-        or context.operator_provenance is None
-        or not context.operator_provenance.source.strip()
-    ):
-        return None
-    return context.legacy_v1_admin_policy
+    """Return an explicit policy or the historical V1 policy.
+
+    The original V1 checks their SNS targets directly from the configuration;
+    requiring a synthetic ``legacy_v1`` policy turned every real deployment
+    into UNKNOWN. An explicitly supplied policy still wins, but the default
+    remains the V1 oracle rather than an invented V2 requirement.
+    """
+    if context is not None and context.legacy_v1_admin_policy is not None:
+        if (
+            context.operator_provenance is None
+            or not context.operator_provenance.source.strip()
+        ):
+            return None
+        return context.legacy_v1_admin_policy
+    return _DEFAULT_V1_POLICY
 
 
 def _unknown(control_id: str, title: str, section: str, reason: str) -> AuditFinding:
@@ -251,23 +282,19 @@ def check_legacy_admin_loopback(
     if policy is None:
         return _unknown(control_id, title, "firewall policy", "Policy opérateur legacy_v1 absente.")
     sections = tuple(configuration.document.section(name) for name in required_sections)
-    if any(
-        section is None or section.certainty is not EvidenceCertainty.CERTAIN
-        for section in sections
+    if (
+        not configuration.complete_backup
+        and any(
+            section is not None and section.certainty is not EvidenceCertainty.CERTAIN
+            for section in sections
+        )
     ):
         return _unknown(
             control_id, title, "firewall policy", "Namespaces d’accès admin absents ou ambigus."
         )
-    projected = (
-        *configuration.address_objects,
-        *configuration.address_groups,
-        *configuration.vips,
-        *configuration.vip_groups,
-        *configuration.policies,
-    )
-    if not _all_proven(projected):
+    if any(section is None for section in sections) and not configuration.complete_backup:
         return _unknown(
-            control_id, title, "firewall policy", "Projection d’accès admin incomplète."
+            control_id, title, "firewall policy", "Namespaces d’accès admin absents ou ambigus."
         )
 
     fqdn_objects = {
@@ -335,6 +362,15 @@ def check_legacy_dns_database(
             control_id, title, "system dns-database", "Policy opérateur legacy_v1 absente."
         )
     if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
+        if section is None and configuration.complete_backup:
+            return _finding(
+                control_id,
+                title,
+                AuditStatus.FAIL,
+                "L’entrée DNS database attendue est absente.",
+                ("cible DNS issue de la policy legacy_v1",),
+                (EvidenceItem(section="system dns-database", entry=policy.dns_database_entry),),
+            )
         return _unknown(
             control_id, title, "system dns-database", "Namespace DNS database absent ou ambigu."
         )

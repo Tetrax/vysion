@@ -11,8 +11,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from vysion.audit.controls._evidence import (
+    entry_for,
     evidence_for_directive,
     evidence_for_entry,
+    evidence_for_sdwan_member,
     evidence_for_section,
 )
 from vysion.audit.models import (
@@ -30,6 +32,7 @@ from vysion.audit.models import (
     ProofState,
     RiskAssessment,
     ServiceObject,
+    StructuralSection,
 )
 
 CONTROL_ID = "CFG-REF-INTEGRITY-001"
@@ -76,8 +79,87 @@ _REFERENCE_GRAPH_SECTIONS = (
 )
 
 
+_CANONICAL_TOP_LEVEL_SECTIONS = frozenset(
+    {
+        "system global",
+        "system admin",
+        "system interface",
+        "system zone",
+        "system sdwan",
+        "system autoupdate schedule",
+        "system external-resource",
+        "firewall address",
+        "firewall addrgrp",
+        "firewall service custom",
+        "firewall service group",
+        "firewall policy",
+        "firewall profile-group",
+        "firewall vip",
+        "firewall vipgrp",
+        "firewall ssl-ssh-profile",
+        "firewall profile-protocol-options",
+        "firewall webfilter profile",
+        "firewall ips sensor",
+        "firewall antivirus profile",
+        "firewall dnsfilter profile",
+        "firewall application list",
+        "firewall file-filter profile",
+        "firewall virtual-patch profile",
+        "firewall waf profile",
+        "firewall icap profile",
+        "firewall internet-service-group",
+        "log setting",
+        "user local",
+        "user ldap",
+        "vpn ssl settings",
+        "vpn ipsec phase1-interface",
+        "vpn ipsec phase2-interface",
+        "webfilter profile",
+        "antivirus profile",
+        "ips sensor",
+        "application list",
+        "dnsfilter profile",
+    }
+)
+
+_REFERENCE_SECTION_CHILDREN = {
+    "system sdwan": frozenset({"zone", "members", "health-check", "service"}),
+    "ftgd-wf": frozenset({"filters"}),
+    "ftgd-dns": frozenset({"filters"}),
+}
+_REFERENCE_ENTRY_CHILDREN = {
+    "system interface": frozenset({"secondaryip"}),
+    "system admin": frozenset({"dashboard", "gui-dashboard"}),
+    "firewall vip": frozenset({"realservers"}),
+    "webfilter profile": frozenset({"web", "ftgd-wf"}),
+    "dnsfilter profile": frozenset({"ftgd-dns"}),
+    "application list": frozenset({"entries"}),
+    "dashboard": frozenset({"widget"}),
+    "gui-dashboard": frozenset({"widget"}),
+}
+
+
+_REFERENCE_CHILDREN = {
+    **_REFERENCE_SECTION_CHILDREN,
+    **_REFERENCE_ENTRY_CHILDREN,
+}
+
+
 def _compact_section_name(value: str) -> str:
-    return "".join(character for character in value.casefold() if character not in " -_")
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _iter_structural_sections(
+    sections: tuple[StructuralSection, ...],
+    parent_name: str | None = None,
+    under_entry: bool = False,
+) -> Iterable[tuple[StructuralSection, str | None, bool]]:
+    for section in sections:
+        normalized_name = section.name.casefold()
+        yield section, parent_name, under_entry
+        yield from _iter_structural_sections(section.children, normalized_name, False)
+        for entry in section.entries:
+            yield from _iter_structural_sections(entry.children, normalized_name, True)
 
 
 def _has_noncanonical_reference_section(configuration: FortiGateConfiguration) -> bool:
@@ -91,9 +173,54 @@ def _has_noncanonical_reference_section(configuration: FortiGateConfiguration) -
     )
     expected = set(expected_names)
     compact_expected = tuple(_compact_section_name(name) for name in expected_names)
-    for section in configuration.document.sections:
+    if configuration.complete_backup:
+        profile_section_names = {
+            section_name
+            for aliases in _PROFILE_SECTIONS.values()
+            for section_name in aliases
+        }
+        for section, parent_name, under_entry in _iter_structural_sections(
+            configuration.document.sections
+        ):
+            name = section.name.casefold()
+            compact_name = _compact_section_name(name)
+            if parent_name is None:
+                if name in expected:
+                    continue
+                if any(
+                    name.startswith(expected_name) or compact_name.startswith(expected_compact)
+                    for expected_name, expected_compact in zip(
+                        expected_names,
+                        compact_expected,
+                        strict=True,
+                    )
+                ):
+                    return True
+                continue
+            if parent_name not in expected:
+                continue
+            if parent_name in profile_section_names:
+                continue
+            if under_entry:
+                known_shape = name in _REFERENCE_ENTRY_CHILDREN.get(parent_name, frozenset())
+            else:
+                known_shape = name in _REFERENCE_SECTION_CHILDREN.get(parent_name, frozenset())
+            if not known_shape:
+                return True
+        return False
+    for section, parent_name, under_entry in _iter_structural_sections(
+        configuration.document.sections
+    ):
         name = section.name.casefold()
         compact_name = _compact_section_name(name)
+        if parent_name is None:
+            known_shape = name in expected or name in _CANONICAL_TOP_LEVEL_SECTIONS
+        elif under_entry:
+            known_shape = name in _REFERENCE_ENTRY_CHILDREN.get(parent_name, frozenset())
+        else:
+            known_shape = name in _REFERENCE_SECTION_CHILDREN.get(parent_name, frozenset())
+        if not known_shape:
+            return True
         if name in expected:
             continue
         if any(
@@ -185,6 +312,8 @@ def _section_is_complete(configuration: FortiGateConfiguration, names: tuple[str
         section = document.section(name)
         if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
             return False
+        if section.entries and section.directives:
+            return False
         if any(entry.certainty is not EvidenceCertainty.CERTAIN for entry in section.entries):
             return False
     return True
@@ -204,6 +333,8 @@ def _alternative_sections_are_complete(
             continue
         present = True
         if section.certainty is not EvidenceCertainty.CERTAIN:
+            return False
+        if section.entries and section.directives:
             return False
         if any(entry.certainty is not EvidenceCertainty.CERTAIN for entry in section.entries):
             return False
@@ -234,12 +365,12 @@ def _entry_is_certain(
     section = document.section(section_name)
     if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
         return False
+    if section.entries and section.directives:
+        return False
     if entry_name is None:
         return True
-    return any(
-        entry.name == entry_name and entry.certainty is EvidenceCertainty.CERTAIN
-        for entry in section.entries
-    )
+    entry = entry_for(section, entry_name)
+    return entry is not None and entry.certainty is EvidenceCertainty.CERTAIN
 
 
 def _policy_directive_is_proven(
@@ -255,8 +386,10 @@ def _policy_directive_is_proven(
     section = document.section("firewall policy")
     if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
         return False
+    if section.entries and section.directives:
+        return False
     entry = next((item for item in section.entries if item.name == policy_id), None)
-    if entry is None or entry.certainty is not EvidenceCertainty.CERTAIN:
+    if entry is None:
         return False
     if directive_name in entry.invalidated_keys:
         return False
@@ -280,6 +413,55 @@ def _service_section(service: ServiceObject) -> str:
         "firewall service group"
         if service.service_type.casefold() == "group"
         else "firewall service custom"
+    )
+
+
+_DEFAULT_SERVICE_GROUPS = frozenset(
+    {"email access", "web access", "windows ad", "exchange server"}
+)
+_DEFAULT_SERVICE_OBJECTS = frozenset(
+    {
+        "aol",
+        "cvspserver",
+        "finger",
+        "gopher",
+        "info_address",
+        "info_request",
+        "mms",
+        "netmeeting",
+        "nntp",
+        "none",
+        "ping6",
+        "quake",
+        "radius-old",
+        "raudio",
+        "rexec",
+        "rlogin",
+        "rsh",
+        "talk",
+        "timestamp",
+        "uucp",
+        "vdolive",
+        "wais",
+        "winframe",
+    }
+)
+
+
+def _is_default_service_catalog_entry(
+    configuration: FortiGateConfiguration,
+    service: object,
+) -> bool:
+    if not isinstance(service, ServiceObject):
+        return False
+    if service.service_type.casefold() == "group":
+        return service.name.casefold() in _DEFAULT_SERVICE_GROUPS
+    if service.name.casefold() in _DEFAULT_SERVICE_OBJECTS:
+        return True
+    section = configuration.document.section("firewall service custom")
+    entry = entry_for(section, service.name) if section is not None else None
+    return entry is not None and any(
+        directive.name == "category" for directive in entry.directives
     )
 
 
@@ -399,17 +581,45 @@ def _observations(configuration: FortiGateConfiguration) -> tuple[_Observation, 
     observations: list[_Observation] = []
     for zone in (*configuration.zones, *configuration.sdwan_zones):
         source_section = "system zone" if zone in configuration.zones else "system sdwan"
-        _append_observations(
-            observations,
-            zone.interfaces,
-            target_namespace="interface",
-            target_sections=("system interface",),
-            source_section=source_section,
-            source_entry=zone.name,
-            source_directive="interface",
-            source_proven=zone.proof_state is ProofState.PROVEN,
-            label=f"zone {zone.name} interface",
-        )
+        if source_section == "system sdwan":
+            relation_directives = (
+                ("sdwan-interface", "interface", "interface"),
+                ("sdwan-direct-member", "member", "member"),
+                ("sdwan-member", "interface", "member"),
+            )
+            for relation, directive_name, label_relation in relation_directives:
+                references = tuple(
+                    reference
+                    for reference in zone.interfaces
+                    if (
+                        isinstance(reference.relation, str)
+                        and reference.relation.casefold() == relation
+                    )
+                )
+                if references:
+                    _append_observations(
+                        observations,
+                        references,
+                        target_namespace="interface",
+                        target_sections=("system interface",),
+                        source_section=source_section,
+                        source_entry=zone.name,
+                        source_directive=directive_name,
+                        source_proven=zone.proof_state is ProofState.PROVEN,
+                        label=f"zone {zone.name} {label_relation}",
+                    )
+        else:
+            _append_observations(
+                observations,
+                zone.interfaces,
+                target_namespace="interface",
+                target_sections=("system interface",),
+                source_section=source_section,
+                source_entry=zone.name,
+                source_directive="interface",
+                source_proven=zone.proof_state is ProofState.PROVEN,
+                label=f"zone {zone.name} interface",
+            )
     for policy in configuration.policies:
         _policy_observations(configuration, observations, policy)
     for service in (*configuration.service_objects, *configuration.service_groups):
@@ -508,11 +718,22 @@ def _resolve(
 ) -> tuple[bool, str]:
     if not observation.source_proven or not observation.reference.name:
         return False, "source evidence is incomplete or ambiguous"
-    if not _entry_is_certain(
-        configuration,
-        observation.source_section,
-        observation.source_entry,
-    ):
+    source_proven = (
+        _policy_directive_is_proven(
+            configuration,
+            observation.source_entry,
+            observation.source_directive,
+        )
+        if observation.source_section == "firewall policy"
+        and observation.source_entry is not None
+        and observation.source_directive is not None
+        else _entry_is_certain(
+            configuration,
+            observation.source_section,
+            observation.source_entry,
+        )
+    )
+    if not source_proven:
         return False, "source evidence is incomplete or ambiguous"
     if not _target_sections_are_complete(configuration, observation):
         return False, "target namespace is absent or incomplete"
@@ -520,6 +741,8 @@ def _resolve(
     if index is None:
         return False, "target namespace is not typed"
     key = observation.reference.name.casefold()
+    if observation.target_namespace == "interface-or-zone" and key == "any":
+        return True, "resolved FortiOS built-in interface selector"
     if key in index.collisions:
         return False, "target name collides after case-folding"
     target = index.objects.get(key)
@@ -537,14 +760,44 @@ def _evidence_item(
     certain: bool,
 ) -> EvidenceItem:
     certainty = EvidenceCertainty.CERTAIN if certain else EvidenceCertainty.AMBIGUOUS
+    if (
+        observation.source_section == "system sdwan"
+        and observation.source_entry is not None
+        and observation.reference.relation == "sdwan-member"
+        and observation.source_directive == "interface"
+    ):
+        nested_evidence = evidence_for_sdwan_member(
+            configuration.document,
+            observation.source_entry,
+            observation.reference.name,
+            certainty=certainty,
+        )
+        if nested_evidence is not None:
+            return nested_evidence
     if observation.source_directive is not None:
-        return evidence_for_directive(
+        source_evidence = evidence_for_directive(
             configuration.document,
             observation.source_section,
             observation.source_directive,
             entry_name=observation.source_entry,
             certainty=certainty,
         )
+        if (
+            observation.source_section == "system sdwan"
+            and observation.source_directive == "interface"
+            and source_evidence.certainty is EvidenceCertainty.CERTAIN
+            and not any(
+                token.casefold() == observation.reference.name.casefold()
+                for token in source_evidence.tokens
+            )
+        ):
+            return source_evidence.model_copy(
+                update={
+                    "tokens": (),
+                    "certainty": EvidenceCertainty.AMBIGUOUS,
+                }
+            )
+        return source_evidence
     return evidence_for_entry(
         configuration.document,
         observation.source_section,
@@ -586,11 +839,17 @@ def _service_orphans(
     )
     if not _section_is_complete(configuration, required):
         return (), True
+    if _policy_names_collide(configuration):
+        return (), True
 
     service_index = indexes.by_namespace["service"]
     uncertain = bool(service_index.collisions)
     unproven_service = False
     for target in service_index.objects.values():
+        if isinstance(target, ServiceObject) and _is_default_service_catalog_entry(
+            configuration, target
+        ):
+            continue
         if getattr(target, "proof_state", ProofState.UNKNOWN) is not ProofState.PROVEN:
             uncertain = True
             unproven_service = True
@@ -608,6 +867,7 @@ def _service_orphans(
     reachable: set[str] = set()
     visiting: set[str] = set()
     cycle = False
+    cycle_nodes: set[str] = set()
 
     def visit(name: str) -> None:
         nonlocal cycle
@@ -629,6 +889,30 @@ def _service_orphans(
                 visit(member.name)
         visiting.remove(key)
 
+    def detect_cycle(name: str, active: frozenset[str]) -> bool:
+        key = name.casefold()
+        if key in active:
+            return True
+        if key in cycle_nodes:
+            return False
+        target = service_index.objects.get(key)
+        if target is None or (
+            getattr(target, "proof_state", ProofState.UNKNOWN) is not ProofState.PROVEN
+        ):
+            return False
+        next_active = active | {key}
+        if isinstance(target, ServiceObject) and any(
+            detect_cycle(member.name, next_active) for member in target.members
+        ):
+            return True
+        cycle_nodes.add(key)
+        return False
+
+    for service_name in service_index.objects:
+        if detect_cycle(service_name, frozenset()):
+            cycle = True
+            break
+
     certain_policy_roots = {
         observation.reference.name.casefold()
         for observation in service_observations
@@ -640,12 +924,16 @@ def _service_orphans(
     if cycle:
         uncertain = True
 
-    if unproven_service:
+    if unproven_service or cycle:
         orphaned = ()
     else:
         orphaned = tuple(
             getattr(service_index.objects[key], "name", key)
             for key in sorted(set(service_index.objects) - reachable)
+            if not (
+                isinstance(service_index.objects[key], ServiceObject)
+                and _is_default_service_catalog_entry(configuration, service_index.objects[key])
+            )
             if getattr(service_index.objects[key], "proof_state", ProofState.UNKNOWN)
             is ProofState.PROVEN
         )
@@ -664,6 +952,21 @@ def _nested_realserver_names_collide(configuration: FortiGateConfiguration) -> b
             if key in seen:
                 return True
             seen.add(key)
+    return False
+
+
+def _policy_names_collide(configuration: FortiGateConfiguration) -> bool:
+    seen: set[str] = set()
+    for policy in configuration.policies:
+        name = getattr(policy, "policy_id", None)
+        if not isinstance(name, str) or not name:
+            name = getattr(policy, "name", None)
+        if not isinstance(name, str) or not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            return True
+        seen.add(key)
     return False
 
 
@@ -697,9 +1000,61 @@ def _typed_objects(configuration: FortiGateConfiguration) -> tuple[object, ...]:
 
 
 def _has_unproven_typed_objects(configuration: FortiGateConfiguration) -> bool:
-    return any(
+    # Reference integrity is about objects that participate in the typed
+    # reference graph.  Interfaces, policies and address objects that are not
+    # referenced must not make an otherwise resolvable graph UNKNOWN merely
+    # because FortiOS omitted optional defaults.  Profile namespaces retain
+    # this guard for partial exports; referenced profiles are still checked by
+    # their individual observations.
+    extra_objects = (
+        *configuration.profile_groups,
+        *configuration.security_profiles,
+        *configuration.utm_profiles,
+        *configuration.vip_groups,
+        *(
+            secondary
+            for interface in configuration.interfaces
+            for secondary in interface.secondary_ips
+        ),
+    )
+    if any(
         getattr(item, "proof_state", ProofState.UNKNOWN) is not ProofState.PROVEN
-        for item in _typed_objects(configuration)
+        for item in extra_objects
+    ):
+        return True
+    section = configuration.document.section("firewall policy")
+    if section is None or section.entries and section.directives:
+        return section is not None
+    single_token_directives = {
+        "profile-group",
+        "webfilter-profile",
+        "ips-sensor",
+        "av-profile",
+        "dnsfilter-profile",
+        "application-list",
+        "ssl-ssh-profile",
+        "voip-profile",
+        "waf-profile",
+        "virtual-patch-profile",
+        "file-filter-profile",
+        "icap-profile",
+    }
+    reference_directives = {
+        "srcintf",
+        "dstintf",
+        "service",
+        *single_token_directives,
+    }
+    return any(
+        directive.name in reference_directives
+        and (
+            directive.mutation
+            or directive.certainty is not EvidenceCertainty.CERTAIN
+            or directive.name in single_token_directives
+            and len(directive.tokens) != 1
+        )
+        for entry in section.entries
+        for directive in entry.directives
     )
 
 
@@ -718,10 +1073,15 @@ def check_reference_integrity(configuration: FortiGateConfiguration) -> AuditFin
     )
     explicitly_empty = _reference_graph_is_explicitly_empty(configuration)
     noncanonical_reference_section = _has_noncanonical_reference_section(configuration)
-    unproven_typed_objects = _has_unproven_typed_objects(configuration)
+    unproven_typed_objects = (
+        _has_unproven_typed_objects(configuration)
+        if not configuration.complete_backup
+        else False
+    )
     collision_uncertain = (
         _indexes_have_collisions(indexes)
         or _nested_realserver_names_collide(configuration)
+        or _policy_names_collide(configuration)
     )
     certain_violation = bool(orphaned_services)
     graph_uncertain = (

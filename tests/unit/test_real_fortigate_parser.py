@@ -52,6 +52,10 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
         finding.control_id: (
             AuditStatus.FAIL
             if finding.control_id == "FW-BY-SEQUENCE-USAGE-001"
+            else AuditStatus.FAIL
+            if finding.control_id in {"IAM-LEGACY-ADMIN-001", "IAM-LEGACY-PKI-PRESENCE-001"}
+            else AuditStatus.PASS
+            if finding.control_id == "IAM-LEGACY-PKI-REMOVAL-001"
             else AuditStatus.NOT_APPLICABLE
             if finding.control_id in {"VPN-SSL-001", "FW-SSL-SSH-PROFILE-001"}
             else AuditStatus.UNKNOWN
@@ -73,9 +77,6 @@ def test_anonymized_realistic_fortigate_export_is_audited() -> None:
                 "UTM-FORTIGUARD-ANYCAST-001",
                 "NET-SDWAN-USAGE-001",
                 "CFG-UNUSED-SERVICE-001",
-                "IAM-LEGACY-ADMIN-001",
-                "IAM-LEGACY-PKI-REMOVAL-001",
-                "IAM-LEGACY-PKI-PRESENCE-001",
                 "NET-LEGACY-ADMIN-LOOPBACK-001",
                 "DNS-LEGACY-DATABASE-001",
                 "NET-GEO-IP-USAGE-001",

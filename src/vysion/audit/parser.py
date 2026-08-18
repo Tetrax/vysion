@@ -37,7 +37,20 @@ from vysion.audit.wifi_projection import apply_wifi_projection, project_wifi
 
 _AUDITED_ENTRY_SECTIONS = {"system interface", "system admin"}
 _AUDITED_SECTIONS = _AUDITED_ENTRY_SECTIONS | {"system global"}
-_ENTRY_ONLY_NAMESPACES = {"system admin", "user local", "user ldap"}
+_ENTRY_ONLY_NAMESPACES = {
+    "system admin",
+    "user local",
+    "user ldap",
+    "zone",
+    "members",
+    "realservers",
+    "secondaryip",
+    "health-check",
+    "service",
+    "filters",
+    "entries",
+    "authentication-rule",
+}
 _CASEFOLD_UNIQUE_ENTRY_SECTIONS = {
     "system zone",
     "system sdwan",
@@ -157,6 +170,7 @@ _PROJECTED_SECTIONS = {
     "system dns-database",
     "firewall profile-group",
     "firewall webfilter profile",
+    "firewall voip profile",
     "firewall ips sensor",
     "firewall antivirus profile",
     "firewall dnsfilter profile",
@@ -195,13 +209,33 @@ _PROJECTED_KEYS = {
     "system zone": {"interface"},
     "system sdwan": {"interface", "member"},
     "firewall policy": {
-        "name", "srcintf", "dstintf", "srcaddr", "dstaddr", "action", "status",
-        "schedule", "service", "logtraffic", "utm-status", "profile-group",
-        "webfilter-profile", "ips-sensor", "av-profile", "dnsfilter-profile",
-        "application-list", "ssl-ssh-profile", "voip-profile", "waf-profile",
-        "virtual-patch-profile", "file-filter-profile", "icap-profile",
-        "internet-service", "internet-service-name",
-        "internet-service-src-name", "internet-service-group",
+        "name",
+        "srcintf",
+        "dstintf",
+        "srcaddr",
+        "dstaddr",
+        "action",
+        "status",
+        "schedule",
+        "service",
+        "logtraffic",
+        "utm-status",
+        "profile-group",
+        "webfilter-profile",
+        "ips-sensor",
+        "av-profile",
+        "dnsfilter-profile",
+        "application-list",
+        "ssl-ssh-profile",
+        "voip-profile",
+        "waf-profile",
+        "virtual-patch-profile",
+        "file-filter-profile",
+        "icap-profile",
+        "internet-service",
+        "internet-service-name",
+        "internet-service-src-name",
+        "internet-service-group",
         "internet-service-src-group",
     },
     "firewall service custom": {
@@ -218,11 +252,20 @@ _PROJECTED_KEYS = {
     "firewall addrgrp": {"member"},
     "system dns-database": set(),
     "firewall profile-group": {
-        "webfilter-profile", "ips-sensor", "av-profile", "dnsfilter-profile",
-        "application-list", "ssl-ssh-profile", "voip-profile", "waf-profile",
-        "virtual-patch-profile", "file-filter-profile", "icap-profile",
+        "webfilter-profile",
+        "ips-sensor",
+        "av-profile",
+        "dnsfilter-profile",
+        "application-list",
+        "ssl-ssh-profile",
+        "voip-profile",
+        "waf-profile",
+        "virtual-patch-profile",
+        "file-filter-profile",
+        "icap-profile",
     },
     "firewall webfilter profile": {"feature-set"},
+    "firewall voip profile": {"feature-set"},
     "firewall ips sensor": {"status"},
     "firewall antivirus profile": {"feature-set"},
     "firewall dnsfilter profile": {"feature-set"},
@@ -238,9 +281,7 @@ _PROJECTED_KEYS = {
     "firewall profile-protocol-options": {"profile-type"},
     "vpn ssl settings": {"status", "source-interface"},
     "vpn ipsec phase1-interface": {"status", "interface", "ike-version", "proposal", "dhgrp"},
-    "vpn ipsec phase2-interface": {
-        "status", "phase1name", "pfs", "proposal", "dhgrp"
-    },
+    "vpn ipsec phase2-interface": {"status", "phase1name", "pfs", "proposal", "dhgrp"},
     "system autoupdate schedule": {"status", "frequency"},
     "system external-resource": {"status"},
     "firewall internet-service-group": {"member"},
@@ -310,7 +351,19 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
         {"comment", "extport", "mappedport", "portforward", "protocol", "uuid"}
     ),
     "firewall vipgrp": frozenset({"interface", "uuid"}),
-    "firewall address": frozenset({"comment", "subnet", "uuid"}),
+    "firewall address": frozenset(
+        {
+            "allow-routing",
+            "color",
+            "comment",
+            "dirty",
+            "end-ip",
+            "start-ip",
+            "sub-type",
+            "subnet",
+            "uuid",
+        }
+    ),
     "firewall addrgrp": frozenset({"comment", "uuid"}),
     "system dns-database": frozenset({"authoritative", "domain", "ttl", "type"}),
     "user local": frozenset({"passwd", "passwd-time"}),
@@ -400,9 +453,7 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
             "unicast-hb-peerip",
         }
     ),
-    "router static": frozenset(
-        {"comment", "device", "gateway", "priority", "status", "vrf"}
-    ),
+    "router static": frozenset({"comment", "device", "gateway", "priority", "status", "vrf"}),
     "firewall schedule onetime": frozenset({"color", "start"}),
     "firewall schedule recurring": frozenset({"color"}),
     "firewall schedule group": frozenset({"color"}),
@@ -427,10 +478,11 @@ _PROJECTED_CHILD_KEYS = {
         "short-guard-interval",
     },
     "zone": {"interface", "member"},
-    "members": {"interface", "zone"},
+    "members": {"interface", "zone", "gateway"},
     "health-check": {
         "server",
         "members",
+        "update-static-route",
         "interval",
         "failtime",
         "recoverytime",
@@ -448,6 +500,7 @@ _PROJECTED_CHILD_KEYS = {
         "src",
         "health-check",
         "priority-members",
+        "priority-zone",
         "quality",
     },
     "secondaryip": {"ip", "allowaccess"},
@@ -599,10 +652,7 @@ def _tokens(payload: str, error: str) -> list[str]:
             token: list[str] = []
             while position < len(payload) and payload[position] != '"':
                 if payload[position] == "\\":
-                    if (
-                        position + 1 < len(payload)
-                        and payload[position + 1] in {'"', "\\"}
-                    ):
+                    if position + 1 < len(payload) and payload[position + 1] in {'"', "\\"}:
                         token.append(payload[position + 1])
                         position += 2
                         continue
@@ -651,9 +701,7 @@ def _key_and_value(payload: str, error: str) -> tuple[str, str | None]:
 def _is_canonical_key_form(section: str, raw_key: str, normalized_key: str) -> bool:
     if raw_key == normalized_key:
         return True
-    return (
-        _FORTIOS_CANONICAL_KEY_FORMS.get(section, {}).get(normalized_key) == raw_key
-    )
+    return _FORTIOS_CANONICAL_KEY_FORMS.get(section, {}).get(normalized_key) == raw_key
 
 
 def _best_effort_tokens(payload: str | None) -> tuple[str, ...]:
@@ -787,10 +835,28 @@ def _structural_section(frame: _Frame) -> StructuralSection:
     certainty = frame.certainty
     if frame.section in _ENTRY_ONLY_NAMESPACES and (frame.directives or frame.children):
         certainty = EvidenceCertainty.AMBIGUOUS
-    if any(child.certainty is not EvidenceCertainty.CERTAIN for child in child_sections):
+    if frame.entries and frame.children:
+        certainty = EvidenceCertainty.AMBIGUOUS
+    if frame.section == "system sdwan":
+        # Only the membership namespaces determine whether an SD-WAN zone can
+        # be projected.  Health-check/service (and newer FortiOS child blocks)
+        # are intentionally ignored here, matching the V1 extractor while
+        # retaining their own structural evidence for controls that use it.
+        membership_children = {"zone", "members"}
+        if any(
+            child.name.casefold() in membership_children
+            and child.certainty is not EvidenceCertainty.CERTAIN
+            for child in child_sections
+        ):
+            certainty = EvidenceCertainty.AMBIGUOUS
+    elif any(child.certainty is not EvidenceCertainty.CERTAIN for child in child_sections):
         certainty = EvidenceCertainty.AMBIGUOUS
     for child in child_sections:
-        if child_counts[child.name.casefold()] > 1:
+        duplicate_child_is_probative = child_counts[child.name.casefold()] > 1 and (
+            frame.section != "system sdwan"
+            or child.name.casefold() in {"zone", "members"}
+        )
+        if duplicate_child_is_probative:
             certainty = EvidenceCertainty.AMBIGUOUS
             children.append(
                 child.model_copy(
@@ -830,6 +896,36 @@ def _structural_section(frame: _Frame) -> StructuralSection:
             entries.append(entry)
     if any(entry.certainty is not EvidenceCertainty.CERTAIN for entry in entries):
         certainty = EvidenceCertainty.AMBIGUOUS
+    if frame.section == "system sdwan":
+        zone_section = next(
+            (child for child in child_sections if child.name.casefold() == "zone"),
+            None,
+        )
+        members_section = next(
+            (child for child in child_sections if child.name.casefold() == "members"),
+            None,
+        )
+        declared_zone_names = (
+            {entry.name.casefold() for entry in zone_section.entries}
+            if zone_section is not None
+            else set()
+        )
+        if members_section is not None:
+            for member in members_section.entries:
+                zone_directive = next(
+                    (
+                        directive
+                        for directive in member.directives
+                        if directive.name.casefold() == "zone"
+                    ),
+                    None,
+                )
+                if zone_directive is not None and (
+                    zone_directive.certainty is not EvidenceCertainty.CERTAIN
+                    or len(zone_directive.tokens) != 1
+                    or zone_directive.tokens[0].casefold() not in declared_zone_names
+                ):
+                    certainty = EvidenceCertainty.AMBIGUOUS
     return StructuralSection(
         name=frame.section,
         line=frame.line,
@@ -863,10 +959,7 @@ def _directive_map(entry: StructuralEntry) -> dict[str, StructuralDirective]:
 
 def _observed_tokens(entry: StructuralEntry, name: str) -> tuple[str, ...]:
     """Keep one explicit value as observation, never as compliance proof."""
-    if any(
-        directive.name == name and directive.mutation
-        for directive in entry.directives
-    ):
+    if any(directive.name == name and directive.mutation for directive in entry.directives):
         return ()
     directives = tuple(
         directive
@@ -945,9 +1038,7 @@ def _projection_directives(
         section_name, frozenset()
     )
     return {
-        name: directive
-        for name, directive in _directive_map(entry).items()
-        if name in allowed_keys
+        name: directive for name, directive in _directive_map(entry).items() if name in allowed_keys
     }
 
 
@@ -957,8 +1048,7 @@ def _references(
     object_type: str = "object",
 ) -> tuple[ObjectReference, ...]:
     return tuple(
-        ObjectReference(object_type=object_type, name=token, relation=relation)
-        for token in tokens
+        ObjectReference(object_type=object_type, name=token, relation=relation) for token in tokens
     )
 
 
@@ -967,9 +1057,11 @@ def _interface_references_are_proven(
     interface_names: frozenset[str],
 ) -> bool:
     normalized_names = tuple(reference.name.casefold() for reference in references)
-    return bool(normalized_names) and len(set(normalized_names)) == len(
-        normalized_names
-    ) and all(name in interface_names for name in normalized_names)
+    return (
+        bool(normalized_names)
+        and len(set(normalized_names)) == len(normalized_names)
+        and all(name in interface_names for name in normalized_names)
+    )
 
 
 def _project_generic_sections(
@@ -1024,8 +1116,19 @@ def _project_generic_sections(
                 None,
             )
             if nested_zone_section is not None:
-                nested_children_are_known = all(
-                    child.name in {"zone", "members"} for child in section.children
+                zone_children = tuple(
+                    child for child in section.children if child.name == "zone"
+                )
+                members_children = tuple(
+                    child for child in section.children if child.name == "members"
+                )
+                membership_children_are_known = (
+                    len(zone_children) == 1
+                    and len(members_children) <= 1
+                    and all(
+                        child.certainty is EvidenceCertainty.CERTAIN
+                        for child in (*zone_children, *members_children)
+                    )
                 )
                 member_references: dict[str, list[ObjectReference]] = {}
                 member_certainty: dict[str, bool] = {}
@@ -1040,7 +1143,9 @@ def _project_generic_sections(
                         zone_names = (
                             tuple(token.casefold() for token in zone.tokens)
                             if zone is not None
-                            else declared_zone_names if len(declared_zone_names) == 1 else ()
+                            else declared_zone_names
+                            if len(declared_zone_names) == 1
+                            else ()
                         )
                         if len(zone_names) != 1:
                             for zone_name in zone_names:
@@ -1052,13 +1157,12 @@ def _project_generic_sections(
                             and len(interface.tokens) == 1
                             and not member.children
                             and not nested_members_section.children
-                            and nested_members_section.certainty
-                            is EvidenceCertainty.CERTAIN
+                            and nested_members_section.certainty is EvidenceCertainty.CERTAIN
                             and member.certainty is EvidenceCertainty.CERTAIN
                         )
-                        member_certainty[zone_name] = member_certainty.get(
-                            zone_name, True
-                        ) and valid_member
+                        member_certainty[zone_name] = (
+                            member_certainty.get(zone_name, True) and valid_member
+                        )
                         if interface is not None:
                             member_references.setdefault(zone_name, []).extend(
                                 _references(
@@ -1072,16 +1176,23 @@ def _project_generic_sections(
                     direct_interface = directives.get("interface")
                     direct_member = directives.get("member")
                     direct_selected = direct_interface or direct_member
+                    direct_relation = (
+                        "sdwan-interface"
+                        if direct_interface is not None
+                        else "sdwan-direct-member"
+                        if direct_member is not None
+                        else None
+                    )
                     direct_aliases_are_unambiguous = not (
                         direct_interface is not None and direct_member is not None
                     )
                     direct_references = (
                         _references(
                             tuple(direct_selected.tokens),
-                            "sdwan-interface",
+                            direct_relation,
                             "interface",
                         )
-                        if direct_selected is not None
+                        if direct_selected is not None and direct_relation is not None
                         else ()
                     )
                     references = direct_references + tuple(
@@ -1108,14 +1219,13 @@ def _project_generic_sections(
                             ),
                             proof_state=(
                                 ProofState.PROVEN
-                                if nested_children_are_known
+                                if membership_children_are_known
                                 and not entry.children
                                 and direct_aliases_are_unambiguous
                                 and evidence_is_complete
                                 and references_are_proven
                                 and section.certainty is EvidenceCertainty.CERTAIN
-                                and nested_zone_section.certainty
-                                is EvidenceCertainty.CERTAIN
+                                and nested_zone_section.certainty is EvidenceCertainty.CERTAIN
                                 and entry.certainty is EvidenceCertainty.CERTAIN
                                 else ProofState.UNKNOWN
                             ),
@@ -1163,16 +1273,12 @@ def _project_generic_sections(
                         policy_id=entry.name,
                         name=(name.tokens[0] if name and name.tokens else None),
                         source_interfaces=(
-                            _references(
-                                tuple(srcintf.tokens), "source-interface", "interface"
-                            )
+                            _references(tuple(srcintf.tokens), "source-interface", "interface")
                             if srcintf is not None
                             else ()
                         ),
                         destination_interfaces=(
-                            _references(
-                                tuple(dstintf.tokens), "destination-interface", "interface"
-                            )
+                            _references(tuple(dstintf.tokens), "destination-interface", "interface")
                             if dstintf is not None
                             else ()
                         ),
@@ -1213,9 +1319,7 @@ def _project_generic_sections(
                         name=entry.name,
                         type=(user_type.tokens[0] if user_type and user_type.tokens else None),
                         two_factor=(
-                            two_factor.tokens[0]
-                            if two_factor and two_factor.tokens
-                            else None
+                            two_factor.tokens[0] if two_factor and two_factor.tokens else None
                         ),
                         parsed_keys=frozenset(directives),
                         defaulted_keys=frozenset(
@@ -1238,9 +1342,7 @@ def _project_generic_sections(
                     SecurityProfile(
                         name=entry.name,
                         profile_type=(
-                            profile_type.tokens[0]
-                            if profile_type and profile_type.tokens
-                            else None
+                            profile_type.tokens[0] if profile_type and profile_type.tokens else None
                         ),
                         settings=_references(
                             tuple(profile_type.tokens) if profile_type else (),
@@ -1387,8 +1489,7 @@ def _project_single_vdom(
             update={
                 "certainty": ambiguous,
                 "entries": tuple(
-                    entry.model_copy(update={"certainty": ambiguous})
-                    for entry in section.entries
+                    entry.model_copy(update={"certainty": ambiguous}) for entry in section.entries
                 ),
             }
         )
@@ -1594,9 +1695,7 @@ class FortiGateParser:
                     Administrator(
                         name=entry.name,
                         two_factor=(
-                            values["two-factor"].lower()
-                            if "two-factor" in values
-                            else None
+                            values["two-factor"].lower() if "two-factor" in values else None
                         ),
                         peer_auth=(
                             values["peer-auth"].casefold() == "enable"
@@ -1637,11 +1736,7 @@ class FortiGateParser:
                     certainty = EvidenceCertainty.AMBIGUOUS
                 else:
                     tokens = tuple(_tokens(value_payload, "malformed set directive"))
-                    certainty = (
-                        EvidenceCertainty.CERTAIN
-                        if tokens
-                        else EvidenceCertainty.AMBIGUOUS
-                    )
+                    certainty = EvidenceCertainty.CERTAIN if tokens else EvidenceCertainty.AMBIGUOUS
                 if frame.section == "user ldap" and raw_key != key:
                     certainty = EvidenceCertainty.AMBIGUOUS
             except ValueError:
@@ -1651,9 +1746,7 @@ class FortiGateParser:
                 tokens = _best_effort_tokens(parts[1] if len(parts) == 2 else None)
                 certainty = EvidenceCertainty.AMBIGUOUS
             existing_keys = {
-                directive.name
-                for directive in frame.entry_directives
-                if not directive.mutation
+                directive.name for directive in frame.entry_directives if not directive.mutation
             }
             if key in existing_keys or key in frame.uncertain_keys:
                 frame.invalidate(key)
@@ -1662,17 +1755,24 @@ class FortiGateParser:
             projected_keys = _PROJECTED_KEYS.get(frame.section) or _PROJECTED_CHILD_KEYS.get(
                 frame.section
             )
-            tolerated_keys = _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS.get(
-                frame.section, frozenset()
-            )
-            if projected_keys is not None and (
-                not _is_canonical_key_form(frame.section, raw_key, key)
-                or key not in projected_keys | tolerated_keys
+            tolerated_keys = _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS.get(frame.section, frozenset())
+            if (
+                frame.section != "system sdwan"
+                and projected_keys is not None
+                and (
+                    not _is_canonical_key_form(frame.section, raw_key, key)
+                    or key not in projected_keys | tolerated_keys
+                )
             ):
+                # FortiOS adds SD-WAN-wide knobs across releases.  They do not
+                # change the membership relation represented by ``zone`` and
+                # ``members``; keep them structural/non-probative instead of
+                # hiding otherwise usable SD-WAN zones as V1 did not do.
                 frame.mark_ambiguous()
-            if frame.section in {"gui-dashboard", "widget"} and key in _RELEVANT_KEYS[
-                "system admin"
-            ]:
+            if (
+                frame.section in {"gui-dashboard", "widget"}
+                and key in _RELEVANT_KEYS["system admin"]
+            ):
                 frame.mark_ambiguous()
             frame.record(
                 StructuralDirective(
@@ -1751,9 +1851,9 @@ class FortiGateParser:
                 if stack:
                     parent_section = stack[-1].section
                     allowed_children = _PROJECTED_CHILDREN.get(parent_section)
-                    if (
-                        allowed_children is not None and section not in allowed_children
-                    ) or (parent_section in _PROJECTED_SECTIONS and allowed_children is None):
+                    if (allowed_children is not None and section not in allowed_children) or (
+                        parent_section in _PROJECTED_SECTIONS and allowed_children is None
+                    ):
                         frame.certainty = EvidenceCertainty.AMBIGUOUS
                 if stack:
                     if stack[-1].entry_name is None:
@@ -1795,8 +1895,7 @@ class FortiGateParser:
                         raise ValueError("malformed edit directive")
                     entry_name = edit_tokens[0]
                     if any(
-                        entry.name.casefold() == entry_name.casefold()
-                        for entry in frame.entries
+                        entry.name.casefold() == entry_name.casefold() for entry in frame.entries
                     ):
                         raise ValueError("duplicate audited entry")
                 frame.entry_name = entry_name
@@ -1883,9 +1982,7 @@ class FortiGateParser:
                     ):
                         raise ValueError("invalid hostname value")
                     hostname = normalized_hostname
-                    hostname_proven = (
-                        canonical_key and frame.certainty is EvidenceCertainty.CERTAIN
-                    )
+                    hostname_proven = canonical_key and frame.certainty is EvidenceCertainty.CERTAIN
                 elif frame.audited_section == "system interface" and key == "allowaccess":
                     lowered = set(map(str.lower, value_tokens))
                     contains_whitespace = any(
@@ -1981,9 +2078,7 @@ class FortiGateParser:
                         if (
                             keyword == "unset"
                             and len(mutation_tokens) == 1
-                            and mutation_name in _CERTAIN_UNSET_KEYS.get(
-                                frame.section, frozenset()
-                            )
+                            and mutation_name in _CERTAIN_UNSET_KEYS.get(frame.section, frozenset())
                             and _is_canonical_key_form(
                                 frame.section, mutation_tokens[0], mutation_name
                             )
@@ -2130,21 +2225,15 @@ class FortiGateParser:
         interfaces = list(_attach_interface_zones(tuple(interfaces), zones))
         firewall_projection = project_firewall(document)
         object_references = tuple(
-            reference
-            for policy in policies
-            for reference in policy.object_references
+            reference for policy in policies for reference in policy.object_references
         )
         device_identity = DeviceIdentity(
             hostname=hostname,
             model=identity_model,
             firmware_version=firmware_version,
-            parsed_keys=frozenset(
-                identity_keys | ({"hostname"} if hostname_proven else set())
-            ),
+            parsed_keys=frozenset(identity_keys | ({"hostname"} if hostname_proven else set())),
             proof_state=(
-                ProofState.PROVEN
-                if hostname_proven or identity_keys
-                else ProofState.UNKNOWN
+                ProofState.PROVEN if hostname_proven or identity_keys else ProofState.UNKNOWN
             ),
         )
         configuration = FortiGateConfiguration(
@@ -2168,9 +2257,7 @@ class FortiGateParser:
         configuration = apply_schedule_projection(configuration, project_schedules(document))
         configuration = apply_vpn_projection(configuration, project_vpn(document))
         configuration = apply_ha_projection(configuration, project_ha(document))
-        configuration = apply_legacy_admin_projection(
-            configuration, project_legacy_admin(document)
-        )
+        configuration = apply_legacy_admin_projection(configuration, project_legacy_admin(document))
         configuration = apply_legacy_network_projection(
             configuration, project_legacy_network(document)
         )
