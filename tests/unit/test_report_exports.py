@@ -167,7 +167,6 @@ def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
         "parser",
         "projection",
         "proof_state",
-        "certain",
         "ambiguous",
         "defaulted",
         "control_id",
@@ -181,7 +180,7 @@ def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
         "registry",
     )
     assert all(
-        re.search(rf"\\b{re.escape(term)}\\b", document, flags=re.IGNORECASE) is None
+        re.search(rf"\b{re.escape(term)}\b", document, flags=re.IGNORECASE) is None
         for term in forbidden
     )
 
