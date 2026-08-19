@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -22,7 +23,7 @@ from vysion.audit.models import (
 )
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
-from vysion.reports.business_text import business_text_for
+from vysion.reports.business_text import business_text_for, client_result_for
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.xlsx_report import render_xlsx
@@ -140,6 +141,50 @@ def test_docx_renders_v1_client_language_without_engine_fields() -> None:
         "namespace",
     ):
         assert value not in document
+
+
+def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
+    finding = AuditFinding(
+        control_id="IAM-GUEST-ACCOUNT-001",
+        title="Absence du compte guest",
+        status=AuditStatus.PASS,
+        applicability=Applicability.APPLICABLE,
+        evidence=("compte guest absent des namespaces certains",),
+        message="Le compte par défaut guest est absent des namespaces certains.",
+    )
+
+    assert client_result_for(finding) == (
+        "Le compte guest n'a pas été détecté dans la configuration analysée."
+    )
+
+    report = _enriched_report().model_copy(update={"findings": (finding,)})
+    with ZipFile(BytesIO(render_docx(report))) as package:
+        document = package.read("word/document.xml").decode("utf-8")
+
+    assert "Le compte guest n'a pas été détecté dans la configuration analysée." in document
+    forbidden = (
+        "namespace",
+        "parser",
+        "projection",
+        "proof_state",
+        "certain",
+        "ambiguous",
+        "defaulted",
+        "control_id",
+        "provenance",
+        "evidence",
+        "internal",
+        "typed projection",
+        "line number",
+        "JSON",
+        "engine",
+        "registry",
+    )
+    assert all(
+        re.search(rf"\\b{re.escape(term)}\\b", document, flags=re.IGNORECASE) is None
+        for term in forbidden
+    )
+
 
 
 def test_docx_hides_not_applicable_findings_from_the_business_body() -> None:

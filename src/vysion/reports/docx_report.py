@@ -140,7 +140,14 @@ def _clean_client_text(value: str | None) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(r"\b(?:certain|ambiguous|defaulted|proven)\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcertain\b", "confirmé", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcertaine\b", "confirmée", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcertains\b", "confirmés", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcertaines\b", "confirmées", text, flags=re.IGNORECASE)
+    text = re.sub(r"\buncertain\b", "non confirmé", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bambiguous\b", "incomplet", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bdefaulted\b", "par défaut", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bproven\b", "confirmé", text, flags=re.IGNORECASE)
     text = re.sub(r"\s{2,}", " ", text).strip(" .;:-")
     text = re.sub(r"^[=+@]", "", text)
     return text or "ce contrôle"

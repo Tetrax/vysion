@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from vysion.audit.models import AuditFinding, RiskAssessment
+from vysion.audit.models import AuditFinding, AuditStatus, RiskAssessment
 
 
 @dataclass(frozen=True, slots=True)
@@ -683,9 +683,27 @@ def _clean_observation(value: str) -> str:
     text = re.sub(r"\b(?:rule_version|ruleset-version|ruleset)\b[^;,.]*", "", text, flags=re.I)
     text = re.sub(r"\bprovenance\b[^;,.]*", "", text, flags=re.I)
     text = re.sub(r"\blegacy_v1\b", "", text, flags=re.I)
-    text = re.sub(r"\bnamespace\b", "section", text, flags=re.I)
+    text = re.sub(r"\btyped\s+projection(?:s)?\b", "configuration analysée", text, flags=re.I)
+    text = re.sub(r"\bnamespaces?\b", "configuration", text, flags=re.I)
+    text = re.sub(r"\bprojection(?:s)?\b", "analyse", text, flags=re.I)
+    text = re.sub(r"\bparser\b", "analyse", text, flags=re.I)
+    text = re.sub(
+        r"\b(?:proof_state|proof|evidence|control_id|internal|engine|registry)\b",
+        "",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\b(?:line|line number)\s*\d*\b", "", text, flags=re.I)
+    text = re.sub(r"\bJSON\b", "rapport", text, flags=re.I)
+    text = re.sub(r"\bcertain\b", "confirmé", text, flags=re.I)
+    text = re.sub(r"\bcertaine\b", "confirmée", text, flags=re.I)
+    text = re.sub(r"\bcertains\b", "confirmés", text, flags=re.I)
+    text = re.sub(r"\bcertaines\b", "confirmées", text, flags=re.I)
+    text = re.sub(r"\buncertain\b", "non confirmé", text, flags=re.I)
+    text = re.sub(r"\bambiguous\b", "incomplet", text, flags=re.I)
+    text = re.sub(r"\bdefaulted\b", "par défaut", text, flags=re.I)
+    text = re.sub(r"\bproven\b", "confirmé", text, flags=re.I)
     text = re.sub(r"\bpolicy\s+(\d+)\b", r"règle \1", text, flags=re.I)
-    text = re.sub(r"\bligne\s+\d+\b", "", text, flags=re.I)
     text = re.sub(r"\s{2,}", " ", text).strip(" .;:-")
     text = re.sub(r"^[=+@]", "", text)
     return text
@@ -745,6 +763,16 @@ def _detected_values(finding: AuditFinding) -> str:
 
 def client_result_for(finding: AuditFinding) -> str:
     """Render a useful client result from the engine message and live evidence."""
+
+    if finding.control_id == "IAM-GUEST-ACCOUNT-001":
+        if finding.status is AuditStatus.PASS:
+            return "Le compte guest n'a pas été détecté dans la configuration analysée."
+        if finding.status is AuditStatus.FAIL:
+            return "Le compte guest par défaut a été détecté dans la configuration analysée."
+        return (
+            "La présence du compte guest n'a pas pu être confirmée dans la "
+            "configuration analysée."
+        )
 
     message = _clean_observation(finding.message)
     detected = _detected_values(finding)
