@@ -71,6 +71,8 @@ The full suite covers the already implemented V2 parity behavior for Geo-IP, LDA
 - Frontend ESLint: passed with project-local ESLint 9.34.0.
 - Frontend TypeScript/Vite build: passed.
 - Compose validation: passed.
+- Candidate image: `vysion:rc-v1-behavioral-parity-4a13a70`, immutable image ID `sha256:3f32d94a336b2ee0c2b9d3599ddb30bbfd82a1d5ccae061db0955a1df7308366`.
+- Isolated candidate smoke: `/healthz` and `/api/health` returned version `2.3.5`, revision `4a13a70`; container was `running|healthy|0` and then removed with its temporary volume.
 - Production runtime after verification: `running|healthy|0`, image remains `vysion:23e219b11a18bcc6d5ff90799f3cdd6739883953`.
 - Rollback tags remain present: `vysion:rollback-v2.3.3` and `vysion:rollback-v2.3.4`.
 
