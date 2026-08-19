@@ -1668,6 +1668,11 @@ class FortiGateParser:
             entry = frame.entries[-1]
             if frame.audited_section == "system interface":
                 parsed_entry_sections.add(frame.audited_section)
+                status_tokens = tuple(
+                    token.casefold() for token in _observed_tokens(entry, "status")
+                )
+                if status_tokens == ("down",):
+                    return
                 interfaces.append(
                     Interface(
                         name=entry.name,

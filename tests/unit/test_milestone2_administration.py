@@ -298,7 +298,7 @@ end
     findings = audit(raw)
 
     assert findings["IAM-DEFAULT-ADMIN-001"].status is AuditStatus.UNKNOWN
-    assert findings["IAM-GUEST-ACCOUNT-001"].status is AuditStatus.UNKNOWN
+    assert findings["IAM-GUEST-ACCOUNT-001"].status is AuditStatus.PASS
 
 
 def test_admin_explicit_failure_dominates_unknown_admin() -> None:
@@ -474,7 +474,7 @@ def test_default_admin_presence_dominates_entry_ambiguity() -> None:
     assert finding.status is AuditStatus.FAIL
 
 
-def test_guest_absence_requires_both_complete_namespaces() -> None:
+def test_guest_absence_requires_complete_user_local_namespace() -> None:
     findings = audit(
         admin_block(admin_entry("secops", "        set two-factor fortitoken\n"))
         + "config user local\nend\n"
@@ -482,12 +482,12 @@ def test_guest_absence_requires_both_complete_namespaces() -> None:
 
     finding = findings["IAM-GUEST-ACCOUNT-001"]
     assert finding.status is AuditStatus.PASS
-    assert len(finding.evidence_items) == 2
+    assert len(finding.evidence_items) == 1
     assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
     assert all(item.directive is None for item in finding.evidence_items)
 
 
-def test_guest_in_admin_or_local_namespace_fails_case_insensitively() -> None:
+def test_guest_only_in_user_local_namespace_fails_case_insensitively() -> None:
     admin_finding = audit(
         admin_block(admin_entry("Guest", "        set two-factor fortitoken\n"))
         + "config user local\nend\n"
@@ -499,7 +499,7 @@ def test_guest_in_admin_or_local_namespace_fails_case_insensitively() -> None:
         )
     )["IAM-GUEST-ACCOUNT-001"]
 
-    assert admin_finding.status is AuditStatus.FAIL
+    assert admin_finding.status is AuditStatus.PASS
     assert local_finding.status is AuditStatus.FAIL
 
 

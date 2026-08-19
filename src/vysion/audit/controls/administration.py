@@ -555,15 +555,7 @@ def _absence_finding(
         control_id=control_id,
         title=title,
         status=AuditStatus.PASS,
-        applicability=(
-            Applicability.NOT_APPLICABLE
-            if configuration.complete_backup
-            and any(
-                configuration.document.section(namespace) is None
-                for namespace in namespaces
-            )
-            else Applicability.APPLICABLE
-        ),
+        applicability=Applicability.APPLICABLE,
         evidence=(f"compte {target} absent des namespaces certains",),
         section=namespaces[0],
         directive="account",
@@ -606,5 +598,5 @@ def check_guest_account(configuration: FortiGateConfiguration) -> AuditFinding:
         control_id="IAM-GUEST-ACCOUNT-001",
         title="Absence du compte guest",
         target="guest",
-        namespaces=("system admin", "user local"),
+        namespaces=("user local",),
     )

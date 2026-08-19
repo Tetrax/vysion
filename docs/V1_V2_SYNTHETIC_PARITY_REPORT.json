@@ -1,0 +1,239 @@
+{
+  "corpus": "synthetic",
+  "results": [
+    {
+      "affected_objects": [
+        {
+          "name": "guest",
+          "object_type": "account",
+          "reference": {
+            "name": "guest",
+            "object_type": "account",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "guest-present",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_compte_guest",
+      "legacy_message": "Compte Guest par défaut présent",
+      "legacy_status": "FAIL",
+      "match": true,
+      "transition": "FAIL->FAIL",
+      "v2_control_id": "IAM-GUEST-ACCOUNT-001",
+      "v2_evidence": [
+        "compte guest présent dans user local: guest"
+      ],
+      "v2_message": "Le compte par défaut guest est présent.",
+      "v2_status": "FAIL"
+    },
+    {
+      "affected_objects": [],
+      "case_id": "guest-absent",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_compte_guest",
+      "legacy_message": "Compte Guest par défaut non trouvé",
+      "legacy_status": "PASS",
+      "match": true,
+      "transition": "PASS->PASS",
+      "v2_control_id": "IAM-GUEST-ACCOUNT-001",
+      "v2_evidence": [
+        "compte guest absent des namespaces certains"
+      ],
+      "v2_message": "Le compte par défaut guest est absent des sections contrôlées.",
+      "v2_status": "PASS"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "admin",
+          "object_type": "administrator",
+          "reference": {
+            "name": "admin",
+            "object_type": "administrator",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "default-admin-present",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_compte_admin",
+      "legacy_message": "Le compte Admin par défaut est présent",
+      "legacy_status": "FAIL",
+      "match": true,
+      "transition": "FAIL->FAIL",
+      "v2_control_id": "IAM-DEFAULT-ADMIN-001",
+      "v2_evidence": [
+        "compte admin présent dans system admin: admin"
+      ],
+      "v2_message": "Le compte par défaut admin est présent.",
+      "v2_status": "FAIL"
+    },
+    {
+      "affected_objects": [],
+      "case_id": "default-admin-absent",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_compte_admin",
+      "legacy_message": "Compte Admin par défaut non trouvé",
+      "legacy_status": "PASS",
+      "match": true,
+      "transition": "PASS->PASS",
+      "v2_control_id": "IAM-DEFAULT-ADMIN-001",
+      "v2_evidence": [
+        "compte admin absent des namespaces certains"
+      ],
+      "v2_message": "Le compte par défaut admin est absent des sections contrôlées.",
+      "v2_status": "PASS"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "published",
+          "object_type": "vip",
+          "reference": {
+            "name": "published",
+            "object_type": "vip",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "vip-any",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_vips_extintf_any",
+      "legacy_message": "VIP(s) avec 'ANY' sur l'interface externe : published",
+      "legacy_status": "FAIL",
+      "match": true,
+      "transition": "FAIL->FAIL",
+      "v2_control_id": "FW-VIP-EXTINTF-ANY-001",
+      "v2_evidence": [
+        "vip published: extintf any"
+      ],
+      "v2_message": "Un objet VIP expose explicitement extintf any.",
+      "v2_status": "FAIL"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "published",
+          "object_type": "vip",
+          "reference": {
+            "name": "published",
+            "object_type": "vip",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "vip-specific",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_vips_extintf_any",
+      "legacy_message": "Aucune VIP a 'ANY' comme interface externe",
+      "legacy_status": "PASS",
+      "match": true,
+      "transition": "PASS->PASS",
+      "v2_control_id": "FW-VIP-EXTINTF-ANY-001",
+      "v2_evidence": [
+        "vip published: extintf explicitement borné"
+      ],
+      "v2_message": "Les objets VIP ont une interface externe explicitement bornée.",
+      "v2_status": "PASS"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "frontend",
+          "object_type": "virtual-server",
+          "reference": {
+            "name": "frontend",
+            "object_type": "virtual-server",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "vserver-any",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_vs_extintf_any",
+      "legacy_message": "Virtual Server(s) avec 'ANY' sur l'interface externe non conforme(s) : frontend",
+      "legacy_status": "FAIL",
+      "match": true,
+      "transition": "FAIL->FAIL",
+      "v2_control_id": "FW-VSERVER-EXTINTF-ANY-001",
+      "v2_evidence": [
+        "virtual-server frontend: extintf any"
+      ],
+      "v2_message": "Un objet virtual server expose explicitement extintf any.",
+      "v2_status": "FAIL"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "frontend",
+          "object_type": "virtual-server",
+          "reference": {
+            "name": "frontend",
+            "object_type": "virtual-server",
+            "relation": null
+          }
+        }
+      ],
+      "case_id": "vserver-specific",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_vs_extintf_any",
+      "legacy_message": "Les Virtuals Servers sont conformes (aucun avec ANY en interface externe)",
+      "legacy_status": "PASS",
+      "match": true,
+      "transition": "PASS->PASS",
+      "v2_control_id": "FW-VSERVER-EXTINTF-ANY-001",
+      "v2_evidence": [
+        "virtual-server frontend: extintf explicitement borné"
+      ],
+      "v2_message": "Les objets virtual server ont une interface externe explicitement bornée.",
+      "v2_status": "PASS"
+    },
+    {
+      "affected_objects": [],
+      "case_id": "ssl-vpn-disabled",
+      "classification": "SEMANTIC_EQUIVALENT",
+      "legacy_callable": "verifier_vpn_ssl_utilisation",
+      "legacy_message": "Le VPN SSL est désactivé",
+      "legacy_status": "PASS",
+      "match": false,
+      "transition": "PASS->NOT_APPLICABLE",
+      "v2_control_id": "VPN-SSL-001",
+      "v2_evidence": [
+        "vpn ssl settings: status disable explicite"
+      ],
+      "v2_message": "Le SSL-VPN est explicitement désactivé et aucune utilisation n'est prouvée.",
+      "v2_status": "NOT_APPLICABLE"
+    },
+    {
+      "affected_objects": [
+        {
+          "name": "ssl-vpn",
+          "object_type": "ssl-vpn",
+          "reference": null
+        }
+      ],
+      "case_id": "ssl-vpn-configured",
+      "classification": "EXACT",
+      "legacy_callable": "verifier_vpn_ssl_utilisation",
+      "legacy_message": "Le VPN SSL est configuré.",
+      "legacy_status": "FAIL",
+      "match": true,
+      "transition": "FAIL->FAIL",
+      "v2_control_id": "VPN-SSL-001",
+      "v2_evidence": [
+        "SSL-VPN explicitement activé ou configuré"
+      ],
+      "v2_message": "Une activation ou une utilisation SSL-VPN est explicitement présente.",
+      "v2_status": "FAIL"
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "divergences": 1,
+    "matches": 9,
+    "semantic_equivalences": 1,
+    "total": 10,
+    "unresolved_divergences": 0
+  }
+}

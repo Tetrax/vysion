@@ -206,6 +206,29 @@ end
     assert _finding(findings, "NET-WAN-MGMT-001").status is AuditStatus.FAIL
 
 
+def test_down_interfaces_are_excluded_from_active_inventory_like_v1() -> None:
+    raw = """config system interface
+    edit "wan1"
+        set role wan
+        set status up
+        set allowaccess ping
+    next
+    edit "modem"
+        set type physical
+        set status down
+        set allowaccess ping
+    next
+end
+"""
+
+    configuration = FortiGateParser().parse(raw)
+
+    assert [interface.name for interface in configuration.interfaces] == ["wan1"]
+    section = configuration.document.section("system interface")
+    assert section is not None
+    assert [entry.name for entry in section.entries] == ["wan1", "modem"]
+
+
 def test_fortios_admin_dashboard_and_metadata_preserve_mfa_certainty() -> None:
     raw = """config system admin
     edit "secops-synthetic"
@@ -1046,7 +1069,6 @@ end
     }
     expected_not_applicable = {
         "IAM-LOCAL-USER-MFA-001",
-        "IAM-GUEST-ACCOUNT-001",
         "FW-VIP-EXTINTF-ANY-001",
         "FW-VSERVER-EXTINTF-ANY-001",
         "VPN-IKEV2-001",
