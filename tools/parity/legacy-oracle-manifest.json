@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "python": "3.12.3",
+  "environment": ".legacy-venv",
+  "install": "uv venv --python 3.12 .legacy-venv && uv pip install --python .legacy-venv/bin/python -r tools/parity/legacy-requirements.lock",
+  "network_policy": "deny_unless_frozen",
+  "runtime_image_inclusion": false,
+  "inputs": [
+    {
+      "role": "legacy_oracle",
+      "path": "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/app/audit/legacy_functions.py",
+      "sha256": "c0d45bb0f98a37f7652b6ac8b96740a263da0d7b556518bb5a77aaafa72b603d"
+    },
+    {
+      "role": "legacy_external_adapter",
+      "path": "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/app/audit/fortiguard.py",
+      "sha256": "6ee102395b626239f6566eb288b5cd7625d566d7532d7a74c8b8a6ea9d04b78f"
+    },
+    {
+      "role": "legacy_direct_requirements",
+      "path": "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/requirements.txt",
+      "sha256": "2214ac7f41521b899addf558fd98f8cd17f03ad5e41aaa8d49a47b26ef18b6c5"
+    },
+    {
+      "role": "legacy_eol_reference",
+      "path": "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/Références/fortigate-model-eol.xlsx",
+      "sha256": "f76285c572ad656f40def3085b48e7f377186a033564afa9c0c34bc7b1c14636"
+    }
+  ],
+  "privacy": {
+    "configuration_transport": "stdin to isolated subprocess",
+    "temporary_configuration": "NamedTemporaryFile deleted at worker exit",
+    "persist_results": false
+  }
+}
