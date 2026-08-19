@@ -3,6 +3,23 @@
 > Matrice de pilotage de la récupération de valeur métier V1 dans l’architecture typée V2.
 > V1 est l’oracle fonctionnel ; V2 reste la frontière technique et de preuve.
 
+## État M1 courant — parité comportementale
+
+La cartographie machine vérifiée est `docs/V1_V2_CAPABILITY_MAP.json`. Son test exécute le
+registre public V2 et impose les invariants suivants : 59 capacités V1 uniques et ordonnées,
+60 findings V2 uniques dans l'ordre réel du registre, couverture complète des findings par la
+cartographie ou par la liste explicite des ajouts V2.
+
+- 53 capacités V1 alimentent 56 findings enregistrés (splits MFA et VPN compris) ;
+- 2 capacités sont des projections/restaurations hors finding (inventaire admins, statistiques policies) ;
+- 2 implémentations existent mais restent hors registre (`NET-ISDB-WAN-001`, `NET-CTI-WAN-001`) ;
+- EOL est bloqué par l'absence de source externe versionnée ;
+- les logs/hit counts sont bloqués par l'absence de données runtime ;
+- 4 findings sont des ajouts V2 explicites : hostname, preuve de licence UTM, PSIRT et intégrité des références.
+
+Les catégories A/B/C ci-dessous décrivent l'inventaire de migration historique. Elles ne remplacent
+pas la disposition exécutable courante portée par la cartographie JSON.
+
 ## État de référence figé
 
 - Checkout : `/home/tetrax/workspace/vysion/vysion-v2`
