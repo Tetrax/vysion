@@ -10,15 +10,16 @@ The V1 monolith remains an isolated Python 3.12 comparison oracle. It is not cop
 
 ## Capability matrix
 
-`docs/V1_V2_CAPABILITY_MAP.json` is the canonical exhaustive map:
+`docs/V1_V2_CAPABILITY_MAP.json` and `docs/V1_V2_DETERMINISTIC_PARITY_MATRIX.md` are the canonical exhaustive maps:
 
-- 59 V1 business capabilities inventoried;
-- 53 V1 capabilities mapped to 56 registered V2 findings;
-- 2 V1 capabilities represented as typed projections;
-- 2 existing V2 implementations explicitly outside the registry (CTI and ISDB);
-- 1 external-source capability blocked (FortiGate EOL);
-- 1 runtime-data capability blocked (policy hit counts);
-- 4 V2-only findings identified.
+- 59 V1 business capabilities inventoried one by one;
+- 57 deterministic capabilities classified `EXACT_MATCH` or `SEMANTIC_EQUIVALENT`;
+- 1 external-source capability classified `BLOCKED_EXTERNAL_SOURCE` (FortiGate EOL);
+- 1 runtime-data capability classified `BLOCKED_RUNTIME_DATA` (policy hit counts);
+- 0 `UNRESOLVED_DIVERGENCE` outside those two exclusions;
+- PSIRT/FortiGuard live observations are explicitly outside the parity gate and remain fail-closed.
+
+CTI and ISDB retain their existing typed V2 implementations and are classified in the matrix without adding findings to the 60-control release registry. Projection-only V1 capabilities are evaluated from typed configuration data rather than counted as additional controls.
 
 ## Differential replay
 
@@ -49,6 +50,7 @@ Semantic equivalence is reported separately and never counted as an exact match.
 
 - Explicitly down interfaces are excluded from the active interface projection while remaining available in the structural document.
 - Guest-account detection follows V1's `config user local` scope and reports proven absence as `PASS`.
+- The existing object control now evaluates V1 object families through the structural document and typed references, while preserving UNKNOWN for incomplete exports and service mutations/collisions.
 - Differential summaries separate exact matches, semantic equivalences, and unresolved divergences.
 - Real-reference output is redacted and stores only aggregate projection counts.
 
@@ -64,17 +66,13 @@ The full suite covers the already implemented V2 parity behavior for Geo-IP, LDA
 
 ## Verification
 
-- Backend: `802 passed`.
+- Backend: `806 passed`.
 - Differential tests: `13 passed` (included in backend total).
+- Parity matrix gate: 59 rows, 57 exact/semantic, 2 explicit exclusions, 0 unresolved outside exclusions.
 - Ruff: all checks passed.
-- Frontend: 3 files / 10 tests passed.
-- Frontend ESLint: passed with project-local ESLint 9.34.0.
-- Frontend TypeScript/Vite build: passed.
-- Compose validation: passed.
-- Candidate image: `vysion:rc-v1-behavioral-parity-4a13a70`, immutable image ID `sha256:3f32d94a336b2ee0c2b9d3599ddb30bbfd82a1d5ccae061db0955a1df7308366`.
-- Isolated candidate smoke: `/healthz` and `/api/health` returned version `2.3.5`, revision `4a13a70`; container was `running|healthy|0` and then removed with its temporary volume.
-- Production runtime after verification: `running|healthy|0`, image remains `vysion:23e219b11a18bcc6d5ff90799f3cdd6739883953`.
-- Rollback tags remain present: `vysion:rollback-v2.3.3` and `vysion:rollback-v2.3.4`.
+- Frontend: 3 files / 10 tests passed on the protected GUI snapshot.
+- Frontend ESLint and TypeScript/Vite build: passed on the protected GUI snapshot.
+- Compose validation: passed on the protected delivery path.
 
 ## Release boundary and remaining limits
 

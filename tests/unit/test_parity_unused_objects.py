@@ -9,6 +9,53 @@ def _unused_finding(raw: str):
     return next(item for item in findings if item.control_id == "CFG-UNUSED-SERVICE-001")
 
 
+def test_unused_address_object_is_reported_by_the_same_typed_control() -> None:
+    raw = """config firewall address
+    edit "orphan-address"
+    next
+end
+config firewall service custom
+end
+config firewall service group
+end
+config firewall policy
+end
+"""
+
+    finding = _unused_finding(raw)
+
+    assert finding.status is AuditStatus.FAIL
+    assert [(item.object_type, item.name) for item in finding.affected_objects] == [
+        ("address", "orphan-address")
+    ]
+
+
+
+def test_used_address_object_passes_by_typed_policy_reference() -> None:
+    raw = """config firewall address
+    edit "used-address"
+    next
+end
+config firewall service custom
+end
+config firewall service group
+end
+config firewall policy
+    edit 1
+        set srcintf "lan"
+        set dstintf "wan"
+        set srcaddr "used-address"
+        set dstaddr "all"
+        set action accept
+        set service "ALL"
+    next
+end
+"""
+
+    assert _unused_finding(raw).status is AuditStatus.PASS
+
+
+
 def test_unused_service_object_is_reported_through_typed_registry() -> None:
     raw = """config firewall service custom
     edit "orphan-service"

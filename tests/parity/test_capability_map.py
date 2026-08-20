@@ -45,7 +45,27 @@ def test_capability_map_classifies_splits_and_unregistered_paths() -> None:
 
     assert by_callable["verifier_mfa_utilisateurs_admins"]["relation"] == "split"
     assert by_callable["verifier_durcissement_vpn_ipsec_split"]["relation"] == "split"
-    assert by_callable["verifier_presence_cti"]["disposition"] == "OFF_REGISTRY"
-    assert by_callable["verifier_presence_isdb"]["disposition"] == "OFF_REGISTRY"
-    assert by_callable["verifier_modele_fortigate_eol"]["disposition"] == "BLOCKED_EXTERNAL_SOURCE"
-    assert by_callable["verifier_logs_par_regle"]["disposition"] == "BLOCKED_RUNTIME_DATA"
+    assert by_callable["verifier_presence_cti"]["classification"] == "EXACT_MATCH"
+    assert by_callable["verifier_presence_isdb"]["classification"] == "EXACT_MATCH"
+    assert by_callable["verifier_modele_fortigate_eol"]["classification"] == (
+        "BLOCKED_EXTERNAL_SOURCE"
+    )
+    assert by_callable["verifier_logs_par_regle"]["classification"] == (
+        "BLOCKED_RUNTIME_DATA"
+    )
+
+
+def test_capability_map_has_only_authorized_parity_classifications() -> None:
+    payload = json.loads(MAPPING.read_text(encoding="utf-8"))
+    allowed = set(payload["parity_gate"]["allowed_classifications"])
+    capabilities = payload["legacy_capabilities"]
+
+    assert len(capabilities) == 59
+    assert all(item["classification"] in allowed for item in capabilities)
+    assert all(item["classification"] != "UNRESOLVED_DIVERGENCE" for item in capabilities)
+    assert payload["parity_gate"]["unresolved_divergences"] == 0
+    assert [
+        item["legacy_callable"]
+        for item in capabilities
+        if item["gate"] == "excluded"
+    ] == ["verifier_modele_fortigate_eol", "verifier_logs_par_regle"]
