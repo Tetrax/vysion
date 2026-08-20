@@ -161,13 +161,13 @@ def test_client_exports_use_v1_display_name_and_v1_v2_matrix() -> None:
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "Vérification de la présence de MFA" in document
+    assert "MFA des administrateurs" in document
     assert "IAM-ADMIN-MFA-001" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
     client_controls = list(workbook["Contrôles"].iter_rows(values_only=True))
     assert client_controls[1][0] == "IAM-ADMIN-MFA-001"
-    assert client_controls[1][1].startswith("Vérification de la présence de MFA")
+    assert client_controls[1][1] == "MFA des administrateurs"
     matrix_rows = list(workbook["Matrice V1-V2"].iter_rows(values_only=True))
     assert matrix_rows[0] == (
         "Contrôle V1",
@@ -177,7 +177,7 @@ def test_client_exports_use_v1_display_name_and_v1_v2_matrix() -> None:
         "Classification",
         "Résultat client",
     )
-    assert any(row[1].startswith("Vérification de la présence de MFA") for row in matrix_rows[1:])
+    assert any(row[1] == "MFA des administrateurs" for row in matrix_rows[1:])
 
 
 def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
@@ -253,11 +253,11 @@ def test_docx_hides_not_applicable_findings_from_the_business_body() -> None:
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
 
-    assert "WAN management" in document
+    assert "Protocoles d'administration sur interfaces WAN" in document
     assert "Utilisation du SD-WAN" in document
-    assert "Utilisation de la GEO-IP" in document
-    assert "État et usage explicites du SSL-VPN" not in document
-    assert "NON APPLICABLE" not in document
+    assert "Utilisation du filtrage Geo-IP" in document
+    assert "Utilisation du VPN SSL" in document
+    assert "NON APPLICABLE" in document
 
 
 def test_docx_uses_v1_business_prose_and_detected_values() -> None:

@@ -70,14 +70,15 @@ The full suite covers the already implemented V2 parity behavior for Geo-IP, LDA
 
 ## Verification
 
-- Backend: `809 passed`.
+- Backend: `814 passed`.
 - Differential tests: `13 passed` (included in backend total).
 - Parity matrix gate: 59 rows, 57 included V1 presentation points, 2 explicit exclusions, 0 unresolved outside exclusions.
 - Presentation contract: 57 business points, 60 engine controls, 3 split sub-checks, 4 V2-only controls separated.
 - SD-WAN presentation: all declared zones, observed members, zone-to-member relations and proof state are exposed in preview.
 - Client labels: `display_name` is populated from the V1 presentation map; internal `control_id` remains machine-only.
+- DOCX V1 restoration: numbered client order, V1 template/header/footer/confidentiality, logo placeholder/optional logo insertion, VPN SSL N/A, HA/CTI/ISDB/UTM diagrams.
 - XLSX: client labels plus the `Matrice V1-V2` sheet are generated from the same presentation contract.
-- Frontend: 3 files / 11 tests passed.
+- Frontend: 3 files / 12 tests passed.
 - Frontend ESLint and TypeScript/Vite build: passed on the protected GUI snapshot.
 - Compose validation: passed on the protected delivery path.
 

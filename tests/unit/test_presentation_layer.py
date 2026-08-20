@@ -26,13 +26,9 @@ def test_internal_control_id_is_separate_from_v1_display_name() -> None:
 
     assert admin.control_id == "IAM-ADMIN-MFA-001"
     assert admin.title == "technical:IAM-ADMIN-MFA-001"
-    assert admin.display_name == (
-        "Vérification de la présence de MFA sur les comptes locaux administrateurs et utilisateurs"
-    )
+    assert admin.display_name == "MFA des administrateurs"
     assert all_service.control_id == "FW-INTERNET-ALL-SERVICE-001"
-    assert all_service.display_name == (
-        "Filtrage des ports au strict minimum pour les flux vers Internet"
-    )
+    assert all_service.display_name == "Services ALL vers Internet"
 
 
 def test_presentation_matrix_explains_57_business_points_and_60_engine_controls() -> None:

@@ -12,7 +12,13 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
-from vysion.audit.models import AuditFinding, AuditStatus, DeviceIdentity, RiskAssessment
+from vysion.audit.models import (
+    Applicability,
+    AuditFinding,
+    AuditStatus,
+    DeviceIdentity,
+    RiskAssessment,
+)
 from vysion.reports.business_text import (
     business_risk_for,
     business_text_for,
@@ -20,6 +26,7 @@ from vysion.reports.business_text import (
 )
 from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.presentation import AuditPresentation, build_presentation
+from vysion.reports.v1_document import V1_DOCUMENT_SECTIONS, V1DocumentSlot
 
 _TEMPLATE = Path(__file__).with_name("templates") / "generique.docx"
 
@@ -201,15 +208,21 @@ def _set_cell_text(cell: Any, text: str, *, bold: bool = False) -> None:
 
 def _color_status(run, status: AuditStatus) -> None:
     run.bold = True
-    run.font.color.rgb = RGBColor(
-        0x00,
-        0xB0,
-        0x50,
-    ) if status is AuditStatus.PASS else RGBColor(
-        0xCC,
-        0x00,
-        0x00,
-    ) if status is AuditStatus.FAIL else RGBColor(0xFF, 0xC0, 0x00)
+    run.font.color.rgb = (
+        RGBColor(
+            0x00,
+            0xB0,
+            0x50,
+        )
+        if status is AuditStatus.PASS
+        else RGBColor(
+            0xCC,
+            0x00,
+            0x00,
+        )
+        if status is AuditStatus.FAIL
+        else RGBColor(0xFF, 0xC0, 0x00)
+    )
 
 
 def _domain_for(finding: AuditFinding) -> str:
@@ -242,6 +255,24 @@ def _point_audited(finding: AuditFinding) -> str:
 
 
 def _result_explanation(finding: AuditFinding) -> str:
+    if finding.control_id in {
+        "SYS-FORTIMANAGER-SYNC-001",
+        "SYS-FORTIANALYZER-SYNC-001",
+    }:
+        target = (
+            "FortiManager"
+            if finding.control_id == "SYS-FORTIMANAGER-SYNC-001"
+            else "FortiAnalyzer"
+        )
+        if finding.status is AuditStatus.PASS:
+            return (
+                f"Le FortiGate est configuré avec un {target} explicite. "
+                "L'état réel de synchronisation doit être vérifié."
+            )
+        return (
+            f"La configuration {target} ne permet pas de conclure sur l'état réel "
+            "de synchronisation."
+        )
     if finding.status is AuditStatus.NOT_APPLICABLE:
         return "Ce point n'est pas applicable au périmètre analysé."
     return client_result_for(finding)
@@ -380,7 +411,9 @@ def _add_characteristics(document: Any, report: JsonAuditReport) -> None:
     cluster = (
         "Oui"
         if ha_observed
-        else _display(context.ha) if context.ha is not None else "Non renseigné"
+        else _display(context.ha)
+        if context.ha is not None
+        else "Non renseigné"
     )
     if context.utm_license is True:
         license_state = "Valide"
@@ -484,26 +517,229 @@ def _set_update_fields(document: Any) -> None:
     update.set(qn("w:val"), "true")
 
 
-def render_docx(report: JsonAuditReport) -> bytes:
-    """Render the V2 findings using the historical V1 client-document layout."""
+def _iter_document_paragraphs(document: Any):
+    for paragraph in document.paragraphs:
+        yield paragraph
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                yield from cell.paragraphs
+    for section in document.sections:
+        for container in (
+            section.header,
+            section.first_page_header,
+            section.even_page_header,
+            section.footer,
+            section.first_page_footer,
+            section.even_page_footer,
+        ):
+            for paragraph in container.paragraphs:
+                yield paragraph
+
+
+def _insert_client_logo(document: Any, logo_path: str | Path | None) -> None:
+    if logo_path is None:
+        return
+    path = Path(logo_path)
+    if not path.is_file():
+        return
+    for paragraph in _iter_document_paragraphs(document):
+        if "LOGO CLIENT si existe" not in paragraph.text:
+            continue
+        paragraph.text = ""
+        run = paragraph.add_run()
+        run.add_picture(str(path), width=Cm(4.0))
+        return
+
+
+def _insert_v1_toc(document: Any) -> None:
+    introduction = next(
+        (
+            paragraph
+            for paragraph in document.paragraphs
+            if paragraph.text.strip() == "Introduction"
+        ),
+        None,
+    )
+    if introduction is None:
+        return
+    lines = ["3.\tAudit de configuration"]
+    for section in V1_DOCUMENT_SECTIONS:
+        lines.append(f"{section.number}\t{section.title}")
+        lines.extend(f"{slot.number}\t{slot.title}" for slot in section.slots)
+    introduction.insert_paragraph_before("\n".join(lines))
+
+
+def _add_asset_image(document: Any, filename: str | None) -> None:
+    if filename is None:
+        return
+    path = Path(__file__).with_name("assets") / filename
+    if not path.is_file():
+        return
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.add_run().add_picture(str(path), width=Cm(15.5))
+    document.add_paragraph("")
+
+
+def _aggregate_status(findings: tuple[AuditFinding, ...]) -> AuditStatus:
+    statuses = {finding.status for finding in findings}
+    if AuditStatus.FAIL in statuses:
+        return AuditStatus.FAIL
+    if AuditStatus.ERROR in statuses or AuditStatus.UNKNOWN in statuses:
+        return AuditStatus.UNKNOWN
+    if statuses <= {AuditStatus.NOT_APPLICABLE}:
+        return AuditStatus.NOT_APPLICABLE
+    return AuditStatus.PASS
+
+
+def _slot_finding(
+    report: JsonAuditReport,
+    presentation: AuditPresentation,
+    slot: V1DocumentSlot,
+) -> AuditFinding | None:
+    findings_by_id = {finding.control_id: finding for finding in report.findings}
+    actual = tuple(
+        findings_by_id[control_id]
+        for control_id in slot.control_ids
+        if control_id in findings_by_id
+    )
+    if actual:
+        status = _aggregate_status(actual)
+        messages = tuple(dict.fromkeys(item.message for item in actual if item.message))
+        primary = actual[0]
+        return primary.model_copy(
+            update={
+                "title": slot.title,
+                "display_name": slot.title,
+                "status": status,
+                "applicability": (
+                    Applicability.NOT_APPLICABLE
+                    if status is AuditStatus.NOT_APPLICABLE
+                    else Applicability.APPLICABLE
+                    if status in {AuditStatus.PASS, AuditStatus.FAIL}
+                    else Applicability.UNKNOWN
+                ),
+                "message": " ".join(messages) or primary.message,
+                "risk": next((item.risk for item in actual if item.risk is not None), primary.risk),
+                "recommendation": next(
+                    (item.recommendation for item in actual if item.recommendation),
+                    primary.recommendation,
+                ),
+                "remediation": next(
+                    (item.remediation for item in actual if item.remediation),
+                    primary.remediation,
+                ),
+            }
+        )
+
+    row = next(
+        (
+            item
+            for item in presentation.business_rows
+            if set(slot.control_ids).intersection(item.v2_control_ids)
+        ),
+        None,
+    )
+    if row is not None and row.status is not None:
+        return AuditFinding(
+            control_id=slot.control_ids[0] if slot.control_ids else f"DOC-{slot.number}",
+            title=slot.title,
+            display_name=slot.title,
+            status=row.status,
+            applicability=row.applicability or Applicability.UNKNOWN,
+            message=row.result or "Le résultat de ce point n'est pas disponible.",
+        )
+
+    if slot.kind == "model":
+        return AuditFinding(
+            control_id="DOC-MODEL-001",
+            title=slot.title,
+            display_name=slot.title,
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            message=(
+                "Le modèle FortiGate a été identifié, mais son statut de support actif "
+                "doit être vérifié auprès d'une source EOL versionnée."
+            ),
+        )
+    return None
+
+
+def _render_slot(
+    document: Any,
+    report: JsonAuditReport,
+    presentation: AuditPresentation,
+    slot: V1DocumentSlot,
+    risks: list[dict[str, str]],
+    risk_number: int,
+) -> int:
+    if slot.kind == "group":
+        document.add_heading(f"{slot.number} {slot.title}", level=3)
+        document.add_paragraph(
+            "Les contrôles historiques associés sont présentés dans les points suivants."
+        )
+        return risk_number
+    if slot.kind == "cross_reference":
+        document.add_heading(f"{slot.number} {slot.title}", level=3)
+        document.add_paragraph(
+            slot.note or "Ce point est détaillé dans le contrôle métier correspondant."
+        )
+        return risk_number
+
+    finding = _slot_finding(report, presentation, slot)
+    if finding is None:
+        return risk_number
+
+    document.add_heading(f"{slot.number} {slot.title}", level=3)
+    document.add_paragraph("")
+    point = document.add_paragraph()
+    point.add_run("Point audité :").bold = True
+    document.add_paragraph(_point_audited(finding))
+    document.add_paragraph("")
+    result = document.add_paragraph()
+    result_run = result.add_run("Résultat : ")
+    result_run.bold = True
+    status_label = {
+        AuditStatus.PASS: "CONFORME",
+        AuditStatus.FAIL: "NON CONFORME",
+        AuditStatus.NOT_APPLICABLE: "NON APPLICABLE",
+    }.get(finding.status, "À VÉRIFIER")
+    status_run = result.add_run(status_label)
+    _color_status(status_run, finding.status)
+    document.add_paragraph(_result_explanation(finding))
+    document.add_paragraph("")
+    if finding.status is AuditStatus.FAIL:
+        risks.append(_add_risk_table(document, risk_number, finding))
+        risk_number += 1
+    _add_asset_image(document, slot.image)
+    return risk_number
+
+
+def render_docx(
+    report: JsonAuditReport,
+    client_logo_path: str | Path | None = None,
+) -> bytes:
+    """Render V2 findings in the historical V1 client-document order."""
 
     if not _TEMPLATE.is_file():
         raise FileNotFoundError(f"V1 DOCX template not found: {_TEMPLATE}")
     document = Document(str(_TEMPLATE))
     context = report.context
-    client = _display(context.client, "Client")
-    site = _display(context.site, "site audité")
+    client = _display(context.client, "NOM CLIENT")
+    site = _display(context.site, "SITE À RENSEIGNER")
     model = _display(report.device_identity.model if report.device_identity else None, "FortiGate")
     _replace_everywhere(
         document,
         {
             "NOM CLIENT": client,
-            "LOGO CLIENT si existe": client,
             "LG AUTOS INVEST": client,
             "SAUSHEIM / ILLSACH": site,
             "Fortigate 200F": f"FortiGate {model}",
         },
     )
+    _insert_client_logo(document, client_logo_path)
+    _insert_v1_toc(document)
     document.core_properties.title = "Audit de configuration FortiGate"
     document.core_properties.subject = "Rapport d'audit de configuration"
     document.core_properties.author = "SNS Security"
@@ -511,7 +747,8 @@ def render_docx(report: JsonAuditReport) -> bytes:
     document.core_properties.modified = report.created_at
     _set_update_fields(document)
 
-    document.add_heading("Audit de configuration", level=1)
+    document.add_page_break()
+    document.add_heading("3. Audit de configuration", level=1)
     document.add_paragraph("")
     characteristics = document.add_paragraph()
     characteristics_run = characteristics.add_run("Caractéristiques :")
@@ -519,52 +756,38 @@ def render_docx(report: JsonAuditReport) -> bytes:
     characteristics_run.font.size = Pt(14)
     document.add_paragraph("")
     _add_characteristics(document, report)
-    _add_presentation_summary(document, _presentation_for(report))
 
-    grouped: dict[str, list[AuditFinding]] = {domain: [] for domain in _DOMAIN_ORDER}
-    for finding in report.findings:
-        # NOT_APPLICABLE is a valid engine result, but it is intentionally not
-        # printed as a client report section.  The canonical JSON/XLSX still
-        # retains it and the audit total remains unchanged elsewhere.
-        if finding.status is AuditStatus.NOT_APPLICABLE:
-            continue
-        grouped.setdefault(_domain_for(finding), []).append(finding)
-
+    presentation = _presentation_for(report)
     risks: list[dict[str, str]] = []
     risk_number = 1
-    for domain in _DOMAIN_ORDER:
-        findings = grouped[domain]
-        if not findings:
-            continue
-        document.add_heading(_DOMAIN_TITLES[domain], level=2)
+    for section in V1_DOCUMENT_SECTIONS:
+        document.add_heading(f"{section.number} {section.title}", level=2)
         document.add_paragraph("")
-        for finding in findings:
-            document.add_heading(
-                f" {_clean_client_text(finding.display_name or finding.title)}",
-                level=3,
+        for slot in section.slots:
+            risk_number = _render_slot(
+                document,
+                report,
+                presentation,
+                slot,
+                risks,
+                risk_number,
             )
-            document.add_paragraph("")
-            point = document.add_paragraph()
-            point.add_run("Point audité :").bold = True
-            document.add_paragraph(_point_audited(finding))
-            document.add_paragraph("")
-            result = document.add_paragraph()
-            result_run = result.add_run("Résultat : ")
-            result_run.bold = True
-            status_label = {
-                AuditStatus.PASS: "CONFORME",
-                AuditStatus.FAIL: "NON CONFORME",
-                AuditStatus.NOT_APPLICABLE: "NON APPLICABLE",
-            }.get(finding.status, "À VÉRIFIER")
-            status_run = result.add_run(status_label)
-            _color_status(status_run, finding.status)
-            document.add_paragraph(_result_explanation(finding))
-            document.add_paragraph("")
-            if finding.status is AuditStatus.FAIL:
-                risks.append(_add_risk_table(document, risk_number, finding))
-                risk_number += 1
-            if domain == "utm" and finding is findings[-1]:
-                _add_utm_matrix(document)
+        if section.number == "3.6":
+            _add_utm_matrix(document)
+
+    complementary = tuple(
+        finding
+        for finding in report.findings
+        if finding.control_id == "CFG-REF-INTEGRITY-001"
+        and finding.status in {AuditStatus.FAIL, AuditStatus.UNKNOWN}
+    )
+    if complementary:
+        document.add_heading("Vérifications complémentaires", level=2)
+        for finding in complementary:
+            document.add_heading("Intégrité des références de configuration", level=3)
+            document.add_paragraph("Point audité :")
+            document.add_paragraph(_clean_client_text(finding.message))
+            document.add_paragraph("Résultat : À VÉRIFIER")
 
     _add_risk_summary(document, risks)
     output = BytesIO()

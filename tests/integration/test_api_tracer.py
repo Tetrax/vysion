@@ -253,7 +253,7 @@ async def test_api_does_not_collect_psirt_without_firmware_version(
     assert len(payload["presentation"]["business_rows"]) == 57
     assert len(payload["presentation"]["v2_only_rows"]) == 4
     psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
-    assert psirt["display_name"] == "Vérification FortiGuard PSIRT"
+    assert psirt["display_name"] == "Version Fortigate"
     assert psirt["status"] == "UNKNOWN"
 
 
