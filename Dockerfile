@@ -42,7 +42,7 @@ RUN chmod 0555 /usr/local/bin/vysion-entrypoint \
     && chmod 0755 /etc/nginx \
     && chmod 0644 /etc/nginx/nginx.conf \
     && chmod 0644 /app/VERSION \
-    && chmod -R a=rX /app/static /app/src \
+    && chmod -R a=rX /app/static /app/src /app/docs \
     && rm -rf /var/log/nginx /var/cache/nginx
 
 USER vysion:vysion

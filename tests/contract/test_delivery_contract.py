@@ -78,3 +78,10 @@ def test_runtime_stage_has_no_node_and_fastapi_binds_only_loopback() -> None:
         "/tmp/nginx/scgi_temp",
     ):
         assert path in entrypoint
+
+
+def test_runtime_presentation_map_is_readable_by_non_root_runtime_user() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+
+    assert "COPY docs/V1_V2_CAPABILITY_MAP.json ./docs/V1_V2_CAPABILITY_MAP.json" in dockerfile
+    assert "/app/docs" in dockerfile.split("FROM python:", maxsplit=1)[1]
