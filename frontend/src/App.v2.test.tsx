@@ -48,6 +48,32 @@ describe('Vysion guided V1 workflow', () => {
     expect(screen.getByLabelText('WAN wan1')).toBeChecked()
   })
 
+  it('shows every SD-WAN member and the zone-to-members relation', async () => {
+    const user = userEvent.setup()
+    const sdwanPreview = {
+      ...preview,
+      sdwan_zones: [
+        { name: 'Z-INTERNET', interfaces: ['wan1', 'wan2'], proof_state: 'proven' },
+        { name: 'Z-EMPTY', interfaces: [], proof_state: 'unknown' },
+      ],
+      sdwan_members: [
+        { name: 'wan1', zones: ['Z-INTERNET'] },
+        { name: 'wan2', zones: ['Z-INTERNET'] },
+      ],
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse(sdwanPreview))
+    render(<App />)
+
+    await upload(user, sdwanPreview)
+    await user.click(screen.getByRole('button', { name: 'Continuer vers la sélection WAN' }))
+
+    expect(screen.getByRole('group', { name: 'Membres physiques SD-WAN' })).toBeInTheDocument()
+    expect(screen.getByLabelText('WAN membre SD-WAN wan1')).toBeChecked()
+    expect(screen.getByLabelText('WAN membre SD-WAN wan2')).toBeChecked()
+    expect(screen.getByText(/SD-WAN Zone: Z-INTERNET → wan1, wan2/)).toBeInTheDocument()
+    expect(screen.getByText(/SD-WAN Zone: Z-EMPTY → Aucun membre observé/)).toBeInTheDocument()
+  })
+
   it('exposes audit progress while the request is pending', async () => {
     const user = userEvent.setup()
     let resolveAudit!: (response: Response) => void

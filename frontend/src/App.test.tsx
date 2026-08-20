@@ -65,6 +65,42 @@ describe('Vysion workflow V1', () => {
     }
   })
 
+  it('renders historical V1 labels and the 57/60 comparison from the presentation payload', async () => {
+    const user = userEvent.setup()
+    const presentedReport = {
+      ...report,
+      findings: [
+        { control_id: 'IAM-ADMIN-MFA-001', title: 'IAM-ADMIN-MFA-001', status: 'FAIL' },
+      ],
+      presentation: {
+        business_control_count: 57,
+        engine_control_count: 60,
+        split_extra_finding_count: 3,
+        v2_only_control_count: 4,
+        explanation_lines: [],
+        business_rows: [{
+          business_key: 'V1-20', order: 20,
+          display_name: 'Vérification de la présence de MFA sur les comptes locaux administrateurs et utilisateurs',
+          relation: 'split', classification: 'EXACT_MATCH', presentation_kind: 'control',
+          v2_control_ids: ['IAM-ADMIN-MFA-001', 'IAM-LOCAL-USER-MFA-001'],
+          status: 'FAIL', finding_ids: ['IAM-ADMIN-MFA-001'],
+        }],
+        v2_only_rows: [],
+      },
+    }
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(jsonResponse(preview))
+      .mockResolvedValueOnce(jsonResponse(presentedReport, 201))
+    render(<App />)
+
+    await uploadAndAudit(user)
+
+    expect(await screen.findByText('Vérification de la présence de MFA sur les comptes locaux administrateurs et utilisateurs')).toBeInTheDocument()
+    expect(screen.queryByText('IAM-ADMIN-MFA-001')).not.toBeInTheDocument()
+    expect(screen.getByText(/Points métier V1 comparables:/)).toBeInTheDocument()
+    expect(screen.getByText(/Contrôles moteur V2:/)).toBeInTheDocument()
+  })
+
   it('submits unchecked V1 context options as explicit negatives', async () => {
     const user = userEvent.setup()
     const fetchSpy = vi.spyOn(globalThis, 'fetch')

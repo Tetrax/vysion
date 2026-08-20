@@ -5,6 +5,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 from vysion.adapters.fortiguard import FortiGuardResult
 from vysion.audit.models import AuditContext, AuditFinding, DeviceIdentity
+from vysion.reports.presentation import AuditPresentation
 
 
 class JsonAuditReport(BaseModel):
@@ -21,6 +22,7 @@ class JsonAuditReport(BaseModel):
     device_identity: DeviceIdentity | None = None
     fortiguard: FortiGuardResult
     findings: tuple[AuditFinding, ...]
+    presentation: AuditPresentation | None = None
 
     @field_validator("created_at", "expires_at")
     @classmethod

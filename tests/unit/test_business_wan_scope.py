@@ -257,7 +257,13 @@ end
         ),
     )
     assert finding.status is AuditStatus.UNKNOWN
-    assert _preview_payload(configuration)["sdwan_zones"] == []
+    assert _preview_payload(configuration)["sdwan_zones"] == [
+        {
+            "name": "virtual-wan-link",
+            "interfaces": ["wan-safe"],
+            "proof_state": "unknown",
+        }
+    ]
 
 
 def test_flat_sdwan_entry_with_interface_and_member_aliases_is_unknown() -> None:

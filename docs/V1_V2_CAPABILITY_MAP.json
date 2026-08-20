@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "baseline_commit": "23e219b11a18bcc6d5ff90799f3cdd6739883953",
+  "baseline_commit": "4d6993e350c554831496b3f1b9f276cd7a70f1e2",
   "legacy_oracle": {
     "path": "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/app/audit/legacy_functions.py",
     "entrypoint": "auditer",
@@ -85,7 +85,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle absence de VIP avec any en interface",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-VIP-EXTINTF-ANY-001"
+      ]
     },
     {
       "order": 2,
@@ -99,7 +105,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle absence de Virtual Server avec any en interface",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-VSERVER-EXTINTF-ANY-001"
+      ]
     },
     {
       "order": 3,
@@ -113,7 +125,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation des règles en 'By Sequence'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-BY-SEQUENCE-USAGE-001"
+      ]
     },
     {
       "order": 4,
@@ -128,7 +146,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Contrôle CFG-UNUSED-SERVICE-001 élargi aux familles d’objets V1 via StructuralDocument et références typées."
+      "conclusion": "Contrôle CFG-UNUSED-SERVICE-001 élargi aux familles d’objets V1 via StructuralDocument et références typées.",
+      "display_name": "Absence d'objet sans référence",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "CFG-UNUSED-SERVICE-001"
+      ]
     },
     {
       "order": 5,
@@ -142,7 +166,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle de la suppression du compte local 'Guest'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-GUEST-ACCOUNT-001"
+      ]
     },
     {
       "order": 6,
@@ -156,7 +186,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle de la suppression du compte 'Admin'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-DEFAULT-ADMIN-001"
+      ]
     },
     {
       "order": 7,
@@ -170,7 +206,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "SSL-VPN absent : V1 conforme, V2 NOT_APPLICABLE ; aucune alerte ni remédiation utilisateur dans les deux cas."
+      "conclusion": "SSL-VPN absent : V1 conforme, V2 NOT_APPLICABLE ; aucune alerte ni remédiation utilisateur dans les deux cas.",
+      "display_name": "Contrôle de la non-utilisation du VPN-SSL",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "VPN-SSL-001"
+      ]
     },
     {
       "order": 8,
@@ -184,7 +226,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Filtrage des ports au strict minimum pour les flux vers Internet",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-INTERNET-ALL-SERVICE-001"
+      ]
     },
     {
       "order": 9,
@@ -198,7 +246,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Filtrage des IP en fonction de leur pays d'origine",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-GEO-IP-USAGE-001"
+      ]
     },
     {
       "order": 10,
@@ -212,7 +266,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activation des logs sur la règle 'deny implicit'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-IMPLICIT-DENY-LOG-001"
+      ]
     },
     {
       "order": 11,
@@ -225,7 +285,11 @@
       "gate": "excluded",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Source EOL externe fiable, versionnée et vérifiable manquante ; PSIRT ne remplace pas EOL."
+      "conclusion": "Source EOL externe fiable, versionnée et vérifiable manquante ; PSIRT ne remplace pas EOL.",
+      "display_name": "Contrôle du modèle du FortiGate pour l'obsolescence",
+      "client_comparable": false,
+      "presentation_kind": "excluded",
+      "v2_targets": []
     },
     {
       "order": 12,
@@ -239,7 +303,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle désactivation USB",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "SYS-AUTO-INSTALL-USB-001"
+      ]
     },
     {
       "order": 13,
@@ -254,7 +324,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Implémentation V2 typed CTI existante dans external_services.py ; parité directe conservée sans ajouter de finding au registre 60 de cette release."
+      "conclusion": "Implémentation V2 typed ISDB existante dans external_services.py ; elle est visible dans la matrice mais reste hors du registre des 60 contrôles de cette release.",
+      "display_name": "Utilisation des listes d'ISDB malveillantes",
+      "client_comparable": true,
+      "presentation_kind": "typed_implementation",
+      "v2_targets": [
+        "NET-ISDB-WAN-001"
+      ]
     },
     {
       "order": 14,
@@ -268,7 +344,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Désactivation du SSH, HTTP et HTTPS sur les interfaces WAN",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-WAN-MGMT-001"
+      ]
     },
     {
       "order": 15,
@@ -282,7 +364,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle de la présence d'un compte administrateur local pour SNS",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-LEGACY-ADMIN-001"
+      ]
     },
     {
       "order": 16,
@@ -296,7 +384,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle de la suppression du compte PKI 'sns'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-LEGACY-PKI-REMOVAL-001"
+      ]
     },
     {
       "order": 17,
@@ -310,7 +404,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Contrôle de la présence du compte PKI 'pki-sns'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-LEGACY-PKI-PRESENCE-001"
+      ]
     },
     {
       "order": 18,
@@ -324,7 +424,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Synchronisation des logs avec un FortiAnalyzer",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "SYS-FORTIANALYZER-SYNC-001"
+      ]
     },
     {
       "order": 19,
@@ -338,7 +444,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Synchronisation avec un FortiManager",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "SYS-FORTIMANAGER-SYNC-001"
+      ]
     },
     {
       "order": 20,
@@ -353,7 +465,14 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Vérification de la présence de MFA sur les comptes locaux administrateurs et utilisateurs",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-ADMIN-MFA-001",
+        "IAM-LOCAL-USER-MFA-001"
+      ]
     },
     {
       "order": 21,
@@ -369,7 +488,15 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Durcissement des VPN IPSEC",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "VPN-IKEV2-001",
+        "VPN-DH-001",
+        "VPN-CRYPTO-001"
+      ]
     },
     {
       "order": 22,
@@ -384,7 +511,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Implémentation V2 typed ISDB existante dans external_services.py ; parité directe conservée sans ajouter de finding au registre 60 de cette release."
+      "conclusion": "Implémentation V2 typed CTI existante dans external_services.py ; elle est visible dans la matrice mais reste hors du registre des 60 contrôles de cette release.",
+      "display_name": "Utilisation de nos CTI",
+      "client_comparable": true,
+      "presentation_kind": "typed_implementation",
+      "v2_targets": [
+        "NET-CTI-WAN-001"
+      ]
     },
     {
       "order": 23,
@@ -398,7 +531,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Connecteur LDAPS",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "IAM-LDAPS-001"
+      ]
     },
     {
       "order": 24,
@@ -412,7 +551,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Sauvegardes automatiques de la configuration",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "SYS-BACKUP-AUTO-001"
+      ]
     },
     {
       "order": 25,
@@ -426,7 +571,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Durcissement accès administration à votre FGT",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-LEGACY-ADMIN-LOOPBACK-001"
+      ]
     },
     {
       "order": 26,
@@ -440,7 +591,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "DNS Database SNS",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "DNS-LEGACY-DATABASE-001"
+      ]
     },
     {
       "order": 27,
@@ -454,7 +611,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Désactivation du SIP ALG",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-SIP-ALG-001"
+      ]
     },
     {
       "order": 28,
@@ -468,7 +631,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Configuration FortiSandbox Cloud",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-FORTISANDBOX-CLOUD-001"
+      ]
     },
     {
       "order": 29,
@@ -482,7 +651,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Désactivation des requêtes anycast vers FortiGuard",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-FORTIGUARD-ANYCAST-001"
+      ]
     },
     {
       "order": 30,
@@ -496,7 +671,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "FortiGuard - Mises à jour automatiques des bases AV + IPS",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-AUTOUPDATE-001"
+      ]
     },
     {
       "order": 31,
@@ -510,7 +691,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Route Blackhole pour les réseaux privés",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-RFC6890-BLACKHOLE-001"
+      ]
     },
     {
       "order": 32,
@@ -524,7 +711,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Redondance du câblage entre les FortiGate (HA)",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "HA-CABLING-REDUNDANCY-001"
+      ]
     },
     {
       "order": 33,
@@ -538,7 +731,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activer le session pickup",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "HA-SESSION-PICKUP-001"
+      ]
     },
     {
       "order": 34,
@@ -552,7 +751,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Redondance des interfaces de HA (Heartbeat)",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "HA-HEARTBEAT-REDUNDANCY-001"
+      ]
     },
     {
       "order": 35,
@@ -566,7 +771,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Override à 30 secondes ou désactivé",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "HA-OVERRIDE-001"
+      ]
     },
     {
       "order": 36,
@@ -580,7 +791,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Blocage de certains ports pour les flux vers Internet : KERBEROS, LDAP, LDAPS, RADIUS, SAMBA, SMB",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-SENSITIVE-PROTOCOL-DENY-001"
+      ]
     },
     {
       "order": 37,
@@ -594,7 +811,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation du SD-WAN",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "NET-SDWAN-USAGE-001"
+      ]
     },
     {
       "order": 38,
@@ -608,7 +831,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Absence de règles avec logs en UTM sans profils de sécurité activés",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-UTM-PROFILE-BINDING-001"
+      ]
     },
     {
       "order": 39,
@@ -622,7 +851,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Eviter le Mail Filter",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-MAIL-FILTER-USAGE-001"
+      ]
     },
     {
       "order": 40,
@@ -636,7 +871,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation du Web-Filter",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-WEBFILTER-001"
+      ]
     },
     {
       "order": 41,
@@ -650,7 +891,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation de l'Antivirus",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-ANTIVIRUS-001"
+      ]
     },
     {
       "order": 42,
@@ -664,7 +911,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation du DNS-Filter",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-DNSFILTER-001"
+      ]
     },
     {
       "order": 43,
@@ -678,7 +931,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation de l'IPS",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-IPS-001"
+      ]
     },
     {
       "order": 44,
@@ -692,7 +951,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Blocage Proxy, P2P et Remote access via l'Application Control",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "UTM-APPCONTROL-001"
+      ]
     },
     {
       "order": 45,
@@ -706,7 +971,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Personnalisation du port HTTPS pour l'accès admin",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "SYS-ADMIN-HTTPS-PORT-001"
+      ]
     },
     {
       "order": 46,
@@ -720,7 +991,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Modèle de FortiAP - Prévention de l'obsolescence",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-FORTIAP-OBSOLETE-001"
+      ]
     },
     {
       "order": 47,
@@ -734,7 +1011,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Nombre de SSID par profil WIFI",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-SSID-LIMIT-001"
+      ]
     },
     {
       "order": 48,
@@ -748,7 +1031,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Utilisation de la bande 5GHz sur le canal 40MHz",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-RADIO2-40MHZ-001"
+      ]
     },
     {
       "order": 49,
@@ -762,7 +1051,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activation de l'option 'Radio Resource Provision'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-DARRP-001"
+      ]
     },
     {
       "order": 50,
@@ -776,7 +1071,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activation de l'option 'Frequency Handoff'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-FREQUENCY-HANDOFF-001"
+      ]
     },
     {
       "order": 51,
@@ -790,7 +1091,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activation de l'option 'TIM'",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-TIM-001"
+      ]
     },
     {
       "order": 52,
@@ -803,7 +1110,11 @@
       "gate": "excluded",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Hit counts/logs par règle nécessitent des données runtime ; aucun compteur n’est inféré du backup."
+      "conclusion": "Hit counts/logs par règle nécessitent des données runtime ; aucun compteur n’est inféré du backup.",
+      "display_name": "Compteurs de règles par règle",
+      "client_comparable": false,
+      "presentation_kind": "excluded",
+      "v2_targets": []
     },
     {
       "order": 53,
@@ -816,7 +1127,11 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Projection déterministe depuis les objets/policies FortiOS typés ; ce n’est pas un finding indépendant du registre."
+      "conclusion": "Projection déterministe depuis les objets/policies FortiOS typés ; ce n’est pas un finding indépendant du registre.",
+      "display_name": "Utilisateurs et administrateurs",
+      "client_comparable": true,
+      "presentation_kind": "projection",
+      "v2_targets": []
     },
     {
       "order": 54,
@@ -829,7 +1144,11 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Projection déterministe depuis les objets/policies FortiOS typés ; ce n’est pas un finding indépendant du registre."
+      "conclusion": "Projection déterministe depuis les objets/policies FortiOS typés ; ce n’est pas un finding indépendant du registre.",
+      "display_name": "Répartition des règles actives et désactivées",
+      "client_comparable": true,
+      "presentation_kind": "projection",
+      "v2_targets": []
     },
     {
       "order": 55,
@@ -843,7 +1162,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Inventaire des schedules de policies",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-LEGACY-SCHEDULE-INVENTORY-001"
+      ]
     },
     {
       "order": 56,
@@ -857,7 +1182,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Inspection SSL/SSH - Probe Failure",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "FW-SSL-SSH-PROFILE-001"
+      ]
     },
     {
       "order": 57,
@@ -871,7 +1202,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Conformité des bandes radio utilisées (802.11)",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-BAND-001"
+      ]
     },
     {
       "order": 58,
@@ -885,7 +1222,13 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Conformité des canaux radio utilisés",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-CHANNELS-001"
+      ]
     },
     {
       "order": 59,
@@ -899,25 +1242,35 @@
       "gate": "included",
       "data_used": "configuration FortiGate structurée et choix/contexte opérateur si requis",
       "user_result": "statut/applicabilité ou projection métier équivalente au chemin V1",
-      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible."
+      "conclusion": "Capacité couverte par le contrôle/projection V2 mappé ; le harnais et les tests de parité constituent la preuve de non-régression disponible.",
+      "display_name": "Activation de l'option Short Guard Interval",
+      "client_comparable": true,
+      "presentation_kind": "control",
+      "v2_targets": [
+        "WIFI-SHORT-GUARD-INTERVAL-001"
+      ]
     }
   ],
   "v2_only_controls": [
     {
       "control_id": "SYS-HOSTNAME-001",
-      "reason": "V1 extracted hostname for reports but did not count it as one of the 59 business checks."
+      "reason": "V1 extracted hostname for reports but did not count it as one of the 59 business checks.",
+      "display_name": "Identification du FortiGate"
     },
     {
       "control_id": "UTM-LICENSE-001",
-      "reason": "V2 makes operator-provided UTM licence proof explicit rather than hiding it in a GUI boolean."
+      "reason": "V2 makes operator-provided UTM licence proof explicit rather than hiding it in a GUI boolean.",
+      "display_name": "Vérification de la licence UTM"
     },
     {
       "control_id": "EXT-PSIRT-001",
-      "reason": "V2 separates FortiOS PSIRT correlation from EOL; it is not an EOL substitute."
+      "reason": "V2 separates FortiOS PSIRT correlation from EOL; it is not an EOL substitute.",
+      "display_name": "Vérification FortiGuard PSIRT"
     },
     {
       "control_id": "CFG-REF-INTEGRITY-001",
-      "reason": "V2 structural fail-closed integrity control added for typed reference recovery."
+      "reason": "V2 structural fail-closed integrity control added for typed reference recovery.",
+      "display_name": "Intégrité des références de configuration"
     }
   ],
   "summary": {
@@ -953,5 +1306,21 @@
     "unresolved_divergences": 0,
     "psirt_external_non_blocking": true,
     "hit_counts_runtime_non_blocking": true
+  },
+  "presentation": {
+    "business_control_count": 57,
+    "engine_control_count": 60,
+    "registered_business_count": 53,
+    "registered_finding_count": 56,
+    "split_extra_finding_count": 3,
+    "v2_only_control_count": 4,
+    "unregistered_typed_capability_count": 2,
+    "projection_capability_count": 2,
+    "excluded_capability_count": 2,
+    "explanation_lines": [
+      "53 capacités V1 produisent 56 findings V2 : deux capacités V1 sont détaillées en sous-contrôles.",
+      "4 contrôles V2 complémentaires sont séparés de la lecture métier V1.",
+      "2 capacités V1 disposent d'une implémentation typée hors registre et 2 sont des projections de données."
+    ]
   }
 }

@@ -32,6 +32,7 @@ from vysion.build_info import VYSION_REVISION, VYSION_VERSION
 from vysion.config import Settings
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
+from vysion.reports.presentation import build_presentation, present_findings
 from vysion.reports.xlsx_report import render_xlsx
 from vysion.storage.reports import Clock, JsonReportStore, utc_now
 
@@ -456,11 +457,41 @@ def _preview_zone_payload(
 
 def _preview_sdwan_zones(configuration) -> list[dict[str, object]]:
     interfaces = _unique_named(configuration.interfaces)
-    return _preview_zone_payload(
-        configuration.sdwan_zones,
-        interfaces,
-        sort_interfaces=True,
-    )
+    structural_interfaces = configuration.document.section("system interface")
+    if structural_interfaces is not None:
+        for entry in structural_interfaces.entries:
+            interfaces.setdefault(entry.name.casefold(), entry)
+    preview: list[dict[str, object]] = []
+    for zone in _unique_named(configuration.sdwan_zones).values():
+        resolved_interfaces = _resolve_interface_references(zone.interfaces, interfaces)
+        preview.append(
+            {
+                "name": zone.name,
+                "interfaces": sorted(resolved_interfaces),
+                "proof_state": zone.proof_state.value,
+            }
+        )
+    return preview
+
+
+def _preview_sdwan_members(configuration) -> list[dict[str, object]]:
+    members: dict[str, tuple[str, list[str]]] = {}
+    for zone in _unique_named(configuration.sdwan_zones).values():
+        for reference in zone.interfaces:
+            member_name = reference.name.strip()
+            if not member_name:
+                continue
+            key = member_name.casefold()
+            if key not in members:
+                members[key] = (member_name, [])
+            members[key][1].append(zone.name)
+    return [
+        {
+            "name": member_name,
+            "zones": list(dict.fromkeys(zones)),
+        }
+        for member_name, zones in members.values()
+    ]
 
 
 def _preview_payload(configuration) -> dict[str, object]:
@@ -487,6 +518,7 @@ def _preview_payload(configuration) -> dict[str, object]:
             if interface.zone is not None
         ],
         "sdwan_zones": _preview_sdwan_zones(configuration),
+        "sdwan_members": _preview_sdwan_members(configuration),
     }
 
 
@@ -635,6 +667,8 @@ def create_app(
             context = context.model_copy(update={"psirt": psirt})
 
         created_at = clock()
+        engine_findings = tuple(engine.run(parsed, context=context))
+        findings = present_findings(engine_findings)
         report = JsonAuditReport(
             report_id=uuid4(),
             created_at=created_at,
@@ -643,7 +677,8 @@ def create_app(
             context=context,
             device_identity=parsed.device_identity,
             fortiguard=await fortiguard.check(),
-            findings=tuple(engine.run(parsed, context=context)),
+            findings=findings,
+            presentation=build_presentation(engine_findings, parsed, context),
         )
         store.save(report)
         return JSONResponse(

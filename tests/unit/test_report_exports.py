@@ -26,6 +26,7 @@ from vysion.audit.registry import default_registry
 from vysion.reports.business_text import business_text_for, client_result_for
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
+from vysion.reports.presentation import build_presentation, present_finding
 from vysion.reports.xlsx_report import render_xlsx
 
 
@@ -141,6 +142,42 @@ def test_docx_renders_v1_client_language_without_engine_fields() -> None:
         "namespace",
     ):
         assert value not in document
+
+
+def test_client_exports_use_v1_display_name_and_v1_v2_matrix() -> None:
+    finding = AuditFinding(
+        control_id="IAM-ADMIN-MFA-001",
+        title="IAM-ADMIN-MFA-001",
+        status=AuditStatus.FAIL,
+        message="Compte sans MFA",
+    )
+    presented = present_finding(finding)
+    report = _enriched_report().model_copy(
+        update={
+            "findings": (presented,),
+            "presentation": build_presentation((finding,)),
+        }
+    )
+
+    with ZipFile(BytesIO(render_docx(report))) as package:
+        document = package.read("word/document.xml").decode("utf-8")
+    assert "Vérification de la présence de MFA" in document
+    assert "IAM-ADMIN-MFA-001" not in document
+
+    workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
+    client_controls = list(workbook["Contrôles"].iter_rows(values_only=True))
+    assert client_controls[1][0] == "IAM-ADMIN-MFA-001"
+    assert client_controls[1][1].startswith("Vérification de la présence de MFA")
+    matrix_rows = list(workbook["Matrice V1-V2"].iter_rows(values_only=True))
+    assert matrix_rows[0] == (
+        "Contrôle V1",
+        "Libellé métier V1",
+        "Contrôle(s) V2 correspondant(s)",
+        "Relation",
+        "Classification",
+        "Résultat client",
+    )
+    assert any(row[1].startswith("Vérification de la présence de MFA") for row in matrix_rows[1:])
 
 
 def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
@@ -263,15 +300,20 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
         data_only=False,
     )
 
-    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert workbook.sheetnames == [
+        "Synthèse",
+        "Contrôles",
+        "Contrôles enrichis",
+        "Matrice V1-V2",
+    ]
     context_values = [cell.value for row in workbook["Synthèse"].iter_rows() for cell in row]
     assert "operator-form" in context_values
     assert "analyst" in context_values
     assert "wan1" in context_values
     controls = list(workbook["Contrôles enrichis"].iter_rows(values_only=True))
     assert controls[0] == (
-        "Contrôle",
-        "Titre",
+        "Contrôle V2 (interne)",
+        "Libellé métier V1",
         "Catégorie",
         "Priorité",
         "Sévérité",

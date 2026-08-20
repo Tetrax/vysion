@@ -75,8 +75,13 @@ async def test_preview_exposes_only_primary_identity_plus_typed_wan_relations(
     assert payload["zones"] == [{"name": "internet", "interfaces": ["wan1"]}]
     assert payload["wan_relations"] == [{"interface": "wan1", "zone": "internet"}]
     assert payload["sdwan_zones"] == [
-        {"name": "virtual-wan-link", "interfaces": ["wan1"]}
+        {
+            "name": "virtual-wan-link",
+            "interfaces": ["wan1"],
+            "proof_state": "proven",
+        }
     ]
+    assert payload["sdwan_members"] == [{"name": "wan1", "zones": ["virtual-wan-link"]}]
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ from openpyxl.utils import get_column_letter
 
 from vysion.audit.models import AffectedObject, EvidenceItem, RiskAssessment
 from vysion.reports.json_report import JsonAuditReport
+from vysion.reports.presentation import AuditPresentation, build_presentation
 
 
 def spreadsheet_text(value: object) -> str:
@@ -55,7 +56,12 @@ def risk_text(risk: RiskAssessment | None) -> str:
     )
 
 
+def _presentation_for(report: JsonAuditReport) -> AuditPresentation:
+    return report.presentation or build_presentation(report.findings)
+
+
 def render_xlsx(report: JsonAuditReport) -> bytes:
+    presentation = _presentation_for(report)
     workbook = Workbook()
     summary = workbook.active
     if summary is None:
@@ -93,6 +99,14 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
                 else None
             ),
         ),
+        ("Points métier V1 comparables", presentation.business_control_count),
+        ("Contrôles moteur V2", presentation.engine_control_count),
+        ("Sous-contrôles issus des splits", presentation.split_extra_finding_count),
+        ("Contrôles complémentaires V2", presentation.v2_only_control_count),
+        *(
+            ("Explication du périmètre", line)
+            for line in presentation.explanation_lines
+        ),
     )
     for row in summary_rows:
         summary.append(row)
@@ -102,7 +116,14 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
     summary.column_dimensions["B"].width = 60
 
     controls = workbook.create_sheet("Contrôles")
-    legacy_headers = ("Contrôle", "Titre", "Statut", "Constat", "Risque", "Recommandation")
+    legacy_headers = (
+        "Contrôle V2 (interne)",
+        "Libellé métier V1",
+        "Statut",
+        "Constat",
+        "Risque",
+        "Recommandation",
+    )
     controls.append(legacy_headers)
     for cell in controls[1]:
         cell.font = Font(bold=True)
@@ -112,7 +133,7 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
         controls.append(
             (
                 spreadsheet_text(finding.control_id),
-                spreadsheet_text(finding.title),
+                spreadsheet_text(finding.display_name or finding.title),
                 spreadsheet_text(finding.status.value),
                 spreadsheet_text(finding.message),
                 spreadsheet_text(risk_text(finding.risk)),
@@ -124,8 +145,8 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
 
     enriched = workbook.create_sheet("Contrôles enrichis")
     headers = (
-        "Contrôle",
-        "Titre",
+        "Contrôle V2 (interne)",
+        "Libellé métier V1",
         "Catégorie",
         "Priorité",
         "Sévérité",
@@ -150,7 +171,7 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
                 spreadsheet_text(value)
                 for value in (
                     finding.control_id,
-                    finding.title,
+                    finding.display_name or finding.title,
                     finding.category,
                     finding.priority.value,
                     finding.severity.value,
@@ -171,6 +192,37 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
         start=1,
     ):
         enriched.column_dimensions[get_column_letter(index)].width = width
+
+    matrix = workbook.create_sheet("Matrice V1-V2")
+    matrix_headers = (
+        "Contrôle V1",
+        "Libellé métier V1",
+        "Contrôle(s) V2 correspondant(s)",
+        "Relation",
+        "Classification",
+        "Résultat client",
+    )
+    matrix.append(matrix_headers)
+    for cell in matrix[1]:
+        cell.font = Font(bold=True)
+    for row in (*presentation.business_rows, *presentation.v2_only_rows):
+        targets = ", ".join(row.v2_control_ids) or (row.v2_projection or "Aucun finding moteur")
+        matrix.append(
+            (
+                spreadsheet_text(row.business_key),
+                spreadsheet_text(row.display_name),
+                spreadsheet_text(targets),
+                spreadsheet_text(row.relation),
+                spreadsheet_text(row.classification),
+                spreadsheet_text(
+                    row.status.value if row.status is not None else row.result
+                ),
+            )
+        )
+    matrix.freeze_panes = "A2"
+    matrix.auto_filter.ref = f"A1:F{matrix.max_row}"
+    for index, width in enumerate((16, 64, 58, 22, 28, 64), start=1):
+        matrix.column_dimensions[get_column_letter(index)].width = width
 
     output = BytesIO()
     workbook.save(output)

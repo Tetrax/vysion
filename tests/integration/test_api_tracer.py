@@ -248,7 +248,12 @@ async def test_api_does_not_collect_psirt_without_firmware_version(
     assert response.status_code == 201
     payload = response.json()
     assert payload["context"]["psirt"] is None
+    assert payload["presentation"]["business_control_count"] == 57
+    assert payload["presentation"]["engine_control_count"] == 60
+    assert len(payload["presentation"]["business_rows"]) == 57
+    assert len(payload["presentation"]["v2_only_rows"]) == 4
     psirt = next(item for item in payload["findings"] if item["control_id"] == "EXT-PSIRT-001")
+    assert psirt["display_name"] == "Vérification FortiGuard PSIRT"
     assert psirt["status"] == "UNKNOWN"
 
 
@@ -663,7 +668,12 @@ async def test_api_generates_xlsx_from_the_stored_typed_report(tmp_path: Path) -
         f'attachment; filename="vysion-{report_id}.xlsx"'
     )
     workbook = load_workbook(BytesIO(response.content), read_only=True, data_only=True)
-    assert workbook.sheetnames == ["Synthèse", "Contrôles", "Contrôles enrichis"]
+    assert workbook.sheetnames == [
+        "Synthèse",
+        "Contrôles",
+        "Contrôles enrichis",
+        "Matrice V1-V2",
+    ]
     summary = {
         str(key): value
         for key, value in workbook["Synthèse"].iter_rows(
@@ -675,7 +685,14 @@ async def test_api_generates_xlsx_from_the_stored_typed_report(tmp_path: Path) -
     assert summary["Source"] == "synthetic.conf"
     assert summary["FortiGuard"] == "AVAILABLE"
     controls = list(workbook["Contrôles"].iter_rows(values_only=True))
-    assert controls[0] == ("Contrôle", "Titre", "Statut", "Constat", "Risque", "Recommandation")
+    assert controls[0] == (
+        "Contrôle V2 (interne)",
+        "Libellé métier V1",
+        "Statut",
+        "Constat",
+        "Risque",
+        "Recommandation",
+    )
     assert controls[1][0] == "SYS-HOSTNAME-001"
     assert controls[1][2] == "PASS"
     assert {row[0] for row in controls[1:]} >= {

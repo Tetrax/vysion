@@ -87,7 +87,15 @@ end
 
     assert response.status_code == 200
     assert response.json()["sdwan_zones"] == [
-        {"name": "virtual-wan-link", "interfaces": ["port1", "wan1"]}
+        {
+            "name": "virtual-wan-link",
+            "interfaces": ["port1", "wan1"],
+            "proof_state": "proven",
+        }
+    ]
+    assert response.json()["sdwan_members"] == [
+        {"name": "wan1", "zones": ["virtual-wan-link"]},
+        {"name": "port1", "zones": ["virtual-wan-link"]},
     ]
 
 

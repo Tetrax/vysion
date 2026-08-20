@@ -919,6 +919,7 @@ class AuditFinding(BaseModel):
 
     control_id: str
     title: str
+    display_name: str | None = None
     status: AuditStatus
     category: str = "general"
     priority: AuditPriority = AuditPriority.P2

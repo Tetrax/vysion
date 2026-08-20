@@ -19,6 +19,7 @@ from vysion.reports.business_text import (
     client_result_for,
 )
 from vysion.reports.json_report import JsonAuditReport
+from vysion.reports.presentation import AuditPresentation, build_presentation
 
 _TEMPLATE = Path(__file__).with_name("templates") / "generique.docx"
 
@@ -236,7 +237,7 @@ def _point_audited(finding: AuditFinding) -> str:
         return business_text.point
     return (
         "Évaluation de ce point de configuration à partir des éléments réellement "
-        f"observés : {_clean_client_text(finding.title)}."
+        f"observés : {_clean_client_text(finding.display_name or finding.title)}."
     )
 
 
@@ -274,9 +275,12 @@ def _add_risk_table(
     business_text = business_text_for(finding)
     risk_assessment = business_risk_for(finding)
     likelihood, impact, risk_level, correction = _risk_values(risk_assessment)
-    point = _clean_client_text(
-        business_text.risk_point if business_text and business_text.risk_point else finding.title
+    risk_point = (
+        business_text.risk_point
+        if business_text and business_text.risk_point
+        else finding.display_name or finding.title
     )
+    point = _clean_client_text(risk_point)
     description = _clean_client_text(
         business_text.risk_description
         if business_text and business_text.risk_description
@@ -336,6 +340,30 @@ def _add_risk_table(
         "risk": risk_level,
         "correction": correction,
     }
+
+
+def _presentation_for(report: JsonAuditReport) -> AuditPresentation:
+    return report.presentation or build_presentation(report.findings)
+
+
+def _add_presentation_summary(document: Any, presentation: AuditPresentation) -> None:
+    document.add_heading("Périmètre de comparaison V1/V2", level=2)
+    table = document.add_table(rows=1, cols=2)
+    table.style = "Table Grid"
+    _set_cell_text(table.cell(0, 0), "Indicateur", bold=True)
+    _set_cell_text(table.cell(0, 1), "Valeur", bold=True)
+    for label, value in (
+        ("Points métier V1 comparables", presentation.business_control_count),
+        ("Contrôles moteur exécutés", presentation.engine_control_count),
+        ("Sous-vérifications détaillées", presentation.split_extra_finding_count),
+        ("Contrôles complémentaires", presentation.v2_only_control_count),
+    ):
+        cells = table.add_row().cells
+        _set_cell_text(cells[0], label)
+        _set_cell_text(cells[1], str(value))
+    for line in presentation.explanation_lines:
+        document.add_paragraph(line)
+    document.add_paragraph("")
 
 
 def _add_characteristics(document: Any, report: JsonAuditReport) -> None:
@@ -491,6 +519,7 @@ def render_docx(report: JsonAuditReport) -> bytes:
     characteristics_run.font.size = Pt(14)
     document.add_paragraph("")
     _add_characteristics(document, report)
+    _add_presentation_summary(document, _presentation_for(report))
 
     grouped: dict[str, list[AuditFinding]] = {domain: [] for domain in _DOMAIN_ORDER}
     for finding in report.findings:
@@ -510,7 +539,10 @@ def render_docx(report: JsonAuditReport) -> bytes:
         document.add_heading(_DOMAIN_TITLES[domain], level=2)
         document.add_paragraph("")
         for finding in findings:
-            document.add_heading(f" {_clean_client_text(finding.title)}", level=3)
+            document.add_heading(
+                f" {_clean_client_text(finding.display_name or finding.title)}",
+                level=3,
+            )
             document.add_paragraph("")
             point = document.add_paragraph()
             point.add_run("Point audité :").bold = True

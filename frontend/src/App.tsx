@@ -6,10 +6,38 @@ import './app.css'
 type AuditStatus = 'PASS' | 'FAIL' | 'UNKNOWN' | 'ERROR' | 'NOT_APPLICABLE'
 type TriState = '' | 'true' | 'false'
 type Step = 'upload' | 'context' | 'wan' | 'options' | 'audit' | 'results'
-type Finding = { control_id: string; title: string; status: AuditStatus }
-type AuditReport = { report_id: string; fortiguard: { status: string; detail: string }; findings: Finding[] }
+type Finding = { control_id: string; title: string; display_name?: string | null; status: AuditStatus }
+type PresentationRow = {
+  business_key: string
+  order: number
+  display_name: string
+  relation: string
+  classification: string
+  presentation_kind: string
+  v2_control_ids: string[]
+  v2_projection?: string | null
+  status?: AuditStatus | null
+  result?: string | null
+  finding_ids: string[]
+}
+type Presentation = {
+  business_control_count: number
+  engine_control_count: number
+  split_extra_finding_count: number
+  v2_only_control_count: number
+  explanation_lines: string[]
+  business_rows: PresentationRow[]
+  v2_only_rows: PresentationRow[]
+}
+type AuditReport = {
+  report_id: string
+  fortiguard: { status: string; detail: string }
+  findings: Finding[]
+  presentation?: Presentation | null
+}
 type PreviewInterface = { name: string; role?: string | null; zone?: string | null }
-type PreviewZone = { name: string; interfaces: string[] }
+type PreviewZone = { name: string; interfaces: string[]; proof_state?: string }
+type PreviewSdwanMember = { name: string; zones: string[] }
 type Preview = {
   hostname?: string | null
   model?: string | null
@@ -19,6 +47,7 @@ type Preview = {
   zones: PreviewZone[]
   wan_relations?: { interface: string; zone: string }[]
   sdwan_zones: PreviewZone[]
+  sdwan_members?: PreviewSdwanMember[]
 }
 type ApiErrorDetail = { detail?: string | Array<{ msg?: string }> }
 type WanSelectionKind = 'interface' | 'zone' | 'sdwan'
@@ -50,6 +79,7 @@ function buildWanOptions(preview: Preview): WanOption[] {
     })
   }
   preview.interfaces.forEach((item) => add(item.name, 'interface', item.role === 'wan' ? 'Interface WAN' : 'Interface', [], item.role === 'wan'))
+  preview.sdwan_members?.forEach((member) => add(member.name, 'interface', 'Membre SD-WAN', [], true))
   preview.zones.forEach((zone) => add(zone.name, 'zone', 'Zone', zone.interfaces))
   preview.sdwan_zones.forEach((zone) => add(zone.name, 'sdwan', 'SD-WAN', zone.interfaces))
   return [...byName.values()]
@@ -142,7 +172,10 @@ function App() {
       const inspected = (await response.json()) as Preview
       if (generation !== requestGeneration.current) return
       setPreview(inspected)
-      const defaults = buildWanOptions(inspected).filter((option) => option.kinds.includes('Interface WAN'))
+      const defaults = buildWanOptions(inspected).filter((option) => (
+        option.scopes.includes('interface')
+        && (option.kinds.includes('Interface WAN') || option.kinds.includes('Membre SD-WAN'))
+      ))
       setSelectedWanScopes(defaults.map((option) => ({ name: option.name, kind: 'interface' })))
       setSerialNumber(inspected.serial_number ?? '')
       setStep('context')
@@ -244,7 +277,24 @@ function App() {
   }
 
   const findings = report?.findings ?? []
-  const nonConform = findings.filter((finding) => finding.status === 'FAIL' || finding.status === 'UNKNOWN')
+  const presentation = report?.presentation
+  const clientRows: PresentationRow[] = presentation
+    ? [...presentation.business_rows, ...presentation.v2_only_rows]
+    : findings.map((finding): PresentationRow => ({
+      business_key: finding.control_id,
+      order: 0,
+      display_name: finding.display_name ?? finding.title,
+      relation: 'engine',
+      classification: 'V2',
+      presentation_kind: 'engine',
+      v2_control_ids: [finding.control_id],
+      status: finding.status,
+      result: null,
+      finding_ids: [finding.control_id],
+    }))
+  const nonConform = clientRows.filter((row) => row.status === 'FAIL' || row.status === 'UNKNOWN')
+  const sdwanMembers = preview?.sdwan_members ?? []
+  const sdwanMemberNames = new Set(sdwanMembers.map((member) => member.name.toLocaleLowerCase()))
 
   return <div className="app-shell">
     <header className="hero">
@@ -298,13 +348,23 @@ function App() {
         <fieldset className="selection-section" aria-label="Interfaces WAN">
           <h3>Interfaces WAN à sélectionner</h3>
           <div className="checkbox-list interfaces-list">
-            {preview.interfaces.filter((item) => item.name.trim()).map((item) => <label key={`interface-${item.name}`} className="checkbox-item">
+            {preview.interfaces.filter((item) => item.name.trim() && !sdwanMemberNames.has(item.name.toLocaleLowerCase())).map((item) => <label key={`interface-${item.name}`} className="checkbox-item">
               <input aria-label={`WAN ${item.name}`} type="checkbox" checked={hasScope(item.name, 'interface')} onChange={() => toggleWan(item.name, 'interface')} />
               <span>{item.name}</span>
             </label>)}
-            {preview.interfaces.length === 0 && <p className="empty-state">Aucune interface détectée.</p>}
+            {preview.interfaces.filter((item) => item.name.trim() && !sdwanMemberNames.has(item.name.toLocaleLowerCase())).length === 0 && <p className="empty-state">Aucune interface hors SD-WAN détectée.</p>}
           </div>
         </fieldset>
+
+        {sdwanMembers.length > 0 && <fieldset className="selection-section" aria-label="Membres physiques SD-WAN">
+          <h3>Membres physiques SD-WAN à sélectionner</h3>
+          <div className="checkbox-list sdwan-members-list">
+            {sdwanMembers.map((member) => <label key={`sdwan-member-${member.name}`} className="checkbox-item">
+              <input aria-label={`WAN membre SD-WAN ${member.name}`} type="checkbox" checked={hasScope(member.name, 'interface')} onChange={() => toggleWan(member.name, 'interface')} />
+              <span>{member.name} <small>(zone{member.zones.length > 1 ? 's' : ''} : {member.zones.join(', ')})</small></span>
+            </label>)}
+          </div>
+        </fieldset>}
 
         <fieldset className="selection-section" aria-label="Zones">
           <h3>Zones WAN à sélectionner</h3>
@@ -322,7 +382,7 @@ function App() {
           <div className="checkbox-list sdwan-list">
             {preview.sdwan_zones.filter((zone) => zone.name.trim()).map((zone) => <label key={`sdwan-${zone.name}`} className="checkbox-item">
               <input aria-label={`WAN sdwan ${zone.name}`} type="checkbox" checked={hasScope(zone.name, 'sdwan')} onChange={() => toggleWan(zone.name, 'sdwan')} />
-              <span>SD-WAN Zone: {zone.name} ({zone.interfaces.join(', ')})</span>
+              <span>SD-WAN Zone: {zone.name} → {zone.interfaces.length > 0 ? zone.interfaces.join(', ') : 'Aucun membre observé'}{zone.proof_state === 'unknown' ? ' (à vérifier)' : ''}</span>
             </label>)}
             {preview.sdwan_zones.length === 0 && <p className="empty-state">Aucune zone SD-WAN détectée.</p>}
           </div>
@@ -361,14 +421,19 @@ function App() {
         <div className="info-box" aria-label="Synthèse de l’audit">
           <p><strong>Hostname:</strong> <span>{display(preview.hostname)}</span> | <strong>Version:</strong> <span>{display(preview.firmware_version)}</span> | <strong>Model:</strong> <span>{display(preview.model)}</span></p>
           <p><strong>Total Checks:</strong> {findings.length}</p>
+          {presentation && <>
+            <p><strong>Points métier V1 comparables:</strong> {presentation.business_control_count} | <strong>Contrôles moteur V2:</strong> {presentation.engine_control_count}</p>
+            <p className="field-hint">{presentation.split_extra_finding_count} sous-vérifications détaillent des points V1 ; {presentation.v2_only_control_count} contrôles complémentaires sont séparés de la lecture métier.</p>
+          </>}
         </div>
 
         {nonConform.length > 0 ? <div className="reports-section">
           <h3>Contrôles non conformes ou à vérifier</h3>
           <div className="checks-table-wrapper"><table className="checks-table"><thead><tr><th>Contrôle</th><th className="checks-status-col">Statut</th></tr></thead><tbody>
             {nonConform.map((finding) => {
-              const statusLabel = finding.status === 'FAIL' ? 'NON CONFORME' : 'À VÉRIFIER'
-              return <tr key={finding.control_id}><td className="checks-name">{finding.title}</td><td className="checks-status"><span className={`status-icon ${finding.status.toLowerCase()}`} aria-label={statusLabel} title={statusLabel}>{finding.status === 'FAIL' ? '✕' : '?'}</span></td></tr>
+              const status = finding.status ?? 'UNKNOWN'
+              const statusLabel = status === 'FAIL' ? 'NON CONFORME' : 'À VÉRIFIER'
+              return <tr key={finding.business_key}><td className="checks-name">{finding.display_name}</td><td className="checks-status"><span className={`status-icon ${status.toLowerCase()}`} aria-label={statusLabel} title={statusLabel}>{status === 'FAIL' ? '✕' : '?'}</span></td></tr>
             })}
           </tbody></table></div>
         </div> : <div className="reports-section"><h3>Contrôles</h3><div className="info-box">✅ Aucun contrôle non conforme détecté.</div></div>}

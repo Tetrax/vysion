@@ -30,6 +30,7 @@ COPY requirements.lock ./
 RUN python -m venv /opt/vysion-venv \
     && pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY VERSION ./VERSION
+COPY docs/V1_V2_CAPABILITY_MAP.json ./docs/V1_V2_CAPABILITY_MAP.json
 COPY src/ ./src/
 RUN mkdir -p /app/data/reports /tmp/nginx/client_temp /tmp/nginx/proxy_temp \
     && chown -R vysion:vysion /app/data /tmp/nginx
