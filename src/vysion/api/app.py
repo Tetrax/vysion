@@ -494,23 +494,53 @@ def _preview_sdwan_members(configuration) -> list[dict[str, object]]:
     ]
 
 
+def _preview_interface_labels(configuration) -> dict[str, str]:
+    """Expose operator-facing FortiOS aliases/descriptions in the preview."""
+    section = configuration.document.section("system interface")
+    if section is None:
+        return {}
+    labels: dict[str, str] = {}
+    for entry in section.entries:
+        if not entry.name.strip():
+            continue
+        for key in ("alias", "description"):
+            if any(directive.name == key and directive.mutation for directive in entry.directives):
+                continue
+            directives = tuple(
+                directive
+                for directive in entry.directives
+                if directive.name == key and not directive.mutation
+            )
+            if len(directives) != 1 or not directives[0].tokens:
+                continue
+            label = " ".join(directives[0].tokens).strip()
+            if label and label.casefold() != entry.name.strip().casefold():
+                labels[entry.name.strip().casefold()] = label
+                break
+    return labels
+
 def _preview_payload(configuration) -> dict[str, object]:
     identity = configuration.device_identity
     preview_interfaces = tuple(_unique_named(configuration.interfaces).values())
     interface_index = _unique_named(configuration.interfaces)
     preview_zones = _preview_zone_payload(configuration.zones, interface_index)
+    interface_labels = _preview_interface_labels(configuration)
+    interface_payload = []
+    for interface in preview_interfaces:
+        item = {
+            "name": interface.name,
+            "role": interface.role,
+        }
+        label = interface_labels.get(interface.name.strip().casefold())
+        if label:
+            item["label"] = label
+        interface_payload.append(item)
     return {
         "hostname": identity.hostname,
         "model": identity.model,
         "firmware_version": identity.firmware_version,
         "serial_number": identity.serial_number,
-        "interfaces": [
-            {
-                "name": interface.name,
-                "role": interface.role,
-            }
-            for interface in preview_interfaces
-        ],
+        "interfaces": interface_payload,
         "zones": preview_zones,
         "wan_relations": [
             {"interface": interface.name, "zone": interface.zone.name}

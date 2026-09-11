@@ -47,7 +47,7 @@ describe('Vysion V1 business path', () => {
     expect(body.has('context_comment')).toBe(false)
     expect(body.has('comment')).toBe(false)
     expect(body.has('automatic_wan')).toBe(false)
-    expect(body.get('selected_wan_scopes')).toBe(JSON.stringify([{ name: 'wan1', kind: 'interface' }]))
+    expect(body.get('selected_wan_scopes')).toBe(JSON.stringify([{ name: 'wan1', kind: 'interface' }, { name: 'internet', kind: 'zone' }]))
   })
 
   it('keeps interface and zone selections distinct when names collide', async () => {
@@ -63,7 +63,7 @@ describe('Vysion V1 business path', () => {
     await user.upload(screen.getByLabelText('Configuration FortiGate'), new File(['safe'], 'safe.conf'))
     await screen.findByText('shared-name')
     await user.click(screen.getByRole('button', { name: 'Continuer vers la sélection WAN' }))
-    await user.click(screen.getByLabelText('WAN zone internet'))
+    expect(screen.getByLabelText('WAN zone internet')).toBeChecked()
     await user.click(screen.getByRole('button', { name: 'Continuer vers les options d’audit' }))
     await user.click(screen.getByRole('button', { name: 'Lancer l’audit' }))
 

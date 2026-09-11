@@ -13,6 +13,7 @@ config system global
 end
 config system interface
     edit "wan1"
+        set alias "4G Bouygues"
         set ip 192.0.2.10 255.255.255.0
         set role wan
         set allowaccess ping
@@ -61,7 +62,7 @@ async def test_preview_returns_safe_identity_interfaces_and_zones_without_persis
     assert payload["model"] == "60E"
     assert payload["firmware_version"] == "7.2.9"
     assert payload["interfaces"] == [
-        {"name": "wan1", "role": "wan"},
+        {"name": "wan1", "role": "wan", "label": "4G Bouygues"},
         {"name": "port1", "role": "lan"},
     ]
     assert payload["zones"] == [{"name": "internet", "interfaces": ["wan1"]}]

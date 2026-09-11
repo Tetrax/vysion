@@ -36,7 +36,7 @@ type AuditReport = {
   findings: Finding[]
   presentation?: Presentation | null
 }
-type PreviewInterface = { name: string; role?: string | null; zone?: string | null }
+type PreviewInterface = { name: string; role?: string | null; label?: string | null; zone?: string | null }
 type PreviewZone = { name: string; interfaces: string[]; proof_state?: string }
 type PreviewSdwanMember = { name: string; zones: string[] }
 type Preview = {
@@ -54,6 +54,12 @@ type ApiErrorDetail = { detail?: string | Array<{ msg?: string }> }
 type WanSelectionKind = 'interface' | 'zone' | 'sdwan'
 type WanScope = { name: string; kind: WanSelectionKind }
 type WanOption = { name: string; kinds: string[]; scopes: WanSelectionKind[]; interfaces: string[]; defaultKind: WanSelectionKind }
+
+function interfaceLabel(item: PreviewInterface): string {
+  const label = item.label?.trim()
+  const suffix = item.role?.toLocaleLowerCase() === 'wan' ? ' [WAN]' : ''
+  return `${item.name}${label ? ` (${label})` : ''}${suffix}`
+}
 
 function buildWanOptions(preview: Preview): WanOption[] {
   const byName = new Map<string, WanOption>()
@@ -177,7 +183,12 @@ function App() {
         option.scopes.includes('interface')
         && (option.kinds.includes('Interface WAN') || option.kinds.includes('Membre SD-WAN'))
       ))
-      setSelectedWanScopes(defaults.map((option) => ({ name: option.name, kind: 'interface' })))
+      const defaultScopes: WanScope[] = defaults.map((option) => ({ name: option.name, kind: 'interface' }))
+      const internetZone = inspected.zones.find((zone) => zone.name.trim().toLocaleLowerCase() === 'internet')
+      if (internetZone && !defaultScopes.some((scope) => scope.kind === 'zone' && scope.name.toLocaleLowerCase() === internetZone.name.trim().toLocaleLowerCase())) {
+        defaultScopes.push({ name: internetZone.name, kind: 'zone' })
+      }
+      setSelectedWanScopes(defaultScopes)
       setSerialNumber(inspected.serial_number ?? '')
       setStep('context')
     } catch (reason) {
@@ -278,6 +289,11 @@ function App() {
     })
   }
 
+  function previewInterfaceLabel(name: string): string {
+    const item = preview?.interfaces.find((candidate) => candidate.name.toLocaleLowerCase() === name.toLocaleLowerCase())
+    return item ? interfaceLabel(item) : name
+  }
+
   const findings = report?.findings ?? []
   const presentation = report?.presentation
   const clientRows: PresentationRow[] = presentation
@@ -352,7 +368,7 @@ function App() {
           <div className="checkbox-list interfaces-list">
             {preview.interfaces.filter((item) => item.name.trim() && !sdwanMemberNames.has(item.name.toLocaleLowerCase())).map((item) => <label key={`interface-${item.name}`} className="checkbox-item">
               <input aria-label={`WAN ${item.name}`} type="checkbox" checked={hasScope(item.name, 'interface')} onChange={() => toggleWan(item.name, 'interface')} />
-              <span>{item.name}</span>
+              <span>{interfaceLabel(item)}</span>
             </label>)}
             {preview.interfaces.filter((item) => item.name.trim() && !sdwanMemberNames.has(item.name.toLocaleLowerCase())).length === 0 && <p className="empty-state">Aucune interface hors SD-WAN détectée.</p>}
           </div>
@@ -363,7 +379,7 @@ function App() {
           <div className="checkbox-list sdwan-members-list">
             {sdwanMembers.map((member) => <label key={`sdwan-member-${member.name}`} className="checkbox-item">
               <input aria-label={`WAN membre SD-WAN ${member.name}`} type="checkbox" checked={hasScope(member.name, 'interface')} onChange={() => toggleWan(member.name, 'interface')} />
-              <span>{member.name} <small>(zone{member.zones.length > 1 ? 's' : ''} : {member.zones.join(', ')})</small></span>
+              <span>{previewInterfaceLabel(member.name)} <small>(zone{member.zones.length > 1 ? 's' : ''} : {member.zones.join(', ')})</small></span>
             </label>)}
           </div>
         </fieldset>}

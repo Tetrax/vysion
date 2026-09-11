@@ -15,7 +15,7 @@ function jsonResponse(value: unknown, status = 200) {
 
 const preview = {
   hostname: 'guided-lab', model: '80F', firmware_version: '7.4.3', serial_number: 'FG-guided',
-  interfaces: [{ name: 'wan1', role: 'wan' }, { name: 'lan1', role: 'lan' }],
+  interfaces: [{ name: 'wan1', role: 'wan', label: '4G Bouygues' }, { name: 'lan1', role: 'lan' }],
   zones: [{ name: 'internet', interfaces: ['wan1'] }], sdwan_zones: [{ name: 'sdwan-public', interfaces: ['wan1'] }],
 }
 const report = { report_id: 'guided-report', fortiguard: { status: 'UNKNOWN', detail: '' }, findings: [] }
@@ -46,6 +46,8 @@ describe('Vysion guided V1 workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Retour à la sélection WAN' }))
     expect(screen.getByRole('heading', { name: 'Sélection WAN' })).toBeInTheDocument()
     expect(screen.getByLabelText('WAN wan1')).toBeChecked()
+    expect(screen.getByText('wan1 (4G Bouygues) [WAN]')).toBeInTheDocument()
+    expect(screen.getByLabelText('WAN zone internet')).toBeChecked()
   })
 
   it('shows every SD-WAN member and the zone-to-members relation', async () => {
