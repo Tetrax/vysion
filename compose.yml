@@ -5,6 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks:
+      subnet-docker:
+        ipv4_address: ${VYSION_IPV4_ADDRESS:-172.30.250.11}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:443:8443"
     environment:
@@ -39,3 +42,8 @@ services:
 
 volumes:
   vysion-reports:
+
+networks:
+  subnet-docker:
+    external: true
+    name: ${DOCKER_NETWORK_NAME:-Subnet-Docker}
