@@ -69,12 +69,7 @@ def _wan_names(
     interfaces, interface_collisions = unique_named(configuration.interfaces)
     zones, zone_collisions = unique_named(configuration.zones)
     sdwan_zones, sdwan_collisions = unique_named(configuration.sdwan_zones)
-    resolved = not (
-        entry_collisions
-        or interface_collisions
-        or zone_collisions
-        or sdwan_collisions
-    )
+    resolved = not (entry_collisions or interface_collisions or zone_collisions or sdwan_collisions)
     proven_zone_names = frozenset(
         zone.name.casefold()
         for zone in (*zones.values(), *sdwan_zones.values())
@@ -93,9 +88,7 @@ def _wan_names(
             elif selection.kind in {WanSelectionKind.ZONE, WanSelectionKind.SDWAN}:
                 index = zones if selection.kind is WanSelectionKind.ZONE else sdwan_zones
                 collisions = (
-                    zone_collisions
-                    if selection.kind is WanSelectionKind.ZONE
-                    else sdwan_collisions
+                    zone_collisions if selection.kind is WanSelectionKind.ZONE else sdwan_collisions
                 )
                 zone = index.get(key)
                 if zone is None or key in collisions or zone.proof_state is not ProofState.PROVEN:
@@ -120,9 +113,7 @@ def _wan_names(
                 )
         return (
             frozenset(selected),
-            bool(selected)
-            and resolved
-            and selected <= certain_names | proven_zone_names,
+            bool(selected) and resolved and selected <= certain_names | proven_zone_names,
         )
 
     if context is not None and context.selected_wans is not None:
@@ -153,12 +144,7 @@ def _active_policy_direction(
     dst = _tokens_for(entry, "dstintf")
     action = _tokens_for(entry, "action")
     status = _tokens_for(entry, "status")
-    if (
-        src is None
-        or dst is None
-        or action != ("accept",)
-        or status != ("enable",)
-    ):
+    if src is None or dst is None or action != ("accept",) or status != ("enable",):
         return None
     src_wan = any(value.casefold() in wan_names for value in src)
     dst_wan = any(value.casefold() in wan_names for value in dst)
@@ -187,11 +173,15 @@ def _policy_has_unknown_interface(
     entry: StructuralEntry,
 ) -> bool:
     section = configuration.document.section("system interface")
-    known = {
-        entry.name.casefold()
-        for entry in section.entries
-        if entry.certainty is EvidenceCertainty.CERTAIN
-    } if section is not None and section.certainty is EvidenceCertainty.CERTAIN else set()
+    known = (
+        {
+            entry.name.casefold()
+            for entry in section.entries
+            if entry.certainty is EvidenceCertainty.CERTAIN
+        }
+        if section is not None and section.certainty is EvidenceCertainty.CERTAIN
+        else set()
+    )
     known.update(
         zone.name.casefold()
         for zone in configuration.zones
@@ -256,8 +246,7 @@ def _flow_finding(
         message=message,
         risk=RiskAssessment(
             summary=(
-                "Un flux WAN insuffisamment filtré peut communiquer "
-                "avec une source malveillante."
+                "Un flux WAN insuffisamment filtré peut communiquer avec une source malveillante."
             ),
             impact="Compromission, exfiltration ou communication avec une infrastructure hostile.",
             likelihood="élevée sur un flux exposé",
@@ -353,9 +342,7 @@ def check_cti_wan_flows(
         if missing_resources:
             details.append(f"ressources manquantes: {', '.join(sorted(missing_resources))}")
         if disabled_resources:
-            details.append(
-                f"ressources désactivées: {', '.join(sorted(disabled_resources))}"
-            )
+            details.append(f"ressources désactivées: {', '.join(sorted(disabled_resources))}")
         if weak:
             details.append(f"politiques incomplètes: {', '.join(weak)}")
         return _flow_finding(
@@ -435,9 +422,7 @@ def check_isdb_wan_flows(
         applicable.append((entry, direction))
         key = "internet-service-src-name" if direction == "incoming" else "internet-service-name"
         group_key = (
-            "internet-service-src-group"
-            if direction == "incoming"
-            else "internet-service-group"
+            "internet-service-src-group" if direction == "incoming" else "internet-service-group"
         )
         direct_names = _tokens_for(entry, key)
         group_names = _tokens_for(entry, group_key)
@@ -524,8 +509,7 @@ def _ldaps_finding(
             impact="Interception des secrets ou usurpation du serveur d'annuaire.",
             likelihood="élevée sur un réseau compromis",
             treatment=(
-                "Imposer LDAPS et une autorité de certification explicite "
-                "sur chaque connecteur."
+                "Imposer LDAPS et une autorité de certification explicite sur chaque connecteur."
             ),
         ),
         recommendation="Configurer chaque connecteur en LDAPS avec un certificat CA approuvé.",
@@ -569,9 +553,7 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
 
     weak: list[str] = []
     unknown: list[str] = (
-        ["namespace user ldap"]
-        if section.certainty is not EvidenceCertainty.CERTAIN
-        else []
+        ["namespace user ldap"] if section.certainty is not EvidenceCertainty.CERTAIN else []
     )
     items: list[EvidenceItem] = []
     for entry in section.entries:
@@ -592,8 +574,7 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             entry_name=entry.name,
             certainty=(
                 EvidenceCertainty.CERTAIN
-                if entry.certainty is EvidenceCertainty.CERTAIN
-                and secure_directive is not None
+                if entry.certainty is EvidenceCertainty.CERTAIN and secure_directive is not None
                 else None
             ),
         )
@@ -622,6 +603,16 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
         if secure_value in {"disable", "none", "plain"}:
             weak.append(entry.name)
         elif (
+            configuration.complete_backup
+            and section.certainty is EvidenceCertainty.CERTAIN
+            and entry.certainty is EvidenceCertainty.CERTAIN
+            and secure_value == "ldaps"
+            and not ca_value
+        ):
+            # In a complete FortiOS backup, absence of ca-cert is an explicit
+            # configuration fact and must match the mandatory audit result.
+            weak.append(entry.name)
+        elif (
             entry.certainty is not EvidenceCertainty.CERTAIN
             or secure.certainty is not EvidenceCertainty.CERTAIN
             or ca.certainty is not EvidenceCertainty.CERTAIN
@@ -635,7 +626,9 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             configuration,
             status=AuditStatus.FAIL,
             applicability=Applicability.APPLICABLE,
-            evidence=(f"Connecteurs non LDAPS: {', '.join(weak)}.",),
+            evidence=(
+                f"Connecteurs LDAP non conformes (LDAPS ou CA manquant): {', '.join(weak)}.",
+            ),
             evidence_items=tuple(items),
             affected_objects=tuple(
                 AffectedObject(object_type="ldap-connector", name=name) for name in weak
@@ -786,16 +779,13 @@ def check_fortiguard_psirt(
             evidence=evidence,
             affected_objects=(),
             message=(
-                "La vulnérabilité de la version FortiOS ne peut pas être établie "
-                "de façon certaine."
+                "La vulnérabilité de la version FortiOS ne peut pas être établie de façon certaine."
             ),
         )
 
     assert observation is not None
     ruleset = f"{observation.ruleset_id}@{observation.ruleset_version}"
-    vulnerabilities = tuple(
-        item.strip() for item in observation.vulnerabilities if item.strip()
-    )
+    vulnerabilities = tuple(item.strip() for item in observation.vulnerabilities if item.strip())
     if vulnerabilities:
         return _psirt_finding(
             status=AuditStatus.FAIL,

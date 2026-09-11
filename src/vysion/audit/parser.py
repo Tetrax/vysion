@@ -80,6 +80,7 @@ _RELEVANT_KEYS = {
 _TOLERATED_NON_PROBATIVE_KEYS = {
     "system global": {
         "admin-server-cert",
+        "admin-scp",
         "admin-sport",
         "admintimeout",
         "alias",
@@ -88,11 +89,13 @@ _TOLERATED_NON_PROBATIVE_KEYS = {
         "fortitoken-cloud-region",
         "gui-auto-upgrade-setup-warning",
         "gui-certificates",
+        "gui-local-out",
         "gui-display-hostname",
         "gui-replacement-message-groups",
         "gui-wireless-opensecurity",
         "ipv6-allow-traffic-redirect",
         "ldapconntimeout",
+        "management-port-use-admin-sport",
         "management-ip",
         "remoteauthtimeout",
         "reset-sessionless-tcp",
@@ -146,14 +149,25 @@ _TOLERATED_NON_PROBATIVE_KEYS = {
         "old-password",
         "password",
         "peer-group",
+        "remote-auth",
+        "remote-group",
+        "ssh-public-key1",
         "trusthost1",
+        "trusthost2",
+        "trusthost3",
+        "trusthost4",
+        "trusthost5",
+        "trusthost6",
         "vdom",
+        "wildcard",
     },
 }
 _TOLERATED_CHILD_SECTIONS = {
     "system global": frozenset(),
     "system interface": frozenset({"secondaryip"}),
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
+    "dashboard": frozenset({"widget"}),
+    "gui-dashboard": frozenset({"widget"}),
 }
 _MUTATION_DIRECTIVES = {"append", "select", "unselect", "unset", "rename"}
 _RESERVED_DIRECTIVES = _MUTATION_DIRECTIVES | {"config", "edit", "end", "next", "set"}
@@ -296,7 +310,9 @@ _PROJECTED_KEYS = {
     },
     "system fortisandbox": {"sandbox-region"},
     "system fortiguard": {"fortiguard-anycast"},
-    "router static": {"status", "dstaddr", "blackhole", "distance"},
+    # FortiOS 7.2/7.4 exports the route destination as ``dst``.  Keep the
+    # internal ``dstaddr`` spelling as a compatibility alias for older input.
+    "router static": {"status", "dst", "dstaddr", "blackhole", "distance"},
     "firewall schedule onetime": {"end"},
     "firewall schedule recurring": {"day", "start", "end"},
     "firewall schedule group": {"member"},
@@ -366,6 +382,15 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     ),
     "firewall addrgrp": frozenset({"comment", "uuid"}),
     "system dns-database": frozenset({"authoritative", "domain", "ttl", "type"}),
+    "log setting": frozenset(
+        {
+            "local-in-allow",
+            "local-in-deny-broadcast",
+            "local-in-deny-unicast",
+        }
+    ),
+    "system fortiguard": frozenset({"service-account-id", "source-ip"}),
+    "system fortisandbox": frozenset({"status", "source-ip"}),
     "user local": frozenset({"passwd", "passwd-time"}),
     "user ldap": frozenset(
         {
@@ -382,6 +407,18 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
             "username",
         }
     ),
+    "firewall ssl-ssh-profile": frozenset({"comment"}),
+    "ssl-ssh-profile": frozenset({"comment"}),
+    "firewall antivirus profile": frozenset(
+        {"comment", "external-blocklist-enable-all", "outbreak-prevention-archive-scan"}
+    ),
+    "antivirus profile": frozenset(
+        {"comment", "external-blocklist-enable-all", "outbreak-prevention-archive-scan"}
+    ),
+    "firewall ips sensor": frozenset({"comment", "block-malicious-url"}),
+    "ips sensor": frozenset({"comment", "block-malicious-url"}),
+    "firewall application list": frozenset({"comment", "deep-app-inspection", "options"}),
+    "application list": frozenset({"comment", "deep-app-inspection", "options"}),
     "vpn ssl settings": frozenset(
         {
             "algorithm",
@@ -510,9 +547,39 @@ _PROJECTED_CHILD_KEYS = {
     "ftgd-wf": {"options"},
     "ftgd-dns": {"options"},
     "filters": {"category", "action"},
-    "entries": {"category", "action"},
+    "entries": {
+        "action",
+        "category",
+        "fortiguard-category",
+        "location",
+        "log",
+        "protocol",
+        "severity",
+        "status",
+        "type",
+        "wildcard-fqdn",
+    },
     "authentication-rule": {"groups", "portal"},
-    "https": {"cert-probe-failure", "sni-server-cert-check"},
+    "https": {
+        "cert-probe-failure",
+        "ports",
+        "quic",
+        "sni-server-cert-check",
+        "status",
+        "unsupported-ssl-version",
+    },
+    "http": {"av-scan", "executables"},
+    "ftp": {"av-scan", "executables"},
+    "imap": {"av-scan", "executables"},
+    "pop3": {"av-scan", "executables"},
+    "smtp": {"av-scan", "executables"},
+    "cifs": {"av-scan", "executables"},
+    "ftps": {"ports", "status", "unsupported-ssl-version"},
+    "imaps": {"ports", "status", "unsupported-ssl-version"},
+    "pop3s": {"ports", "status", "unsupported-ssl-version"},
+    "smtps": {"ports", "status", "unsupported-ssl-version"},
+    "dot": {"quic", "status"},
+    "ssl-exempt": {"fortiguard-category", "type", "wildcard-fqdn"},
 }
 _PROJECTED_CHILDREN = {
     "wireless-controller wtp-profile": frozenset({"radio-1", "radio-2"}),
@@ -521,12 +588,19 @@ _PROJECTED_CHILDREN = {
     "system sdwan": frozenset({"zone", "members", "health-check", "service"}),
     "system interface": frozenset({"secondaryip"}),
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
+    "firewall ssl-ssh-profile": frozenset(
+        {"https", "ftps", "imaps", "pop3s", "smtps", "dot", "ssl-exempt"}
+    ),
+    "antivirus profile": frozenset({"http", "ftp", "imap", "pop3", "smtp", "cifs"}),
+    "firewall antivirus profile": frozenset({"http", "ftp", "imap", "pop3", "smtp", "cifs"}),
+    "ips sensor": frozenset({"entries"}),
+    "firewall ips sensor": frozenset({"entries"}),
+    "application list": frozenset({"entries"}),
+    "firewall application list": frozenset({"entries"}),
     "vpn ssl settings": frozenset({"authentication-rule"}),
     "firewall vip": frozenset({"realservers"}),
-    "firewall ssl-ssh-profile": frozenset({"https"}),
     "webfilter profile": frozenset({"web", "ftgd-wf"}),
     "dnsfilter profile": frozenset({"ftgd-dns"}),
-    "application list": frozenset({"entries"}),
     "ftgd-wf": frozenset({"filters"}),
     "ftgd-dns": frozenset({"filters"}),
     "secondaryip": frozenset(),
@@ -537,6 +611,7 @@ _PROJECTED_CHILDREN = {
     "web": frozenset(),
     "filters": frozenset(),
     "entries": frozenset(),
+    "ssl-exempt": frozenset({"entries"}),
     "authentication-rule": frozenset(),
     "https": frozenset(),
 }
@@ -777,6 +852,12 @@ class _Frame:
         normalized_children: list[StructuralSection] = []
         for child in child_sections:
             if child_counts[child.name.casefold()] > 1:
+                tolerated_duplicate = child.name.casefold() in _TOLERATED_CHILD_SECTIONS.get(
+                    self.audited_section or self.section, frozenset()
+                )
+                if tolerated_duplicate:
+                    normalized_children.append(child)
+                    continue
                 entry_certainty = EvidenceCertainty.AMBIGUOUS
                 normalized_children.append(
                     child.model_copy(
@@ -852,9 +933,11 @@ def _structural_section(frame: _Frame) -> StructuralSection:
     elif any(child.certainty is not EvidenceCertainty.CERTAIN for child in child_sections):
         certainty = EvidenceCertainty.AMBIGUOUS
     for child in child_sections:
-        duplicate_child_is_probative = child_counts[child.name.casefold()] > 1 and (
-            frame.section != "system sdwan"
-            or child.name.casefold() in {"zone", "members"}
+        duplicate_child_is_probative = (
+            child_counts[child.name.casefold()] > 1
+            and (frame.section != "system sdwan" or child.name.casefold() in {"zone", "members"})
+            and child.name.casefold()
+            not in _TOLERATED_CHILD_SECTIONS.get(frame.section, frozenset())
         )
         if duplicate_child_is_probative:
             certainty = EvidenceCertainty.AMBIGUOUS
@@ -1116,9 +1199,7 @@ def _project_generic_sections(
                 None,
             )
             if nested_zone_section is not None:
-                zone_children = tuple(
-                    child for child in section.children if child.name == "zone"
-                )
+                zone_children = tuple(child for child in section.children if child.name == "zone")
                 members_children = tuple(
                     child for child in section.children if child.name == "members"
                 )

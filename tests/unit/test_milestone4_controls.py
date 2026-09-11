@@ -200,6 +200,16 @@ def test_m4_dh_requires_all_phase1_and_phase2_groups() -> None:
     assert audit(raw)["VPN-DH-001"].status is AuditStatus.PASS
 
 
+@pytest.mark.parametrize("dh", ["14", "19", "27"])
+def test_m4_dh_accepts_supported_fortios_72_74_groups(dh: str) -> None:
+    raw = ssl_settings("set status disable") + ipsec(
+        phase1=phase1_entry(dh=dh),
+        phase2=phase2_entry(dh=dh),
+    )
+
+    assert audit(raw)["VPN-DH-001"].status is AuditStatus.PASS
+
+
 @pytest.mark.parametrize("dh", ["1", "5", "13"])
 def test_m4_explicit_weak_dh_fails(dh: str) -> None:
     raw = ssl_settings("set status disable") + ipsec(phase1=phase1_entry(dh=dh))

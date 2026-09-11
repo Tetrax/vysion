@@ -450,6 +450,20 @@ def test_m6_ldaps_explicit_insecure_or_missing_ca_fails() -> None:
     assert no_ca.status is AuditStatus.UNKNOWN
 
 
+def test_m6_ldaps_missing_ca_fails_in_complete_fortios_backup() -> None:
+    raw = (
+        "#config-version=FGT60E-7.4.12-FW-build2902-260505:opmode=0:vdom=0:user=admin\n"
+        "#conf_file_ver=247403001208483\n"
+        "#buildno=2902\n"
+        "#global_vdom=1\n" + ldap(ldap_entry("ldap-a", "set secure ldaps"))
+    )
+
+    parsed = FortiGateParser().parse(raw)
+
+    assert parsed.complete_backup is True
+    assert check_ldaps_connectors(parsed).status is AuditStatus.FAIL
+
+
 def test_m6_ldaps_explicit_violation_dominates_unknown_connector() -> None:
     raw = ldap(
         ldap_entry("weak", "set secure disable"),

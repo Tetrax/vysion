@@ -43,6 +43,10 @@ def _directives(entry: StructuralEntry) -> tuple[dict[str, StructuralDirective],
 
 def _single(directives: dict[str, StructuralDirective], key: str) -> str | None:
     directive = directives.get(key)
+    # FortiOS 7.2/7.4 writes static-route destinations as ``dst`` while
+    # earlier Vysion projections used the equivalent ``dstaddr`` spelling.
+    if directive is None and key == "dstaddr":
+        directive = directives.get("dst")
     return directive.tokens[0] if directive is not None and len(directive.tokens) == 1 else None
 
 

@@ -53,14 +53,10 @@ def check_hostname(configuration: FortiGateConfiguration) -> AuditFinding:
             ),
             recommendation="Définir un hostname unique et documenté.",
             remediation=(
-                "Configurer un hostname conforme à la convention client "
-                "puis relancer l'audit."
+                "Configurer un hostname conforme à la convention client puis relancer l'audit."
             ),
         )
-    if (
-        "system global" not in configuration.parsed_value_sections
-        or not evidence_is_certain
-    ):
+    if "system global" not in configuration.parsed_value_sections or not evidence_is_certain:
         return AuditFinding(
             **metadata,
             status=AuditStatus.UNKNOWN,
@@ -145,9 +141,14 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
         "revision-image-auto-backup",
     )
     section = section_for(configuration.document, "system global")
-    values = {
-        name: _certain_revision_value(section, name) for name in directive_names
-    }
+    values = {name: _certain_revision_value(section, name) for name in directive_names}
+    complete_section = bool(
+        configuration.complete_backup
+        and configuration.document.valid
+        and configuration.document.certainty is EvidenceCertainty.CERTAIN
+        and section is not None
+        and section.certainty is EvidenceCertainty.CERTAIN
+    )
     disabled = tuple(name for name, value in values.items() if value == "disable")
     evidence_items = tuple(
         evidence_for_directive(
@@ -157,6 +158,8 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
             certainty=(
                 EvidenceCertainty.CERTAIN
                 if values[name] == "disable"
+                else EvidenceCertainty.CERTAIN
+                if complete_section and values[name] is None
                 else None
             ),
         )
@@ -171,6 +174,32 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
             evidence=tuple(f"{name}: disable" for name in disabled),
             evidence_items=evidence_items,
             message=f"Une sauvegarde automatique de révision est désactivée: {disabled_text}.",
+            risk=RiskAssessment(
+                summary=(
+                    "Une partie des révisions FortiGate peut ne pas être "
+                    "sauvegardée automatiquement."
+                ),
+                impact="Une révision peut être perdue après une modification ou une déconnexion.",
+                likelihood="élevée",
+                treatment="Activer les deux directives de sauvegarde automatique.",
+            ),
+            recommendation="Activer revision-backup-on-logout et revision-image-auto-backup.",
+            remediation=(
+                "Configurer revision-backup-on-logout enable et revision-image-auto-backup enable, "
+                "puis vérifier les deux directives."
+            ),
+        )
+    if complete_section and all(values[name] is None for name in directive_names):
+        return AuditFinding(
+            **metadata,
+            status=AuditStatus.FAIL,
+            applicability=Applicability.APPLICABLE,
+            evidence=tuple(f"{name}: absent" for name in directive_names),
+            evidence_items=evidence_items,
+            message=(
+                "Les deux sauvegardes automatiques de révision sont absentes de la "
+                "configuration complète."
+            ),
             risk=RiskAssessment(
                 summary=(
                     "Une partie des révisions FortiGate peut ne pas être "

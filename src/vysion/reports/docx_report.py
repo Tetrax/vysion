@@ -206,6 +206,15 @@ def _set_cell_text(cell: Any, text: str, *, bold: bool = False) -> None:
     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
 
+def _repeat_table_header(row: Any) -> None:
+    """Repeat a table's header row when the table crosses a page break."""
+
+    properties = row._tr.get_or_add_trPr()
+    header = OxmlElement("w:tblHeader")
+    header.set(qn("w:val"), "true")
+    properties.append(header)
+
+
 def _color_status(run, status: AuditStatus) -> None:
     run.bold = True
     run.font.color.rgb = (
@@ -260,9 +269,7 @@ def _result_explanation(finding: AuditFinding) -> str:
         "SYS-FORTIANALYZER-SYNC-001",
     }:
         target = (
-            "FortiManager"
-            if finding.control_id == "SYS-FORTIMANAGER-SYNC-001"
-            else "FortiAnalyzer"
+            "FortiManager" if finding.control_id == "SYS-FORTIMANAGER-SYNC-001" else "FortiAnalyzer"
         )
         if finding.status is AuditStatus.PASS:
             return (
@@ -464,6 +471,7 @@ def _add_utm_matrix(document: Any) -> None:
         _shade(cell, "232323")
         for run in cell.paragraphs[0].runs:
             run.font.color.rgb = RGBColor(0xFE, 0xD2, 0xF2)
+    _repeat_table_header(table.rows[0])
     rows = (
         ("\nFiltre DNS\n", "\nNon\n", "\nOui\n"),
         ("\nFiltre Web\n", "\nNon\n", "\nOui\n"),
@@ -490,6 +498,7 @@ def _add_risk_summary(document: Any, risks: list[dict[str, str]]) -> None:
         _shade(cell, "232323")
         for run in cell.paragraphs[0].runs:
             run.font.color.rgb = RGBColor(0xFE, 0xD2, 0xF2)
+    _repeat_table_header(table.rows[0])
     if not risks:
         cells = table.add_row().cells
         cells[0].merge(cells[3])
@@ -515,6 +524,17 @@ def _set_update_fields(document: Any) -> None:
         update = OxmlElement("w:updateFields")
         settings.append(update)
     update.set(qn("w:val"), "true")
+
+
+def _disable_template_heading_numbering(document: Any) -> None:
+    """Use the explicit V1 numbers exactly once in generated headings."""
+
+    for style_name in ("Heading 1", "Heading 2", "Heading 3"):
+        style = document.styles[style_name]
+        paragraph_properties = style._element.get_or_add_pPr()
+        numbering = paragraph_properties.find(qn("w:numPr"))
+        if numbering is not None:
+            paragraph_properties.remove(numbering)
 
 
 def _iter_document_paragraphs(document: Any):
@@ -563,11 +583,22 @@ def _insert_v1_toc(document: Any) -> None:
     )
     if introduction is None:
         return
-    lines = ["3.\tAudit de configuration"]
+
+    def add_entry(number: str, title: str, style: str) -> None:
+        paragraph = introduction.insert_paragraph_before(style=style)
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.keep_together = True
+        paragraph.paragraph_format.keep_with_next = False
+        paragraph.add_run(f"{number}\t{title}")
+
+    # Each TOC row must be its own paragraph.  A single paragraph containing
+    # line breaks inherits the template's justified alignment, which stretches
+    # every word across the page in Word/LibreOffice.
+    add_entry("3.", "Audit de configuration", "toc 1")
     for section in V1_DOCUMENT_SECTIONS:
-        lines.append(f"{section.number}\t{section.title}")
-        lines.extend(f"{slot.number}\t{slot.title}" for slot in section.slots)
-    introduction.insert_paragraph_before("\n".join(lines))
+        add_entry(section.number, section.title, "toc 2")
+        for slot in section.slots:
+            add_entry(slot.number, slot.title, "toc 3")
 
 
 def _add_asset_image(document: Any, filename: str | None) -> None:
@@ -725,6 +756,7 @@ def render_docx(
     if not _TEMPLATE.is_file():
         raise FileNotFoundError(f"V1 DOCX template not found: {_TEMPLATE}")
     document = Document(str(_TEMPLATE))
+    _disable_template_heading_numbering(document)
     context = report.context
     client = _display(context.client, "NOM CLIENT")
     site = _display(context.site, "SITE À RENSEIGNER")
@@ -772,31 +804,8 @@ def render_docx(
                 risks,
                 risk_number,
             )
-        if section.number == "3.6":
+        if section.number == "3.5":
             _add_utm_matrix(document)
-
-    complementary = tuple(
-        finding
-        for finding in report.findings
-        if finding.control_id == "CFG-REF-INTEGRITY-001"
-        and finding.status in {AuditStatus.FAIL, AuditStatus.UNKNOWN}
-    )
-    engine_errors = tuple(
-        finding for finding in report.findings if finding.status is AuditStatus.ERROR
-    )
-    if complementary:
-        document.add_heading("Vérifications complémentaires", level=2)
-        for finding in complementary:
-            document.add_heading("Intégrité des références de configuration", level=3)
-            document.add_paragraph("Point audité :")
-            document.add_paragraph(_clean_client_text(finding.message))
-            document.add_paragraph("Résultat : À VÉRIFIER")
-    if engine_errors:
-        document.add_heading("Contrôles en erreur", level=2)
-        for finding in engine_errors:
-            document.add_heading(_clean_client_text(finding.display_name or finding.title), level=3)
-            document.add_paragraph(_clean_client_text(finding.message))
-            document.add_paragraph("Résultat : ERREUR — aucune conclusion de conformité")
 
     _add_risk_summary(document, risks)
     output = BytesIO()

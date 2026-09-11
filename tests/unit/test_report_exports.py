@@ -81,7 +81,6 @@ def _enriched_report() -> JsonAuditReport:
             mpls=False,
             utm_license=True,
         ),
-
         findings=(
             AuditFinding(
                 control_id="NET-WAN-MGMT-001",
@@ -118,8 +117,10 @@ def _enriched_report() -> JsonAuditReport:
 
 
 def test_docx_renders_v1_client_language_without_engine_fields() -> None:
-    finding = _enriched_report().findings[0].model_copy(
-        update={"remediation": "Retirer admin des namespaces concernés"}
+    finding = (
+        _enriched_report()
+        .findings[0]
+        .model_copy(update={"remediation": "Retirer admin des namespaces concernés"})
     )
     report = _enriched_report().model_copy(update={"findings": (finding,)})
     with ZipFile(BytesIO(render_docx(report))) as package:
@@ -161,7 +162,7 @@ def test_client_exports_use_v1_display_name_and_v1_v2_matrix() -> None:
 
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
-    assert "MFA des administrateurs" in document
+    assert "MFA pour les comptes admins et utilisateurs" in document
     assert "IAM-ADMIN-MFA-001" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
@@ -198,7 +199,7 @@ def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
 
-    assert "Le compte guest n'a pas été détecté dans la configuration analysée." in document
+    assert "Le compte guest n'a pas été détecté dans la configuration analysée." not in document
     forbidden = (
         "namespace",
         "parser",
@@ -220,7 +221,6 @@ def test_guest_client_wording_hides_internal_namespace_evidence() -> None:
         re.search(rf"\b{re.escape(term)}\b", document, flags=re.IGNORECASE) is None
         for term in forbidden
     )
-
 
 
 def test_docx_hides_not_applicable_findings_from_the_business_body() -> None:
@@ -253,9 +253,9 @@ def test_docx_hides_not_applicable_findings_from_the_business_body() -> None:
     with ZipFile(BytesIO(render_docx(report))) as package:
         document = package.read("word/document.xml").decode("utf-8")
 
-    assert "Protocoles d'administration sur interfaces WAN" in document
+    assert "Durcissement accès administration à votre Fortigate" in document
     assert "Utilisation du SD-WAN" in document
-    assert "Utilisation du filtrage Geo-IP" in document
+    assert "Utilisation de la GEO-IP" in document
     assert "Utilisation du VPN SSL" in document
     assert "NON APPLICABLE" in document
 
@@ -334,7 +334,6 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
     assert "@risk" in row[10]
     assert row[13] == "Non renseigné"
 
-
     for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
@@ -343,19 +342,23 @@ def test_xlsx_renders_context_and_all_enriched_finding_fields_as_safe_text() -> 
 
 
 def test_structured_evidence_item_stays_in_xlsx_not_client_docx() -> None:
-    finding = _enriched_report().findings[0].model_copy(
-        update={
-            "evidence": (),
-            "evidence_items": (
-                EvidenceItem(
-                    section="system interface",
-                    entry="wan1",
-                    directive="allowaccess",
-                    tokens=("https",),
-                    line=42,
+    finding = (
+        _enriched_report()
+        .findings[0]
+        .model_copy(
+            update={
+                "evidence": (),
+                "evidence_items": (
+                    EvidenceItem(
+                        section="system interface",
+                        entry="wan1",
+                        directive="allowaccess",
+                        tokens=("https",),
+                        line=42,
+                    ),
                 ),
-            ),
-        }
+            }
+        )
     )
     report = _enriched_report().model_copy(update={"findings": (finding,)})
 
@@ -451,8 +454,5 @@ def test_m5_json_xlsx_keep_finding_ids_but_docx_is_client_facing() -> None:
     assert "met en évidence une non-conformité nécessitant une action corrective" not in document
 
     workbook = load_workbook(BytesIO(render_xlsx(report)), read_only=True, data_only=True)
-    xlsx_ids = [
-        row[0]
-        for row in list(workbook["Contrôles"].iter_rows(values_only=True))[1:]
-    ]
+    xlsx_ids = [row[0] for row in list(workbook["Contrôles"].iter_rows(values_only=True))[1:]]
     assert xlsx_ids == json_ids
