@@ -155,7 +155,7 @@ _TOLERATED_CHILD_SECTIONS = {
     "system interface": frozenset({"secondaryip"}),
     "system admin": frozenset({"dashboard", "gui-dashboard"}),
 }
-_MUTATION_DIRECTIVES = {"append", "select", "unselect", "unset"}
+_MUTATION_DIRECTIVES = {"append", "select", "unselect", "unset", "rename"}
 _RESERVED_DIRECTIVES = _MUTATION_DIRECTIVES | {"config", "edit", "end", "next", "set"}
 _PROJECTED_SECTIONS = {
     "system zone",
@@ -296,7 +296,7 @@ _PROJECTED_KEYS = {
     },
     "system fortisandbox": {"sandbox-region"},
     "system fortiguard": {"fortiguard-anycast"},
-    "router static": {"dstaddr", "blackhole", "distance"},
+    "router static": {"status", "dstaddr", "blackhole", "distance"},
     "firewall schedule onetime": {"end"},
     "firewall schedule recurring": {"day", "start", "end"},
     "firewall schedule group": {"member"},
@@ -1590,8 +1590,13 @@ def _materialize_documented_defaults(
 
 
 class FortiGateParser:
+    _MAX_LINES = 100_000
+    _MAX_NESTING_DEPTH = 128
+
     def parse(self, raw: str) -> FortiGateConfiguration:
         raw = raw.removeprefix("\ufeff")
+        if len(raw.splitlines()) > self._MAX_LINES:
+            raise ValueError("configuration exceeds parser line limit")
         _reject_dangerous_characters(raw)
 
         config_headers = tuple(
@@ -1791,6 +1796,8 @@ class FortiGateParser:
                 frame.mark_ambiguous()
 
         for line_number, original_line in _logical_lines(raw):
+            if len(stack) > self._MAX_NESTING_DEPTH:
+                raise ValueError("configuration exceeds parser nesting limit")
             line = original_line.strip()
             if not line or line.startswith("#"):
                 continue

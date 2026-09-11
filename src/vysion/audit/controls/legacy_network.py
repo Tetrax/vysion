@@ -232,6 +232,7 @@ def check_legacy_rfc6890_blackhole(
         for route in configuration.static_routes
         if route.destination is not None
         and route.destination.name.casefold() in destinations
+        and route.status != "disable"
         and route.blackhole is True
         and route.distance == 254
     )

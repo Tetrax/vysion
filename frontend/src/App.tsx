@@ -28,6 +28,7 @@ type Presentation = {
   explanation_lines: string[]
   business_rows: PresentationRow[]
   v2_only_rows: PresentationRow[]
+  engine_error_rows?: PresentationRow[]
 }
 type AuditReport = {
   report_id: string
@@ -206,6 +207,7 @@ function App() {
     if (serialNumber) form.append('serial_number', serialNumber)
     if (licenseEndDate) form.append('utm_license_expiration', licenseEndDate)
     if (uptime) form.append('uptime', uptime)
+    form.append('schedule_reference_instant', new Date().toISOString())
     if (unmatchedRules) form.append('unmatched_rules', unmatchedRules)
     if (ha) form.append('ha_cabling_redundancy', ha)
     if (mpls) form.append('mpls_context', mpls)
@@ -279,7 +281,7 @@ function App() {
   const findings = report?.findings ?? []
   const presentation = report?.presentation
   const clientRows: PresentationRow[] = presentation
-    ? [...presentation.business_rows, ...presentation.v2_only_rows]
+    ? [...presentation.business_rows, ...presentation.v2_only_rows, ...(presentation.engine_error_rows ?? [])]
     : findings.map((finding): PresentationRow => ({
       business_key: finding.control_id,
       order: 0,
@@ -292,7 +294,7 @@ function App() {
       result: null,
       finding_ids: [finding.control_id],
     }))
-  const nonConform = clientRows.filter((row) => row.status === 'FAIL' || row.status === 'UNKNOWN')
+  const nonConform = clientRows.filter((row) => row.status === 'FAIL' || row.status === 'UNKNOWN' || row.status === 'ERROR')
   const sdwanMembers = preview?.sdwan_members ?? []
   const sdwanMemberNames = new Set(sdwanMembers.map((member) => member.name.toLocaleLowerCase()))
 
@@ -332,7 +334,7 @@ function App() {
             <label className="checkbox-item"><span>Nom du site</span><input aria-label="Site" type="text" value={site} onChange={(event) => setSite(event.target.value)} className="text-input" /></label>
             <label className="checkbox-item"><span>Numéro de série</span><input type="text" value={serialNumber} onChange={(event) => setSerialNumber(event.target.value)} className="text-input" /></label>
             <label className="checkbox-item"><span>Date de fin de licence</span><input type="date" value={licenseEndDate} onChange={(event) => setLicenseEndDate(event.target.value)} className="date-input" /></label>
-            <label className="checkbox-item"><span>System Uptime</span><input aria-label="Uptime" type="date" value={uptime} onChange={(event) => setUptime(event.target.value)} className="date-input" /></label>
+            <label className="checkbox-item"><span>System Uptime</span><input aria-label="Uptime" type="text" placeholder="42 days, 03:12:10" value={uptime} onChange={(event) => setUptime(event.target.value)} className="text-input" /></label>
           </div>
 
           <div className="button-group">
@@ -432,13 +434,14 @@ function App() {
           <div className="checks-table-wrapper"><table className="checks-table"><thead><tr><th>Contrôle</th><th className="checks-status-col">Statut</th></tr></thead><tbody>
             {nonConform.map((finding) => {
               const status = finding.status ?? 'UNKNOWN'
-              const statusLabel = status === 'FAIL' ? 'NON CONFORME' : 'À VÉRIFIER'
-              return <tr key={finding.business_key}><td className="checks-name">{finding.display_name}</td><td className="checks-status"><span className={`status-icon ${status.toLowerCase()}`} aria-label={statusLabel} title={statusLabel}>{status === 'FAIL' ? '✕' : '?'}</span></td></tr>
+              const statusLabel = status === 'FAIL' ? 'NON CONFORME' : status === 'ERROR' ? 'ERREUR' : 'À VÉRIFIER'
+              return <tr key={finding.business_key}><td className="checks-name">{finding.display_name}</td><td className="checks-status"><span className={`status-icon ${status.toLowerCase()}`} aria-label={statusLabel} title={statusLabel}>{status === 'FAIL' ? '✕' : status === 'ERROR' ? '!' : '?'}</span></td></tr>
             })}
           </tbody></table></div>
         </div> : <div className="reports-section"><h3>Contrôles</h3><div className="info-box">✅ Aucun contrôle non conforme détecté.</div></div>}
 
         <div className="reports-section"><h3>Download Reports</h3><div className="button-group report-downloads">
+          <a href={`/api/reports/${report.report_id}.json`} className="button primary">Download JSON Report</a>
           <a href={`/api/reports/${report.report_id}.xlsx`} className="button primary">Download Excel Report</a>
           <a href={`/api/reports/${report.report_id}.docx`} className="button primary">Download Word Report</a>
         </div></div>

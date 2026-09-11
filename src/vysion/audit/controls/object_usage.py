@@ -119,12 +119,22 @@ def _family_objects(
     return objects, incomplete, explicit_family
 
 
+_NON_REFERENCE_DIRECTIVES = frozenset({
+    "alias", "comment", "comments", "description", "email-to", "global-label",
+    "label", "name", "password", "sms-phone", "timezone", "uuid",
+})
+
+
 def _reference_names(configuration: FortiGateConfiguration) -> set[str]:
     names: set[str] = set()
 
     def collect_section(section: StructuralSection) -> None:
         for directive in section.directives:
-            if not directive.mutation and directive.certainty is EvidenceCertainty.CERTAIN:
+            if (
+                not directive.mutation
+                and directive.certainty is EvidenceCertainty.CERTAIN
+                and directive.name not in _NON_REFERENCE_DIRECTIVES
+            ):
                 names.update(token.casefold() for token in directive.tokens)
         for entry in section.entries:
             for directive in entry.directives:

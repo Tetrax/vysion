@@ -781,6 +781,9 @@ def render_docx(
         if finding.control_id == "CFG-REF-INTEGRITY-001"
         and finding.status in {AuditStatus.FAIL, AuditStatus.UNKNOWN}
     )
+    engine_errors = tuple(
+        finding for finding in report.findings if finding.status is AuditStatus.ERROR
+    )
     if complementary:
         document.add_heading("Vérifications complémentaires", level=2)
         for finding in complementary:
@@ -788,6 +791,12 @@ def render_docx(
             document.add_paragraph("Point audité :")
             document.add_paragraph(_clean_client_text(finding.message))
             document.add_paragraph("Résultat : À VÉRIFIER")
+    if engine_errors:
+        document.add_heading("Contrôles en erreur", level=2)
+        for finding in engine_errors:
+            document.add_heading(_clean_client_text(finding.display_name or finding.title), level=3)
+            document.add_paragraph(_clean_client_text(finding.message))
+            document.add_paragraph("Résultat : ERREUR — aucune conclusion de conformité")
 
     _add_risk_summary(document, risks)
     output = BytesIO()

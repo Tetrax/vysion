@@ -42,6 +42,11 @@ _VPN_METADATA = {
 }
 _PHASE1_SECTION = "vpn ipsec phase1-interface"
 _PHASE2_SECTION = "vpn ipsec phase2-interface"
+# FortiOS 7.2 and 7.4 expose a discrete set of DH groups.  The security
+# policy below is intentionally stricter than the syntax set: groups 1, 2 and
+# 5 are valid FortiOS values but are rejected by this control as weak.
+_FORTIOS_DH_GROUPS = frozenset({1, 2, 5, *range(14, 22), *range(27, 33)})
+_APPROVED_DH_GROUPS = frozenset(range(14, 22)) | frozenset(range(27, 33))
 
 
 def _risk(summary: str, impact: str, likelihood: str, treatment: str) -> RiskAssessment:
@@ -614,17 +619,52 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
     phase1_items = _phase1_items(configuration)
     phase2_items = _phase2_items(configuration)
     failures: list[tuple[str, IpsecPhase1 | IpsecPhase2]] = []
+    invalid: list[tuple[str, IpsecPhase1 | IpsecPhase2]] = []
     unknown: list[tuple[str, IpsecPhase1 | IpsecPhase2]] = []
     for item in phase1_items:
         if "dhgrp" not in item.parsed_keys:
             unknown.append((_PHASE1_SECTION, item))
         elif any(group < 14 for group in item.dh_groups):
             failures.append((_PHASE1_SECTION, item))
+        elif any(group not in _FORTIOS_DH_GROUPS for group in item.dh_groups):
+            invalid.append((_PHASE1_SECTION, item))
+        elif any(group not in _APPROVED_DH_GROUPS for group in item.dh_groups):
+            failures.append((_PHASE1_SECTION, item))
     for item in phase2_items:
         if "dhgrp" in item.parsed_keys and any(group < 14 for group in item.dh_groups):
             failures.append((_PHASE2_SECTION, item))
+        elif "dhgrp" in item.parsed_keys and any(
+            group not in _FORTIOS_DH_GROUPS for group in item.dh_groups
+        ):
+            invalid.append((_PHASE2_SECTION, item))
+        elif "dhgrp" in item.parsed_keys and any(
+            group not in _APPROVED_DH_GROUPS for group in item.dh_groups
+        ):
+            failures.append((_PHASE2_SECTION, item))
         elif "dhgrp" not in item.parsed_keys or item.phase1_reference is None:
             unknown.append((_PHASE2_SECTION, item))
+
+    if invalid:
+        return _finding(
+            control_id=control_id,
+            title=title,
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=tuple(
+                f"{item.name}: groupe DH non supporté par FortiOS 7.2/7.4 "
+                f"({', '.join(map(str, item.dh_groups))})"
+                for _, item in invalid
+            ),
+            evidence_items=tuple(
+                _group_evidence(configuration, section, item, EvidenceCertainty.AMBIGUOUS)
+                for section, item in invalid
+            ),
+            affected_objects=_affected((item.name for _, item in invalid), "ipsec-phase"),
+            message="Au moins un groupe DH n'appartient pas aux valeurs FortiOS supportées.",
+            risk=_dh_risk(),
+            recommendation="Utiliser un groupe DH explicitement supporté par FortiOS 7.2/7.4.",
+            remediation="Corriger dhgrp puis relancer l'audit.",
+        )
 
     if failures:
         return _finding(
@@ -640,11 +680,11 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
                 _group_evidence(configuration, section, item) for section, item in failures
             ),
             affected_objects=_affected((item.name for _, item in failures), "ipsec-phase"),
-            message="Au moins un groupe DH explicite est inférieur à 14.",
+            message="Au moins un groupe DH explicite est inférieur au niveau approuvé.",
             risk=_dh_risk(),
             recommendation=(
-                "Retirer les groupes DH faibles et conserver uniquement "
-                "des groupes >= 14."
+                "Retirer les groupes DH faibles et conserver uniquement les groupes approuvés "
+                "par la politique FortiOS 7.2/7.4."
             ),
             remediation="Modifier dhgrp sur les phases concernées puis relancer l'audit.",
         )
@@ -692,8 +732,7 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
         ),
         affected_objects=_affected((item.name for _, item in safe), "ipsec-phase"),
         message=(
-            "Tous les groupes DH IPsec applicables sont explicitement "
-            "supérieurs ou égaux à 14."
+            "Tous les groupes DH IPsec applicables sont explicitement supportés et approuvés."
         ),
         risk=_risk(
             "Les groupes DH applicables respectent le seuil minimal.",
@@ -701,7 +740,7 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
             "faible",
             "Maintenir le seuil DH14 et surveiller les changements.",
         ),
-        recommendation="Conserver uniquement des groupes DH >= 14.",
+        recommendation="Conserver uniquement les groupes DH approuvés par la politique.",
         remediation="Aucune remédiation immédiate.",
     )
 

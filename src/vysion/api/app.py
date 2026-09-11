@@ -1,3 +1,4 @@
+import hmac
 import json
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta
@@ -541,6 +542,27 @@ def create_app(
         )
 
     app = FastAPI(title="Vysion", version=VYSION_VERSION, docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def optional_api_auth(request: Request, call_next):
+        configured_token = resolved_settings.api_token
+        if (
+            configured_token
+            and request.url.path.startswith("/api/")
+            and request.url.path != "/api/health"
+        ):
+            authorization = request.headers.get("authorization", "")
+            scheme, _, supplied = authorization.partition(" ")
+            if scheme.casefold() != "bearer" or not supplied or not hmac.compare_digest(
+                supplied.strip(), configured_token
+            ):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "authentication required"},
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+        return await call_next(request)
+
     if managed_http is not None:
         client = managed_http
 
@@ -687,6 +709,19 @@ def create_app(
             headers={"Cache-Control": "no-store, private"},
         )
 
+
+    @app.get("/api/reports/{report_id}.json")
+    async def get_json_report(report_id: UUID) -> JSONResponse:
+        report = store.get(report_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="report not found or expired")
+        return JSONResponse(
+            content=report.model_dump(mode="json"),
+            headers={
+                "Cache-Control": "no-store, private",
+                "Content-Disposition": f'attachment; filename="vysion-{report_id}.json"',
+            },
+        )
 
     @app.get("/api/reports/{report_id}.docx")
     async def get_docx_report(report_id: UUID) -> Response:

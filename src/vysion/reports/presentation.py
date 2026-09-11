@@ -58,6 +58,7 @@ class AuditPresentation(BaseModel):
     explanation_lines: tuple[str, ...] = ()
     business_rows: tuple[PresentationRow, ...] = ()
     v2_only_rows: tuple[PresentationRow, ...] = ()
+    engine_error_rows: tuple[PresentationRow, ...] = ()
 
 
 @lru_cache(maxsize=1)
@@ -251,6 +252,23 @@ def build_presentation(
         for item in _legacy_rows()
     )
     v2_only = tuple(_row_for_v2_only(item, findings_by_id) for item in _v2_only_rows())
+    engine_errors = tuple(
+        PresentationRow(
+            business_key=f"ENGINE-{finding.control_id}",
+            order=0,
+            display_name=finding.display_name or finding.title,
+            relation="engine_error",
+            classification="ENGINE_ERROR",
+            presentation_kind="engine_error",
+            v2_control_ids=(finding.control_id,),
+            status=finding.status,
+            applicability=finding.applicability,
+            result=finding.message,
+            finding_ids=(finding.control_id,),
+        )
+        for finding in presented
+        if finding.status is AuditStatus.ERROR
+    )
     settings = _catalog()["presentation"]
     return AuditPresentation(
         business_control_count=settings["business_control_count"],
@@ -264,4 +282,5 @@ def build_presentation(
         explanation_lines=tuple(settings["explanation_lines"]),
         business_rows=rows,
         v2_only_rows=v2_only,
+        engine_error_rows=engine_errors,
     )

@@ -16,7 +16,7 @@ Vysion v2 est le nouveau socle interne SNS Security d'audit de configurations Fo
 - FastAPI accessible uniquement sur `127.0.0.1` dans le conteneur.
 
 Ce socle ne porte volontairement pas toutes les règles legacy. Le rapport JSON typé est la source
-canonique persistée sous UUID/TTL ; les fichiers DOCX et XLSX sont générés à la demande depuis ce
+canonique persistée sous UUID/TTL et téléchargeable via `/api/reports/{uuid}.json` ; les fichiers DOCX et XLSX sont générés à la demande depuis ce
 même modèle, sans template ni asset legacy et sans copie persistante supplémentaire.
 
 Une section nécessaire absente ou vide produit `UNKNOWN`, jamais un `PASS`. Une interface WAN sans preuve `allowaccess`, un administrateur sans directive `two-factor` ou une mutation non interprétée portant sur une preuve auditée produit également `UNKNOWN`. Toute preuve antérieure est invalidée par une directive ultérieure incomplète ou une mutation non interprétée de la même clé. Une non-conformité explicitement prouvée reste `FAIL`, même si d'autres entrées sont indéterminées. Une configuration structurellement tronquée, un bloc audité top-level dupliqué, un nom de section ressemblant à une section auditée, une section auditée imbriquée, une directive placée hors `edit` dans une section à entrées, une directive probante dupliquée ou une valeur probante lexicalement ambiguë est rejetée.
@@ -102,11 +102,12 @@ Ne jamais versionner :
 - templates ou assets hérités ;
 - données client réelles.
 
-Les réponses API contenant un rapport imposent `Cache-Control: no-store, private`.
+Les réponses API contenant un rapport imposent `Cache-Control: no-store, private`. Une protection Bearer optionnelle peut être activée avec `VYSION_API_TOKEN` (16 caractères minimum) ; `/api/health` reste public pour la supervision.
 
-Les exports historiques sont disponibles tant que le rapport stocké n'a pas expiré :
+Les exports sont disponibles tant que le rapport stocké n'a pas expiré :
 
 ```text
+/api/reports/{uuid}.json
 /api/reports/{uuid}.docx
 /api/reports/{uuid}.xlsx
 ```

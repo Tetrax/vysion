@@ -112,6 +112,7 @@ def project_legacy_network(document: StructuralDocument) -> LegacyNetworkProject
         elif section.name == "router static":
             for entry in section.entries:
                 directives, invalidated = _directives(entry)
+                status = _single(directives, "status")
                 destination = _single(directives, "dstaddr")
                 blackhole = _single(directives, "blackhole")
                 distance_value = _single(directives, "distance")
@@ -133,6 +134,7 @@ def project_legacy_network(document: StructuralDocument) -> LegacyNetworkProject
                     StaticRoute(
                         route_id=entry.name,
                         destination=destination_reference,
+                        status=status.casefold() if status is not None else None,
                         blackhole=(
                             blackhole.casefold() == "enable"
                             if blackhole is not None

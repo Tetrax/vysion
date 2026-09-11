@@ -671,6 +671,7 @@ class StaticRoute(BaseModel):
 
     route_id: str
     destination: ObjectReference | None = None
+    status: str | None = None
     blackhole: bool | None = None
     distance: int | None = Field(default=None, ge=0, le=255)
     parsed_keys: frozenset[str] = Field(default_factory=frozenset)

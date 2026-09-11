@@ -4,18 +4,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VYSION_REVISION: ${VYSION_REVISION:-unknown}
     restart: unless-stopped
     networks:
       subnet-docker:
         ipv4_address: ${VYSION_IPV4_ADDRESS:-172.30.250.11}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:8080:8443"
+      - "${BIND_ADDRESS:-127.0.0.1}:443:8443"
     environment:
       VYSION_REPORT_DIRECTORY: /app/data/reports
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
       VYSION_MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
       VYSION_FORTIGUARD_STATUS_URL: ${FORTIGUARD_STATUS_URL:-https://www.fortiguard.com/}
       VYSION_TLS_SERVER_NAME: ${TLS_SERVER_NAME:-vysion.internal.example}
+      VYSION_API_TOKEN: ${VYSION_API_TOKEN:-}
     volumes:
       - vysion-reports:/app/data/reports
       - type: bind

@@ -518,6 +518,20 @@ def check_admin_https_port(configuration: FortiGateConfiguration) -> AuditFindin
 
     port = int(value[0])
     evidence_item = evidence_for_directive(configuration.document, section_name, "admin-sport")
+    if not 1 <= port <= 65535:
+        return _finding(
+            control_id="SYS-ADMIN-HTTPS-PORT-001",
+            title="Port HTTPS d’administration personnalisé",
+            status=AuditStatus.UNKNOWN,
+            evidence=(f"admin-sport hors plage FortiOS: {port}",),
+            evidence_items=(
+                evidence_item.model_copy(update={"certainty": EvidenceCertainty.AMBIGUOUS}),
+            ),
+            message="La valeur admin-sport est hors de la plage FortiOS 1-65535.",
+            recommendation="Fournir un port HTTPS compris entre 1 et 65535.",
+            remediation="Corriger admin-sport puis relancer l’audit.",
+            risk_summary="Le port d’administration fourni est invalide.",
+        )
     if port == 443:
         return _finding(
             control_id="SYS-ADMIN-HTTPS-PORT-001",

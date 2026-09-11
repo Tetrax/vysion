@@ -17,10 +17,25 @@ from vysion.audit.models import (
 Control = Callable[..., AuditFinding]
 
 
+def _stable_control_id(control: Control) -> str:
+    existing = getattr(control, "control_id", None)
+    if existing:
+        return str(existing)
+    short_name = getattr(control, "__name__", "unknown")
+    # Keep ad-hoc test/application callables readable and backward compatible;
+    # registered Vysion controls get a module-qualified stable identifier.
+    if not getattr(control, "__module__", "").startswith("vysion."):
+        return f"ENGINE-{short_name}"
+    module = getattr(control, "__module__", "unknown").rsplit(".", 1)[-1]
+    name = getattr(control, "__qualname__", short_name)
+    normalized_name = f"{module}-{name}".replace("<", "").replace(">", "").replace(".", "-")
+    normalized = "-".join(part for part in normalized_name.split() if part)
+    return f"ENGINE-{normalized.upper()}"
+
+
 def _control_error(control: Control, error: Exception) -> AuditFinding:
     control_name = getattr(control, "__qualname__", getattr(control, "__name__", "unknown"))
-    control_short_name = getattr(control, "__name__", "unknown")
-    control_id = getattr(control, "control_id", f"ENGINE-{control_short_name}")
+    control_id = _stable_control_id(control)
     error_type = type(error).__name__
     return AuditFinding(
         control_id=str(control_id),
@@ -60,6 +75,9 @@ def _control_error(control: Control, error: Exception) -> AuditFinding:
 class AuditEngine:
     def __init__(self, controls: Iterable[Control]) -> None:
         self._controls = tuple(controls)
+        for control in self._controls:
+            if not getattr(control, "control_id", None):
+                control.control_id = _stable_control_id(control)
 
     def run(
         self,

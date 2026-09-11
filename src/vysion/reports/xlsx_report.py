@@ -205,7 +205,11 @@ def render_xlsx(report: JsonAuditReport) -> bytes:
     matrix.append(matrix_headers)
     for cell in matrix[1]:
         cell.font = Font(bold=True)
-    for row in (*presentation.business_rows, *presentation.v2_only_rows):
+    for row in (
+        *presentation.business_rows,
+        *presentation.v2_only_rows,
+        *presentation.engine_error_rows,
+    ):
         targets = ", ".join(row.v2_control_ids) or (row.v2_projection or "Aucun finding moteur")
         matrix.append(
             (
