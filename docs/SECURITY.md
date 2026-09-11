@@ -39,7 +39,6 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 
 ## Limites connues du socle
 
-- authentification Bearer applicative optionnelle via `VYSION_API_TOKEN` (au moins 16 caractères) ; lorsqu'elle est définie, toutes les routes API sauf `/api/health` exigent ce jeton, en complément de l'allowlist IP externe ;
 - parser FortiGate structurel alimentant les contrôles enregistrés du socle et la corrélation PSIRT ;
 - parser fail-closed sur les preuves auditées : section/preuve absente, interface WAN non identifiable, `allowaccess`/MFA indéterminable ou mutation non interprétée d'une clé auditée → `UNKNOWN`, jamais `PASS` ; une preuve antérieure est invalidée par toute directive ultérieure incomplète ou mutation non interprétée de la même clé ; une non-conformité explicitement prouvée reste `FAIL` ;
 - sections réellement non auditées, clés supplémentaires et sous-sections inconnues traversées puis ignorées sans devenir des preuves ; section auditée imbriquée ou nom de section ressemblant à une section auditée → rejet ;

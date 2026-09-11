@@ -102,7 +102,7 @@ Ne jamais versionner :
 - templates ou assets hérités ;
 - données client réelles.
 
-Les réponses API contenant un rapport imposent `Cache-Control: no-store, private`. Une protection Bearer optionnelle peut être activée avec `VYSION_API_TOKEN` (16 caractères minimum) ; `/api/health` reste public pour la supervision.
+Les réponses API contenant un rapport imposent `Cache-Control: no-store, private`. L'accès est réservé au réseau interne via le reverse proxy et le filtrage réseau.
 
 Les exports sont disponibles tant que le rapport stocké n'a pas expiré :
 
