@@ -1,0 +1,22 @@
+# Never ship client data or local state into the image
+backend/reports/
+**/*.conf
+**/token_cache.bin
+
+# Local environments and caches
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/dist/
+**/.vite/
+
+# Not needed at runtime
+**/.git/
+**/.idea/
+**/.vscode/
+start.bat
+docs/
+**/*.md
+backend/fix_imports.py

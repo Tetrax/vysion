@@ -1,0 +1,51 @@
+# Development with live reload, for parity with the deployed image.
+#
+#   docker compose -f docker-compose.dev.yml up
+#
+# Source is bind-mounted, so editing in PyCharm on the host reloads the running
+# container — no rebuild. The backend reloads through uvicorn --reload and the
+# frontend through the Vite dev server.
+#
+# This is optional. Running the backend and frontend directly on the host, the
+# way you do today, still works unchanged; use this when you want to be sure
+# something behaves the same way it will in production.
+
+services:
+  backend:
+    build:
+      context: ./modern_audit_app
+      target: runtime
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 8000
+      --reload --reload-dir /opt/vysion/app
+    # root in dev only, so bind-mounted files are writable regardless of the
+    # host's uid mapping. The deployed image runs as an unprivileged user.
+    user: root
+    ports:
+      - "8000:8000"
+    environment:
+      # Empty so the API does not try to serve a stale build; Vite serves the UI.
+      FRONTEND_DIR: "/nonexistent"
+      REPORTS_DIR: "/var/lib/vysion/reports"
+      CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173"
+    volumes:
+      - ./modern_audit_app/backend/app:/opt/vysion/app
+      - ./modern_audit_app/backend/Références:/opt/vysion/Références
+      - ./modern_audit_app/backend/reports:/var/lib/vysion/reports
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "5173:5173"
+    environment:
+      # Inside compose the backend is reachable by service name, not localhost.
+      VITE_PROXY_TARGET: "http://backend:8000"
+    volumes:
+      - ./modern_audit_app/frontend:/app
+      # Anonymous volume so the container's node_modules does not collide with
+      # a Windows-built node_modules on the host.
+      - /app/node_modules
+    depends_on:
+      - backend

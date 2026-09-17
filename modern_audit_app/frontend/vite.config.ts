@@ -10,7 +10,10 @@ export default defineConfig({
 
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        // Defaults to a backend running on the host, which is the normal local
+        // setup. docker-compose.dev.yml overrides it with the service name,
+        // since inside a container 127.0.0.1 is the container itself.
+        target: process.env.VITE_PROXY_TARGET || "http://127.0.0.1:8000",
         changeOrigin: true,
       },
     },

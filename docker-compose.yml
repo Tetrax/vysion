@@ -1,0 +1,30 @@
+# Deployment. One container serving the API and the UI on port 8000.
+#
+#   docker compose up -d --build
+#
+# Reports are written to a named volume so they survive rebuilds and restarts.
+# They are client deliverables: back this volume up, and do not expose this
+# service outside the internal network.
+
+services:
+  vysion:
+    build:
+      context: ./modern_audit_app
+    image: vysion:latest
+    container_name: vysion
+    restart: unless-stopped
+    ports:
+      - "${VYSION_PORT:-8000}:8000"
+    environment:
+      # Same-origin in this setup, so usually left empty. Set it only if the UI
+      # is served from a different host than the API.
+      CORS_ORIGINS: "${CORS_ORIGINS:-}"
+    volumes:
+      - vysion-reports:/var/lib/vysion/reports
+    # The audit reaches fortiguard.com to check firmware CVEs. Without egress
+    # that check cannot run; it now reports "vérification impossible" rather
+    # than silently passing, but the result is less useful. Allow outbound
+    # HTTPS to fortiguard.com if you can.
+
+volumes:
+  vysion-reports:

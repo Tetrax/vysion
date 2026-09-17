@@ -47,9 +47,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create reports directory
-REPORTS_DIR = Path("reports")
-REPORTS_DIR.mkdir(exist_ok=True)
+# Generated reports. Relative by default (next to the working directory); the
+# container sets REPORTS_DIR to a path backed by a volume so reports survive
+# a container restart.
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "reports"))
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @app.get("/health")
@@ -311,6 +313,26 @@ async def download_report(filename: str):
         path=str(file_path),
         filename=filename,
         media_type=media_type,
+    )
+
+
+# Serve the compiled frontend, when it is present.
+#
+# The Docker image builds the Vite bundle and copies it here, so one container
+# serves both the API and the UI and the browser talks to a single origin. In
+# local development this directory does not exist and the block is skipped —
+# the frontend runs from the Vite dev server, which proxies /api to this app.
+#
+# This mount must stay last: it matches every path, so any route declared after
+# it would be shadowed.
+FRONTEND_DIR = Path(os.getenv("FRONTEND_DIR", "static"))
+if FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+    logger.info(f"Serving frontend from {FRONTEND_DIR.resolve()}")
+else:
+    logger.info(
+        f"No frontend build at {FRONTEND_DIR} - running API only. "
+        f"Start the Vite dev server for the UI."
     )
 
 
