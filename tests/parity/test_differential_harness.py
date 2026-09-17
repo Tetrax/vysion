@@ -5,14 +5,7 @@ ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools.parity.differential import DifferentialCase, DifferentialHarness  # noqa: E402
-from tools.parity.legacy_oracle import LegacyOracle  # noqa: E402
 
-ORACLE = LegacyOracle(
-    python=Path(".legacy-venv/bin/python"),
-    source=Path(
-        "/home/tetrax/workspace/vysion/audit-fgt-vysion/backend/app/audit/legacy_functions.py"
-    ),
-)
 BACKUP_HEADER = """\
 #config-version=FGT60F-7.2.9-FW-build1-1:opmode=0
 #buildno=1
@@ -21,7 +14,7 @@ BACKUP_HEADER = """\
 """
 
 
-def test_differential_harness_reports_matching_guest_behavior() -> None:
+def test_differential_harness_reports_matching_guest_behavior(legacy_oracle) -> None:
     case = DifferentialCase(
         case_id="guest-present",
         legacy_callable="verifier_compte_guest",
@@ -32,7 +25,7 @@ def test_differential_harness_reports_matching_guest_behavior() -> None:
         ),
     )
 
-    result = DifferentialHarness(ORACLE).run_case(case)
+    result = DifferentialHarness(legacy_oracle).run_case(case)
 
     assert result.case_id == "guest-present"
     assert result.legacy_status == "FAIL"
@@ -41,7 +34,7 @@ def test_differential_harness_reports_matching_guest_behavior() -> None:
     assert result.match is True
 
 
-def test_guest_absence_matches_v1_on_complete_user_local_namespace() -> None:
+def test_guest_absence_matches_v1_on_complete_user_local_namespace(legacy_oracle) -> None:
     case = DifferentialCase(
         case_id="guest-absent",
         legacy_callable="verifier_compte_guest",
@@ -52,14 +45,14 @@ def test_guest_absence_matches_v1_on_complete_user_local_namespace() -> None:
         ),
     )
 
-    result = DifferentialHarness(ORACLE).run_case(case)
+    result = DifferentialHarness(legacy_oracle).run_case(case)
 
     assert result.legacy_status == "PASS"
     assert result.v2_status == "PASS"
     assert result.match is True
 
 
-def test_differential_harness_keeps_status_divergence_visible() -> None:
+def test_differential_harness_keeps_status_divergence_visible(legacy_oracle) -> None:
     case = DifferentialCase(
         case_id="ssl-vpn-absent",
         legacy_callable="verifier_vpn_ssl_utilisation",
@@ -72,7 +65,7 @@ def test_differential_harness_keeps_status_divergence_visible() -> None:
         accepted_transitions=("PASS->NOT_APPLICABLE",),
     )
 
-    result = DifferentialHarness(ORACLE).run_case(case)
+    result = DifferentialHarness(legacy_oracle).run_case(case)
 
     assert result.legacy_status == "PASS"
     assert result.v2_status == "NOT_APPLICABLE"
@@ -81,7 +74,7 @@ def test_differential_harness_keeps_status_divergence_visible() -> None:
     assert result.classification == "SEMANTIC_EQUIVALENT"
 
 
-def test_differential_harness_summarizes_a_batch_without_client_evidence() -> None:
+def test_differential_harness_summarizes_a_batch_without_client_evidence(legacy_oracle) -> None:
     cases = (
         DifferentialCase(
             case_id="guest-present",
@@ -104,7 +97,7 @@ def test_differential_harness_summarizes_a_batch_without_client_evidence() -> No
         ),
     )
 
-    report = DifferentialHarness(ORACLE).run_cases(cases, redact=True)
+    report = DifferentialHarness(legacy_oracle).run_cases(cases, redact=True)
 
     assert report["summary"] == {
         "total": 2,

@@ -109,11 +109,16 @@ def test_docx_inserts_a_client_logo_when_one_is_available() -> None:
     body = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
     assert "LOGO CLIENT si existe" not in body
-    assert len(document.inline_shapes) >= 5
+    # Client logo plus the three business diagrams of the mandatory body
+    # (ISDB, CTI, security profiles); the Cluster diagram left with the
+    # removed Cluster section.
+    assert len(document.inline_shapes) >= 4
 
 
 def test_docx_embeds_v1_business_diagrams_in_the_report_body() -> None:
     with ZipFile(BytesIO(render_docx(_real_report()))) as package:
         document_xml = package.read("word/document.xml").decode("utf-8")
 
-    assert document_xml.count("<pic:pic") >= 4
+    # The mandatory body carries three business diagrams (ISDB, CTI, security
+    # profiles); the Cluster diagram left with the removed Cluster section.
+    assert document_xml.count("<pic:pic") >= 3
