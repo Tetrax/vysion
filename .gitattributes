@@ -1,0 +1,23 @@
+# Normalise line endings. The tree arrived mixed (models.py was CRLF, everything
+# else LF). LF in the repo and on checkout keeps Windows editing and Linux
+# containers consistent — CRLF in a shell script or entrypoint silently breaks
+# inside the image.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF to run correctly.
+*.bat  text eol=crlf
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+
+# Never touch these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.xlsx binary
+*.docx binary
+*.exe  binary
+*.bin  binary
+
+# Reference workbook stored without a file extension.
+"R\u00e9f\u00e9rences/1222F100" binary
