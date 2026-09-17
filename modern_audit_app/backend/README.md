@@ -15,8 +15,10 @@ pytest
 ```
 
 ### Notes
-- The legacy audit logic is loaded from `../.venv/main_audit.py` via `LegacyAdapter`. Update `AUDIT_LEGACY_PATH` env var if you relocate it.
-- `/audit` expects a FortiGate `.conf` file and optional JSON options in the `options` form field.
+- The audit logic lives in `app/audit/legacy_functions.py` in this project. It is
+  no longer loaded from an external file, and `AUDIT_LEGACY_PATH` is not read.
+- `/api/audit` expects a FortiGate `.conf` file plus the audit options as
+  individual multipart form fields (see `app/main.py`).
 
 
 

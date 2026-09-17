@@ -22,7 +22,6 @@ A complete rewrite of the FortiGate configuration audit tool with a modern web-b
 - Python 3.10+
 - Node.js 18+
 - npm or yarn
-- Access to the legacy audit script at `../.venv/main_audit.py`
 
 ## Quick Start
 
@@ -209,7 +208,9 @@ The application performs comprehensive checks across multiple categories:
 
 ## Configuration
 
-The backend looks for the legacy audit script at `../.venv/main_audit.py` by default. You can override this by setting the `AUDIT_LEGACY_PATH` environment variable.
+See the repository root `README.md` for environment variables. The audit engine
+is `app/audit/legacy_functions.py` inside this project — there is no external
+script to point at, and `AUDIT_LEGACY_PATH` is no longer read.
 
 ## Development
 
@@ -230,15 +231,14 @@ npm run dev
 
 ### Running Tests
 
-```powershell
-cd backend
-pytest
-```
+There are no automated tests yet. Changes are verified by running an audit
+against a known config and inspecting the generated reports.
 
 ## Troubleshooting
 
-### Legacy Script Not Found
-Ensure the legacy audit script exists at `../.venv/main_audit.py` relative to the backend directory, or set `AUDIT_LEGACY_PATH` environment variable.
+### Reference File Not Found
+Report generation needs the files in `backend/Références/` (logos, `generique.docx`,
+`fortigate-model-eol.xlsx`). See `backend/Références/README.md` for the list.
 
 ### Port Already in Use
 Change the port in `uvicorn` command or frontend `vite.config.ts`.

@@ -1,3 +1,8 @@
+> **Historical.** This describes the original Tkinter desktop application, now
+> archived at `legacy/`. It is kept for the background it gives on what the tool
+> checks and why. For the web application that is actually deployed, see the
+> README at the repository root.
+
 ## Project Scope
 
 ### Overview
