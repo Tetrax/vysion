@@ -21,7 +21,9 @@ def test_compose_defines_one_service_one_volume_and_one_https_port() -> None:
 
     assert list(compose["services"]) == ["vysion"]
     service = compose["services"]["vysion"]
-    assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:443:8443"]
+    # Host port 8080 is the operational target: the host reverse proxy owns :443
+    # and forwards to 127.0.0.1:8080, which publishes the container HTTPS edge.
+    assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:8080:8443"]
     assert service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]
     assert service["security_opt"] == ["no-new-privileges:true"]

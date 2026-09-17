@@ -4,7 +4,7 @@
 
 - seul Nginx écoute sur le port conteneur `8443` ;
 - FastAPI écoute sur `127.0.0.1:8000` ;
-- le port hôte est lié à `${BIND_ADDRESS}:443` ;
+- le port hôte est lié à `${BIND_ADDRESS}:8080` ;
 - l'accès reste limité par le firewall externe du fournisseur VPS et la source réseau configurée.
 
 ## Défense en profondeur du conteneur
