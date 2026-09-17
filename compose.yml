@@ -1,6 +1,7 @@
 services:
   vysion:
-    image: vysion:${IMAGE_TAG:-local}
+    image: ghcr.io/tetrax/vysion:${IMAGE_TAG:-latest}
+    pull_policy: always
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +12,7 @@ services:
       subnet-docker:
         ipv4_address: ${VYSION_IPV4_ADDRESS:-172.30.250.11}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:443:8443"
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8443"
     environment:
       VYSION_REPORT_DIRECTORY: /app/data/reports
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
