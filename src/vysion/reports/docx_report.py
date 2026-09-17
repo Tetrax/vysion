@@ -281,6 +281,10 @@ def _result_explanation(finding: AuditFinding) -> str:
             "de synchronisation."
         )
     if finding.status is AuditStatus.NOT_APPLICABLE:
+        if finding.control_id == "VPN-SSL-001":
+            # V1-confirmed wording: the engine established that SSL-VPN is not
+            # used, and the generic N/A line would hide that result.
+            return "Le VPN SSL n'est pas utilisé."
         return "Ce point n'est pas applicable au périmètre analysé."
     return client_result_for(finding)
 
