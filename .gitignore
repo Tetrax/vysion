@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------
+# Client data — NEVER commit. Contains real audit results.
+# ---------------------------------------------------------------
+# Generated audit reports (hostnames + findings of real clients)
+modern_audit_app/backend/reports/*
+!modern_audit_app/backend/reports/.gitkeep
+
+# FortiGate configuration backups dropped anywhere in the tree
+*.conf
+!**/nginx/*.conf
+
+# ---------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------
+.env
+.env.*
+!.env.example
+token_cache.bin
+*.token
+
+# ---------------------------------------------------------------
+# Virtualenvs (the root .venv is a Windows venv that also contains
+# the legacy app — the app itself is tracked under legacy/)
+# ---------------------------------------------------------------
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------
+# Node / frontend build
+# ---------------------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# ---------------------------------------------------------------
+# Build artifacts / binaries
+# ---------------------------------------------------------------
+*.exe
+build/
+*.spec.bak
+
+# ---------------------------------------------------------------
+# IDE / OS
+# ---------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

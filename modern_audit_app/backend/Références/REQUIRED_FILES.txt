@@ -1,0 +1,26 @@
+REQUIRED FILES FOR REPORT GENERATION
+=====================================
+
+Place the following files in this directory (backend/Références/):
+
+IMAGES (PNG format):
+- sns-security-logo1.png
+- sns-security-logo-actions.png
+- sns-security-logo-account.png
+- ISDB.png
+- CTI.png
+- cluster.png
+- Security_profiles.png
+
+DOCUMENTS (DOCX format):
+- generique.docx
+
+TOTAL: 8 files required
+
+The application will create this directory automatically, but you must provide these files
+from your original legacy application for report generation to work.
+
+
+
+
+
