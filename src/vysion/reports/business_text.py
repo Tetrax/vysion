@@ -760,6 +760,14 @@ def _detected_values(finding: AuditFinding) -> str:
     return "Données détectées : " + " ; ".join(dict.fromkeys(relevant[:3])) + "."
 
 
+def _with_detected_values(message: str, finding: AuditFinding) -> str:
+    detected = _detected_values(finding)
+    if detected and detected.casefold() not in message.casefold():
+        separator = "" if message.endswith((".", "!", "?")) else "."
+        return f"{message}{separator} {detected}"
+    return message or "Le résultat détaillé n'est pas renseigné."
+
+
 def client_result_for(finding: AuditFinding) -> str:
     """Render a useful client result from the engine message and live evidence."""
 
@@ -773,9 +781,29 @@ def client_result_for(finding: AuditFinding) -> str:
             "configuration analysée."
         )
 
-    message = _clean_observation(finding.message)
-    detected = _detected_values(finding)
-    if detected and detected.casefold() not in message.casefold():
-        separator = "" if message.endswith((".", "!", "?")) else "."
-        return f"{message}{separator} {detected}"
-    return message or "Le résultat détaillé n'est pas renseigné."
+    # V1-confirmed wordings (verified by executing the frozen legacy oracle).
+    # The Geo-IP engine evidence is internal ("aucune policy Geo-IP"), so the
+    # V1 result stands alone; the UTM rules are surfaced by the generic
+    # detected-values suffix.
+    if finding.control_id == "NET-GEO-IP-USAGE-001":
+        if finding.status is AuditStatus.FAIL:
+            return "Aucune utilisation de GEO-IP détectée dans les règles de pare-feu."
+        if finding.status is AuditStatus.PASS:
+            return (
+                "GEO-IP est utilisé dans les règles de pare-feu. "
+                "Il peut être pertinent d'actualiser le filtrage GEO-IP."
+            )
+
+    if finding.control_id == "FW-UTM-PROFILE-BINDING-001":
+        if finding.status is AuditStatus.FAIL:
+            return _with_detected_values(
+                "Des règles avec logs en UTM n'ont pas de profil de sécurité activé.",
+                finding,
+            )
+        if finding.status is AuditStatus.PASS:
+            return _with_detected_values(
+                "Les règles avec logs en UTM disposent de profils de sécurité activés.",
+                finding,
+            )
+
+    return _with_detected_values(_clean_observation(finding.message), finding)

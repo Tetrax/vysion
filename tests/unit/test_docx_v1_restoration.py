@@ -152,3 +152,10 @@ def test_docx_client_body_has_no_internal_architecture_vocabulary() -> None:
     for pattern in INTERNAL_VOCABULARY_PATTERNS:
         assert re.search(pattern, body, flags=re.IGNORECASE) is None, pattern
     assert "adresses, groupes d'adresses, VIP, groupes de VIP, Virtual Server, zones" in body
+
+
+def test_docx_vpn_ssl_na_uses_the_v1_client_wording() -> None:
+    document = Document(BytesIO(render_docx(_real_report())))
+    body = "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+    assert "Le VPN SSL n'est pas utilisé." in body
