@@ -1228,12 +1228,29 @@ def est_version_concernee_par_cve(version):
         if response.status_code != 200:
             print("Début du body:", response.text[:500])
             response.raise_for_status()
+    # Le second membre du tuple signifie "version concernee par au moins une CVE",
+    # et pilote le marquage non-conforme dans les rapports. En cas d'echec reseau
+    # on renvoie True : une verification impossible n'est pas une verification
+    # reussie, et un audit ne doit jamais declarer un firmware sain par defaut.
+    # Ce cas devient frequent en conteneur si l'acces a fortiguard.com est filtre.
     except requests.exceptions.Timeout as e:
         print("Timeout rencontré :", e)
-        return f"Version {version} : Timeout lors de la vérification des CVE (site lent ou filtrage)", False
+        return (
+            f"VERIFICATION CVE IMPOSSIBLE pour la version {version} : délai dépassé "
+            f"en contactant fortiguard.com (site lent ou filtrage réseau). "
+            f"Le statut CVE de cette version n'a PAS pu être établi et doit être "
+            f"vérifié manuellement : https://www.fortiguard.com/psirt",
+            True,
+        )
     except requests.exceptions.RequestException as e:
         print(f"Erreur lors de la récupération des données : {e}")
-        return f"Version {version} : Impossible de vérifier les CVE (erreur réseau)", False
+        return (
+            f"VERIFICATION CVE IMPOSSIBLE pour la version {version} : erreur réseau "
+            f"en contactant fortiguard.com. Le statut CVE de cette version n'a PAS "
+            f"pu être établi et doit être vérifié manuellement : "
+            f"https://www.fortiguard.com/psirt",
+            True,
+        )
 
     soup = BeautifulSoup(response.text, 'html.parser')
     cve_elements = soup.find_all("b", class_="cve")

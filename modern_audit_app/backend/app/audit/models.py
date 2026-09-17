@@ -8,7 +8,6 @@ class AuditOptions(BaseModel):
     ha_cabling_redundancy: bool = False
     wan_interfaces: Optional[List[str]] = None
     regle_no_match: int = 0
-    regle_no_match: int = 0
     client_name: str = ""
     site_name: str = ""
     serial_number: str = ""

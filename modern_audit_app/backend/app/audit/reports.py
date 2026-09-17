@@ -1,6 +1,7 @@
 """
 Report generation - wraps legacy Excel and Word report functions.
 """
+import shutil
 from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -185,11 +186,14 @@ def generate_excel_report(all_results: Dict[str, Any], output_dir: Path,
         system_uptime=system_uptime,
     )
 
-    # Move file to output directory if needed
+    # Move file to output directory if needed.
+    # shutil.move, not Path.rename: the legacy generator writes to the working
+    # directory, and when reports/ is a mounted volume the two live on different
+    # filesystems. rename() would fail there with EXDEV (cross-device link).
     excel_path = Path(filename)
-    if output_dir.exists() and excel_path.parent != output_dir:
+    if output_dir.exists() and excel_path.parent.resolve() != output_dir.resolve():
         new_path = output_dir / excel_path.name
-        excel_path.rename(new_path)
+        shutil.move(str(excel_path), str(new_path))
         return new_path
     return excel_path
 
@@ -315,11 +319,14 @@ def generate_word_report(all_results: Dict[str, Any], output_dir: Path,client_na
         serial_number=serial_number,
     )
 
-    # Move file to output directory if needed
+    # Move file to output directory if needed.
+    # shutil.move, not Path.rename: the legacy generator writes to the working
+    # directory, and when reports/ is a mounted volume the two live on different
+    # filesystems. rename() would fail there with EXDEV (cross-device link).
     word_path = Path(filename)
-    if output_dir.exists() and word_path.parent != output_dir:
+    if output_dir.exists() and word_path.parent.resolve() != output_dir.resolve():
         new_path = output_dir / word_path.name
-        word_path.rename(new_path)
+        shutil.move(str(word_path), str(new_path))
         return new_path
     return word_path
 

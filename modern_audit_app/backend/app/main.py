@@ -28,12 +28,22 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Modern FortiGate Audit API", version="1.0.0")
 
-# CORS
+# CORS. Origins are configured via the CORS_ORIGINS env var (comma separated).
+# In the Docker image the frontend is served by this same app, so requests are
+# same-origin and no entry is needed; the defaults cover the Vite dev server.
+CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -212,7 +222,7 @@ async def run_audit_endpoint(
             },
             {
                 "name": "Personnalisation port HTTPS",
-                "conform": all_results["http_https_conform"],
+                "conform": all_results["is_compliant_https"],
             },
             {
                 "name": 'Accès admin SNS (loopback + VIP)',
@@ -273,8 +283,20 @@ async def download_report(filename: str):
     """
     Download generated report file.
     """
-    file_path = REPORTS_DIR / filename
-    if not file_path.exists():
+    # Reject anything that is not a plain file name. Without this, an encoded
+    # path such as ..%2F..%2Fetc%2Fpasswd reaches this handler already decoded
+    # and would escape the reports directory.
+    if "/" in filename or "\\" in filename or filename in ("", ".", ".."):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    reports_root = REPORTS_DIR.resolve()
+    file_path = (reports_root / filename).resolve()
+
+    # Defence in depth: confirm the resolved path really is inside reports/.
+    if not file_path.is_relative_to(reports_root):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
     # Determine media type
