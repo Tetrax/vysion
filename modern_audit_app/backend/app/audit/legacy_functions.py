@@ -1256,6 +1256,39 @@ def est_version_concernee_par_cve(version):
     cve_elements = soup.find_all("b", class_="cve")
     cve_list = [cve.get_text(strip=True) for cve in cve_elements]
 
+    # Le selecteur <b class="cve"> casse des que fortiguard.com change son
+    # markup. Repli : on cherche les identifiants CVE directement dans la page.
+    if not cve_list:
+        cve_list = sorted(set(re.findall(r"CVE-\d{4}-\d{4,7}", response.text)))
+
+    # Point critique : une page peut repondre HTTP 200 sans etre la page PSIRT.
+    # fortiguard.com est derriere une protection anti-bot qui renvoie 200 avec
+    # un corps "Just a moment - verifying connection security". Sans ce controle,
+    # aucun CVE n'est trouve, aucune exception n'est levee, et la fonction conclut
+    # "version saine" -- un faux negatif silencieux sur un controle de securite.
+    # Zero CVE n'est une conclusion valable que si la page analysee est bien la
+    # page PSIRT.
+    page = response.text.lower()
+    challenge_markers = (
+        "just a moment",
+        "verifying connection security",
+        "checking your browser",
+        "cf-browser-verification",
+        "enable javascript and cookies",
+        "attention required",
+    )
+    page_is_unusable = any(m in page for m in challenge_markers) or "psirt" not in page
+
+    if not cve_list and page_is_unusable:
+        return (
+            f"VERIFICATION CVE IMPOSSIBLE pour la version {version} : fortiguard.com "
+            f"a répondu sans fournir la liste des vulnérabilités (protection anti-bot "
+            f"ou changement de format de la page). Le statut CVE de cette version n'a "
+            f"PAS pu être établi et doit être vérifié manuellement : "
+            f"https://www.fortiguard.com/psirt",
+            True,
+        )
+
     if len(cve_list) > 3:
         message = (
             f"Version {version} concernée par plus de 3 CVE 'high' et/ou 'critiques' connues.\n "
