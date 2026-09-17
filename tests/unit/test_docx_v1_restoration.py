@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -122,3 +123,32 @@ def test_docx_embeds_v1_business_diagrams_in_the_report_body() -> None:
     # The mandatory body carries three business diagrams (ISDB, CTI, security
     # profiles); the Cluster diagram left with the removed Cluster section.
     assert document_xml.count("<pic:pic") >= 3
+
+
+# Internal migration/architecture vocabulary that must never reach the client
+# document.  Patterns stay qualified (V1/V2 next to architecture words, or
+# explicit internal phrases) so a legitimate client value like an object name
+# containing "V2" is not flagged.
+INTERNAL_VOCABULARY_PATTERNS = (
+    r"périmètre\s+V2",
+    r"contrôle historique",
+    r"règle historique",
+    r"différence de couverture",
+    r"\bV1\s*/\s*V2\b",
+    r"\bV2-only\b",
+    r"\blegacy_v1\b",
+    r"\b(?:moteur|architecture|parité|baseline|gate)\s+V[12]\b",
+)
+
+
+def test_docx_client_body_has_no_internal_architecture_vocabulary() -> None:
+    document = Document(BytesIO(render_docx(_real_report())))
+    texts = [paragraph.text for paragraph in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            texts.extend(cell.text for cell in row.cells)
+    body = "\n".join(texts)
+
+    for pattern in INTERNAL_VOCABULARY_PATTERNS:
+        assert re.search(pattern, body, flags=re.IGNORECASE) is None, pattern
+    assert "adresses, groupes d'adresses, VIP, groupes de VIP, Virtual Server, zones" in body

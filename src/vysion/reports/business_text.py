@@ -504,11 +504,10 @@ _BUSINESS_TEXT: dict[str, BusinessText] = {
         "traitement inattendu des certificats."
     ),
     "CFG-UNUSED-SERVICE-001": BusinessText(
-        "Vérification d'objets sans référence. Sur le périmètre V2 de ce contrôle, sont "
-        "examinés les services et groupes de services. Le contrôle historique V1 élargissait "
-        "la recherche aux adresses, groupes d'adresses, VIP, Virtual Servers, zones, "
-        "utilisateurs et profils de sécurité ; cette différence de couverture est conservée "
-        "et signalée plutôt que de fabriquer une non-conformité.",
+        "Vérification que les objets de configuration (adresses, groupes d'adresses, "
+        "VIP, groupes de VIP, Virtual Server, zones, utilisateurs, groupes "
+        "d'utilisateurs, profils de sécurité, services et groupes de services) sont "
+        "référencés par au moins un usage.",
         risk_point="Objet sans référence",
         risk_description="Erreur de configuration et augmentation de la surface d'exposition.",
         likelihood="VRAISEMBLABLE",
