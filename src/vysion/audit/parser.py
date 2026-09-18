@@ -370,17 +370,35 @@ _PROJECTED_TOLERATED_NON_PROBATIVE_KEYS = {
     "firewall address": frozenset(
         {
             "allow-routing",
+            # Object values observed on real 7.2/7.4 backups.  None of them is
+            # consumed by a control: the probative keys (``type``, ``fqdn``)
+            # carry the audit semantics and the V1 legacy check only reads
+            # ``set type geography``.  Tolerating them keeps the entry - and
+            # the whole section through the certainty propagation - usable.
+            "associated-interface",
             "color",
             "comment",
+            "country",
             "dirty",
             "end-ip",
+            "macaddr",
             "start-ip",
             "sub-type",
             "subnet",
             "uuid",
         }
     ),
-    "firewall addrgrp": frozenset({"comment", "uuid"}),
+    "firewall addrgrp": frozenset(
+        {
+            # ``allow-routing``/``color`` are value keys, already tolerated on
+            # the sibling ``firewall address`` family; ``member`` stays the
+            # probative key.
+            "allow-routing",
+            "color",
+            "comment",
+            "uuid",
+        }
+    ),
     "system dns-database": frozenset({"authoritative", "domain", "ttl", "type"}),
     "log setting": frozenset(
         {
@@ -636,6 +654,9 @@ _FORTIOS_CANONICAL_KEY_FORMS = {
 }
 _CERTAIN_UNSET_KEYS = {
     "application list": frozenset({"options"}),
+    # Compatibility spelling kept in older exports; same fact as the modern
+    # ``application list`` name above.
+    "firewall application list": frozenset({"options"}),
     "cifs": frozenset({"options"}),
     "firewall service custom": frozenset(
         {"icmpcode", "icmptype", "tcp-portrange", "udp-portrange"}
