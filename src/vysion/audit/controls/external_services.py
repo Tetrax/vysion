@@ -529,7 +529,10 @@ def _ldaps_finding(
             ),
         ),
         recommendation="Configurer chaque connecteur en LDAPS avec un certificat CA approuvé.",
-        remediation="Définir `set secure ldaps` et `set ca-cert` puis relancer l'audit.",
+        remediation=(
+            "Configurer chaque connecteur en LDAPS avec un certificat CA approuvé, "
+            "puis relancer l'audit."
+        ),
         customer_approval=None,
     )
 
@@ -542,16 +545,16 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
                 configuration,
                 status=AuditStatus.PASS,
                 applicability=Applicability.NOT_APPLICABLE,
-                evidence=("Backup complet: namespace user ldap absent.",),
+                evidence=("Aucun connecteur LDAP dans la configuration.",),
                 evidence_items=(evidence_for_complete_backup(),),
                 affected_objects=(),
-                message="Aucun connecteur LDAP n'est configuré dans le backup complet.",
+                message="Aucun connecteur LDAP n'est configuré.",
             )
         return _ldaps_finding(
             configuration,
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=("Namespace user ldap absent.",),
+            evidence=("Aucun connecteur LDAP dans la configuration.",),
             evidence_items=(evidence_for_section(configuration.document, "user ldap"),),
             affected_objects=(),
             message="L'existence et la sécurité des connecteurs LDAP ne peuvent pas être établies.",
@@ -561,13 +564,15 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             configuration,
             status=AuditStatus.PASS,
             applicability=Applicability.NOT_APPLICABLE,
-            evidence=("Namespace user ldap explicitement vide.",),
+            evidence=("Aucun connecteur LDAP déclaré.",),
             evidence_items=(evidence_for_section(configuration.document, "user ldap"),),
             affected_objects=(),
             message="Aucun connecteur LDAP n'est configuré.",
         )
 
     weak: list[str] = []
+    insecure: list[str] = []
+    missing_ca: list[str] = []
     unknown: list[str] = (
         ["namespace user ldap"]
         if section.certainty is not EvidenceCertainty.CERTAIN
@@ -621,6 +626,7 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
         )
         if secure_value in {"disable", "none", "plain"}:
             weak.append(entry.name)
+            insecure.append(entry.name)
         elif (
             configuration.complete_backup
             and section.certainty is EvidenceCertainty.CERTAIN
@@ -631,6 +637,7 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             # In a complete FortiOS backup, absence of ca-cert is an explicit
             # configuration fact and must match the mandatory audit result.
             weak.append(entry.name)
+            missing_ca.append(entry.name)
         elif (
             entry.certainty is not EvidenceCertainty.CERTAIN
             or secure.certainty is not EvidenceCertainty.CERTAIN
@@ -645,14 +652,38 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             configuration,
             status=AuditStatus.FAIL,
             applicability=Applicability.APPLICABLE,
-            evidence=(
-                f"Connecteurs LDAP non conformes (LDAPS ou CA manquant): {', '.join(weak)}.",
+            evidence=tuple(
+                item
+                for item in (
+                    (
+                        f"Connecteurs LDAP sans chiffrement: {', '.join(insecure)}."
+                        if insecure
+                        else None
+                    ),
+                    (
+                        f"Connecteurs LDAPS sans certificat CA: {', '.join(missing_ca)}."
+                        if missing_ca
+                        else None
+                    ),
+                )
+                if item is not None
             ),
             evidence_items=tuple(items),
             affected_objects=tuple(
                 AffectedObject(object_type="ldap-connector", name=name) for name in weak
             ),
-            message="Au moins un connecteur LDAP est explicitement non sécurisé.",
+            message=(
+                "Au moins un connecteur LDAP est configuré sans chiffrement."
+                if insecure and not missing_ca
+                else (
+                    "Au moins un connecteur LDAP utilise LDAPS sans certificat CA."
+                    if missing_ca and not insecure
+                    else (
+                        "Des connecteurs LDAP sont configurés sans chiffrement ou "
+                        "utilisent LDAPS sans certificat CA."
+                    )
+                )
+            ),
         )
     if unknown:
         return _ldaps_finding(
@@ -664,7 +695,7 @@ def check_ldaps_connectors(configuration: FortiGateConfiguration) -> AuditFindin
             affected_objects=tuple(
                 AffectedObject(object_type="ldap-connector", name=name) for name in unknown
             ),
-            message="La sécurité de tous les connecteurs LDAP ne peut pas être prouvée.",
+            message="La sécurité de tous les connecteurs LDAP n'a pas pu être établie.",
         )
     return _ldaps_finding(
         configuration,

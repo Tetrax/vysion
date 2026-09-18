@@ -159,14 +159,17 @@ def _admin_unknown(
         directive="two-factor",
         entries=names,
         certainty=EvidenceCertainty.AMBIGUOUS,
-        message="La présence d'un MFA ne peut pas être prouvée pour tous les administrateurs.",
+        message="La présence d'un MFA n'a pas pu être établie pour tous les administrateurs.",
         risk=_risk(
             "L'état MFA des administrateurs ne peut pas être déterminé.",
             "Un compte administrateur pourrait rester sans second facteur.",
             "indéterminée",
-            "Obtenir une section system admin complète et chaque directive MFA.",
+            "Obtenir une section des administrateurs complète et chaque directive MFA.",
         ),
-        recommendation="Fournir two-factor et peer-auth pour chaque administrateur.",
+        recommendation=(
+            "Fournir les réglages MFA et d'authentification homologue pour chaque "
+            "administrateur."
+        ),
         remediation="Compléter l'export puis relancer l'audit avant de conclure.",
     )
 
@@ -174,7 +177,7 @@ def _admin_unknown(
 def check_admin_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
     section = configuration.document.section("system admin")
     if section is None:
-        return _admin_unknown(configuration, ("system admin: namespace absent",))
+        return _admin_unknown(configuration, ("system admin: section absente",))
     # An empty admin namespace is not proof that the export is complete enough
     # to establish MFA coverage; default-account absence is a separate control.
     if not section.entries:
@@ -290,14 +293,14 @@ def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
                 title="MFA des utilisateurs locaux",
                 status=AuditStatus.PASS,
                 applicability=Applicability.NOT_APPLICABLE,
-                evidence=("backup complet: namespace user local absent",),
+                evidence=("user local: section absente",),
                 section="user local",
                 directive="two-factor",
                 evidence_items=(evidence_for_complete_backup(),),
                 object_type="local-user",
-                message="Aucun utilisateur local n'est déclaré dans le backup complet.",
+                message="Aucun utilisateur local n'est déclaré.",
                 risk=_risk(
-                    "Aucun compte local n'est présent dans le backup complet.",
+                    "Aucun compte local n'est présent dans la configuration.",
                     "Le contrôle MFA local n'est pas applicable.",
                     "faible",
                     "Surveiller toute création ultérieure de compte local.",
@@ -311,19 +314,19 @@ def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
             title="MFA des utilisateurs locaux",
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=("user local: namespace absent",),
+            evidence=("user local: section absente",),
             section="user local",
             directive="two-factor",
             certainty=EvidenceCertainty.INVALID,
             object_type="local-user",
-            message="Le namespace des utilisateurs locaux est absent.",
+            message="Les utilisateurs locaux ne sont pas documentés dans la configuration.",
             risk=_risk(
                 "La présence d'utilisateurs locaux ne peut pas être déterminée.",
                 "Un compte local sans MFA pourrait rester non détecté.",
                 "indéterminée",
-                "Obtenir une exportation complète du namespace user local.",
+                "Obtenir une exportation complète des utilisateurs locaux.",
             ),
-            recommendation="Fournir la section user local complète.",
+            recommendation="Fournir la liste complète des utilisateurs locaux.",
             remediation="Rejouer l'export avec tous les utilisateurs locaux et leur MFA.",
         )
 
@@ -369,12 +372,12 @@ def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
             object_type="local-user",
             message="La liste des utilisateurs locaux ou leurs directives est ambiguë.",
             risk=_risk(
-                "La présence d'un MFA ne peut pas être prouvée pour tous les comptes locaux.",
+                "La présence d'un MFA n'a pas pu être établie pour tous les comptes locaux.",
                 "Un compte local peut rester non audité.",
                 "indéterminée",
                 "Corriger les conflits puis fournir une section complète.",
             ),
-            recommendation="Fournir une section user local certaine et exhaustive.",
+            recommendation="Fournir une liste des utilisateurs locaux établie et exhaustive.",
             remediation="Corriger les doublons ou mutations puis relancer l'audit.",
         )
     if not section.entries:
@@ -390,12 +393,12 @@ def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
             object_type="local-user",
             message="Aucun utilisateur local n'est déclaré.",
             risk=_risk(
-                "Aucun compte local n'est présent dans le namespace audité.",
-                "Le contrôle MFA local n'est pas applicable à ce namespace vide.",
+                "Aucun compte local n'est présent dans la configuration analysée.",
+                "Le contrôle MFA local n'est pas applicable à cette configuration vide.",
                 "faible",
                 "Surveiller toute création ultérieure de compte local.",
             ),
-            recommendation="Conserver le namespace local vide si cela est attendu.",
+            recommendation="Conserver l'absence de comptes locaux si elle est attendue.",
             remediation="Aucune remédiation immédiate; réévaluer après création d'un compte.",
         )
 
@@ -423,11 +426,11 @@ def check_local_user_mfa(configuration: FortiGateConfiguration) -> AuditFinding:
             certainty=EvidenceCertainty.AMBIGUOUS,
             object_type="local-user",
             message=(
-                "La présence d'un MFA ne peut pas être prouvée pour tous "
+                "La présence d'un MFA n'a pas pu être établie pour tous "
                 "les utilisateurs locaux."
             ),
             risk=_risk(
-                "La présence d'un MFA ne peut pas être prouvée pour tous les utilisateurs locaux.",
+                "La présence d'un MFA n'a pas pu être établie pour tous les utilisateurs locaux.",
                 "Un compte local sans MFA peut être présent malgré un export incomplet.",
                 "indéterminée",
                 "Obtenir la directive two-factor pour chaque utilisateur local.",
@@ -515,7 +518,7 @@ def _absence_finding(
             ),
             recommendation=f"Supprimer le compte par défaut {target}.",
             remediation=(
-                f"Retirer {target} des namespaces concernés puis valider l'accès de secours."
+                f"Retirer {target} des sections concernées puis valider l'accès de secours."
             ),
         )
     if incomplete:
@@ -540,14 +543,14 @@ def _absence_finding(
             evidence_items=incomplete_items
             or (evidence_for_section(configuration.document, namespaces[0]),),
             object_type=object_type,
-            message=f"L'absence du compte par défaut {target} ne peut pas être prouvée.",
+            message=f"L'absence du compte par défaut {target} n'a pas pu être établie.",
             risk=_risk(
                 f"La présence éventuelle du compte {target} reste indéterminée.",
                 "Un compte connu pourrait rester exploitable.",
                 "indéterminée",
-                "Fournir les namespaces complets et exhaustifs.",
+                "Fournir les sections de comptes complètes et exhaustives.",
             ),
-            recommendation="Fournir les sections de comptes complètes et certaines.",
+            recommendation="Fournir les sections de comptes complètes et établies.",
             remediation="Compléter l'export puis relancer l'audit avant de conclure.",
         )
     return _finding(
@@ -556,7 +559,7 @@ def _absence_finding(
         title=title,
         status=AuditStatus.PASS,
         applicability=Applicability.APPLICABLE,
-        evidence=(f"compte {target} absent des namespaces certains",),
+        evidence=(f"compte {target} absent des sections analysées",),
         section=namespaces[0],
         directive="account",
         evidence_items=tuple(
@@ -570,9 +573,9 @@ def _absence_finding(
             else ()
         ),
         object_type=object_type,
-        message=f"Le compte par défaut {target} est absent des sections contrôlées.",
+        message=f"Le compte par défaut {target} est absent de la configuration analysée.",
         risk=_risk(
-            f"L'absence de {target} est probante dans les namespaces exportés.",
+            f"L'absence de {target} est établie dans les sections exportées.",
             "Les tentatives ciblant ce compte connu sont réduites.",
             "faible",
             "Surveiller la réapparition du compte lors des changements.",

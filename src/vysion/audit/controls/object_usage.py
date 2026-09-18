@@ -188,21 +188,21 @@ def _finding(
         )
 
     if status is AuditStatus.FAIL:
-        message = "Des objets de configuration certains ne sont référencés par aucun usage prouvé."
+        message = "Des objets de configuration confirmés ne sont référencés par aucun usage actif."
         evidence = tuple(
             f"{label} {name}: objet non référencé" for _, _, label, name in orphaned
         )
-        summary = "Des objets de configuration orphelins sont présents."
+        summary = "Des objets de configuration ne sont référencés par aucun usage actif."
         likelihood = "moyenne"
         recommendation = "Valider puis supprimer ou rattacher chaque objet réellement inutilisé."
         remediation = "Rattacher chaque objet à un usage ou le retirer après approbation."
     elif status is AuditStatus.PASS:
         message = (
-            "Tous les objets de configuration analysés sont atteignables depuis "
-            "un usage prouvé."
+            "Tous les objets de configuration analysés sont référencés par au "
+            "moins un usage actif."
         )
         evidence = ("objets: graphe d'utilisation complet sans objet orphelin",)
-        summary = "Les objets de configuration projetés sont utilisés."
+        summary = "Les objets de configuration analysés sont utilisés."
         likelihood = "faible"
         recommendation = "Conserver des relations de configuration explicites et typées."
         remediation = "Aucune remédiation immédiate."
@@ -214,9 +214,9 @@ def _finding(
         recommendation = "Réévaluer le contrôle après création d'un objet."
         remediation = "Aucune remédiation immédiate."
     else:
-        message = "L'utilisation des objets de configuration ne peut pas être prouvée."
+        message = "L'utilisation des objets de configuration ne peut pas être établie."
         evidence = ("objets: famille, objet ou résolution incomplet ou ambigu",)
-        summary = "Le graphe d'utilisation des objets est incomplet ou ambigu."
+        summary = "L'utilisation des objets de configuration est incomplète ou ambiguë."
         likelihood = "indéterminée"
         recommendation = "Fournir les familles et relations de configuration complètes."
         remediation = "Corriger les objets ou références ambigus puis relancer l'audit."
@@ -237,7 +237,7 @@ def _finding(
             summary=summary,
             impact="Des objets obsolètes peuvent masquer une dérive de configuration.",
             likelihood=likelihood,
-            treatment="Maintenir uniquement les objets nécessaires et prouvés.",
+            treatment="Maintenir uniquement les objets nécessaires et utilisés.",
         ),
         recommendation=recommendation,
         remediation=remediation,

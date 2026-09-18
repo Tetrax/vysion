@@ -108,4 +108,4 @@ end
     assert finding.status is AuditStatus.PASS
     assert finding.applicability is Applicability.APPLICABLE
     assert any("HTTPS" in item.tokens for item in finding.evidence_items)
-    assert finding.message == "Aucune politique exportée ne déclare explicitement ALL."
+    assert finding.message == "Aucune règle n'autorise l'ensemble des services."

@@ -54,9 +54,13 @@ end
     assert finding.status is AuditStatus.FAIL
     assert finding.applicability.value == "applicable"
     assert finding.evidence_items[0].certainty is EvidenceCertainty.CERTAIN
-    assert "revision-backup-on-logout" in finding.message
-    assert "revision-backup-on-logout" in finding.remediation
-    assert "revision-image-auto-backup" in finding.remediation
+    # Client wording names the disabled option in business French; the raw
+    # FortiOS directive names stay in the machine evidence.
+    assert "sauvegarde à la déconnexion d'un administrateur" in finding.message
+    assert "revision-backup-on-logout" not in finding.message
+    remediation = finding.remediation or ""
+    assert "sauvegarde automatique de révision" in remediation
+    assert "revision-backup-on-logout" not in remediation
 
 
 def test_invalid_structural_document_cannot_prove_enabled_revision_backups() -> None:

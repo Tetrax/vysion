@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 from zipfile import ZipFile
 
+import pytest
 from docx import Document
 
 from vysion.adapters.fortiguard import FortiGuardResult, FortiGuardStatus
@@ -17,10 +18,21 @@ from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.presentation import build_presentation, present_findings
 
 CONFIGURATION = Path("/home/hermes/.hermes/attachments/FW-AVR-01_7-2_1639_202608121044.conf")
+SECOND_CONFIGURATION = Path(
+    "/home/hermes/.hermes/attachments/CF-UK-WIGAN-MASTER_7-4_2829_202609090946.conf"
+)
+
+pytestmark = pytest.mark.skipif(
+    not CONFIGURATION.exists(),
+    reason=(
+        "real FortiGate backup required: place the field backup under "
+        "/home/hermes/.hermes/attachments/ (see OPERATIONS.md)"
+    ),
+)
 
 
-def _real_report() -> JsonAuditReport:
-    configuration = FortiGateParser().parse(CONFIGURATION.read_text(encoding="utf-8"))
+def _report_for(configuration_path: Path) -> JsonAuditReport:
+    configuration = FortiGateParser().parse(configuration_path.read_text(encoding="utf-8"))
     findings = tuple(AuditEngine(default_registry()).run(configuration, AuditContext()))
     presented = present_findings(findings)
     created_at = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
@@ -28,7 +40,7 @@ def _real_report() -> JsonAuditReport:
         report_id=uuid4(),
         created_at=created_at,
         expires_at=created_at + timedelta(minutes=5),
-        source_name=CONFIGURATION.name,
+        source_name=configuration_path.name,
         context=AuditContext(),
         device_identity=configuration.device_identity,
         fortiguard=FortiGuardResult(
@@ -38,6 +50,10 @@ def _real_report() -> JsonAuditReport:
         findings=presented,
         presentation=build_presentation(findings, configuration, AuditContext()),
     )
+
+
+def _real_report() -> JsonAuditReport:
+    return _report_for(CONFIGURATION)
 
 
 def test_docx_uses_the_v1_document_order_and_keeps_ssl_vpn_na() -> None:
@@ -159,3 +175,64 @@ def test_docx_vpn_ssl_na_uses_the_v1_client_wording() -> None:
     body = "\n".join(paragraph.text for paragraph in document.paragraphs)
 
     assert "Le VPN SSL n'est pas utilisé." in body
+
+
+# FortiOS implementation vocabulary observed in the field validation report
+# (CFG-UNUSED wording, implicit-deny logging, UTM profile families, GEO-IP
+# selection, LDAPS messages, SD-WAN selection).  Patterns stay qualified so a
+# legitimate client object name is not flagged: exact identifiers or English
+# multi-word phrases, never a bare French word.
+IMPLEMENTATION_VOCABULARY_PATTERNS = (
+    r"\bfwpolicy-implicit-log\b",
+    r"\blog setting\b",
+    r"\b(?:enable|disable)\b",
+    r"\busage prouvé\b",
+    r"\btyped\b",
+    r"\bantivirus profile\b",
+    r"\bips sensor\b",
+    r"\bapplication list\b",
+    r"\bwebfilter profile\b",
+    r"\bdnsfilter profile\b",
+    r"\bbackup complet\b",
+    r"\buser ldap\b",
+    r"\brouter static\b",
+    r"\bvpn ssl settings\b",
+    r"\bnamespace",
+    r"\bfortigate-[a-z-]+",
+    r"défaut automatique V[12]",
+    r"explicitement non sécurisé",
+    r"\(\s*\)",
+)
+
+
+def _client_body(document) -> str:
+    texts = [paragraph.text for paragraph in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            texts.extend(cell.text for cell in row.cells)
+    return "\n".join(texts)
+
+
+@pytest.mark.parametrize(
+    "configuration_path",
+    [
+        CONFIGURATION,
+        pytest.param(
+            SECOND_CONFIGURATION,
+            marks=pytest.mark.skipif(
+                not SECOND_CONFIGURATION.exists(),
+                reason="second field backup not available on this machine",
+            ),
+        ),
+    ],
+    ids=["FW-AVR-01", "CF-UK-WIGAN-MASTER"],
+)
+def test_docx_client_body_has_no_fortios_implementation_vocabulary(
+    configuration_path: Path,
+) -> None:
+    document = Document(BytesIO(render_docx(_report_for(configuration_path))))
+    body = _client_body(document)
+
+    for pattern in IMPLEMENTATION_VOCABULARY_PATTERNS:
+        match = re.search(pattern, body, flags=re.IGNORECASE)
+        assert match is None, f"{pattern!r} matched {match.group(0)!r}"

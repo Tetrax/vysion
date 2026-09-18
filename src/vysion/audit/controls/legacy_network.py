@@ -45,9 +45,9 @@ def _finding(
             summary="La règle réseau historique V1 doit rester observable.",
             impact="Le filtrage réseau attendu peut être absent ou appliqué au mauvais contexte.",
             likelihood="indéterminée" if status is AuditStatus.UNKNOWN else "moyenne",
-            treatment="Corriger la configuration ou compléter le contexte typed.",
+            treatment="Corriger la configuration ou compléter le contexte opérateur.",
         ),
-        recommendation="Aligner la configuration sur la règle legacy_v1.",
+        recommendation="Aligner la configuration sur la règle historique V1.",
         remediation="Corriger les objets ou routes concernés puis rejouer l’audit.",
         rule_provenance=_PROVENANCE,
     )
@@ -122,14 +122,22 @@ def check_legacy_geo_ip_usage(
     group_section = configuration.document.section("firewall addrgrp")
     policy_section = configuration.document.section("firewall policy")
     if selected is None or not selected:
-        return _unknown(control_id, title, "firewall policy", "Sélection WAN typed absente.")
+        return _unknown(
+            control_id,
+            title,
+            "firewall policy",
+            "Aucune sélection WAN n'a été fournie pour évaluer ce point.",
+        )
     sections = (address_section, group_section, policy_section)
     if any(
         section is None or section.certainty is not EvidenceCertainty.CERTAIN
         for section in sections
     ):
         return _unknown(
-            control_id, title, "firewall address", "Namespace Geo-IP incomplet ou ambigu."
+            control_id,
+            title,
+            "firewall address",
+            "Les données nécessaires à l'analyse GEO-IP sont absentes ou ambiguës.",
         )
     objects = {item.name.casefold(): item for item in configuration.address_objects}
     groups = {item.name.casefold(): item for item in configuration.address_groups}
@@ -147,7 +155,7 @@ def check_legacy_geo_ip_usage(
             control_id,
             title,
             "firewall addrgrp",
-            "Collision, cycle ou mutation dans le graphe Geo-IP.",
+            "Les objets GEO-IP analysés comportent des incohérences ou des ambiguïtés.",
         )
 
     geographic = {name for name, item in objects.items() if item.address_type == "geography"}
@@ -220,11 +228,17 @@ def check_legacy_rfc6890_blackhole(
     section = configuration.document.section("router static")
     if section is None or section.certainty is not EvidenceCertainty.CERTAIN:
         return _unknown(
-            control_id, title, "router static", "Namespace router static absent ou ambigu."
+            control_id,
+            title,
+            "router static",
+            "Les routes statiques nécessaires ne sont pas disponibles ou sont ambiguës.",
         )
     if any(route.proof_state is not ProofState.PROVEN for route in configuration.static_routes):
         return _unknown(
-            control_id, title, "router static", "Route mutée, invalide ou en collision."
+            control_id,
+            title,
+            "router static",
+            "Des routes statiques sont incohérentes ou ambiguës.",
         )
     destinations = {name.casefold() for name in destinations}
     complete = tuple(
@@ -239,9 +253,9 @@ def check_legacy_rfc6890_blackhole(
     passed = bool(complete) is (not context.mpls)
     status = AuditStatus.PASS if passed else AuditStatus.FAIL
     message = (
-        "La présence de la route blackhole correspond au contexte MPLS/L2L legacy_v1."
+        "La présence de la route blackhole correspond au contexte MPLS/L2L déclaré."
         if passed
-        else "La présence de la route blackhole contredit le contexte MPLS/L2L legacy_v1."
+        else "La présence de la route blackhole contredit le contexte MPLS/L2L déclaré."
     )
     return _finding(
         control_id=control_id,
