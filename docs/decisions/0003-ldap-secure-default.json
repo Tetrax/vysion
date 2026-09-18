@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "decision_id": "0003-ldap-secure-default",
+  "status": "accepted",
+  "scope": "Vysion audit - controle IAM-LDAPS-001 (`config user ldap`, directive `secure`)",
+  "decision": "DECISION ACCEPTEE : conserver le comportement fail-closed / A VERIFIER lorsque `secure` est absent. Une directive absente dans un backup standard ne permet pas, seule, de prouver la valeur effective.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Conserver V2 : absence de `secure` => indetermine (fail-closed)",
+      "assessment": {
+        "fidelite": "Aucune supposition ; la faille potentielle n'est ni affirmee ni exclue.",
+        "client": "Phrase metier dediee (Phase A) ; pas de faux positif de securite.",
+        "risque": "Le point peut rester non conclu si le client ne fournit pas le contexte."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Traiter l'absence comme LDAP non chiffre (alignement V1 'LDAPS sans CA')",
+      "assessment": {
+        "fidelite": "Suppose un defaut CLI non documente.",
+        "client": "Resultat deterministe mais potentiellement alarmiste a tort.",
+        "risque": "Non-conformite affirmee non prouvee."
+      }
+    }
+  ],
+  "criteria": [
+    "ne pas affirmer une non-conformite non prouvee",
+    "distinguer explicitement les trois situations (sans chiffrement / LDAPS sans CA / indetermine) - deja fait en Phase A"
+  ],
+  "rationale": "Terrain : sur FR1-FW01 (7.4.11), les connecteurs LDAPS sans `ca-cert` sont un fait constate (FAIL, message dedie apres Phase A) ; sur CF-UK-WIGAN, l'etat global reste indetermine. Recherche officielle : les modes `none`/`ldaps`/`starttls` sont documentes ; la valeur par defaut CLI de `secure` n'est PAS documentee (FortiOS 8.0 documente STARTTLS par defaut cote GUI uniquement). L'absence de la directive dans un backup signifie seulement qu'elle n'est pas ecrite (defaut) : cf. note 0002 sur `show`.",
+  "constraints": [
+    "ne pas deduire une valeur effective de la seule absence de la directive",
+    "conserver les trois messages distincts"
+  ],
+  "sources": [
+    "https://docs.fortinet.com/document/fortigate/8.0.0/cli-reference/590785459/config-user-ldap",
+    "https://docs.fortinet.com/document/fortigate/6.2.0/cookbook/627485/subcommands"
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Option A acceptee par Tetrax le 2026-09-22."
+  },
+  "rollback_boundary": "Aucun code modifie."
+}

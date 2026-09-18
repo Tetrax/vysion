@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "decision_id": "0004-ssl-vpn-residual-directives",
+  "status": "accepted",
+  "scope": "Vysion audit - controle VPN-SSL-001 (`config vpn ssl settings`)",
+  "decision": "DECISION ACCEPTEE : conserver A VERIFIER lorsque `status disable` coexiste avec des directives d'usage residuelles. Un test FortiGate en laboratoire pourra ulterieurement determiner si `status disable` doit avoir priorite sur ces directives.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Conserver V2 : indetermine avec message dedie",
+      "assessment": {
+        "fidelite": "N'affirme pas que le service est inexploitable.",
+        "client": "Message metier clair (Phase A).",
+        "risque": "Ecart residuel avec V1 (conforme sur FR1-FW01)."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Aligner V1 : `status disable` fait foi, residus sans effet",
+      "assessment": {
+        "fidelite": "Suppose que les directives residuelles n'ont aucun effet lorsque le statut est disable - NON documente officiellement dans la documentation consultee.",
+        "client": "Resultat deterministe.",
+        "risque": "Peut masquer une exposition reelle si un portail residuel restait actif."
+      }
+    },
+    {
+      "id": "C",
+      "name": "Trancher par un test controle en lab FortiOS 7.2/7.4",
+      "assessment": {
+        "fidelite": "Preuve experimentale reproductible, conforme a la doctrine 'preuves avant conclusions'.",
+        "client": "Aucun impact direct.",
+        "risque": "Necessite un FortiGate de lab et une fenetre dediee."
+      }
+    }
+  ],
+  "criteria": [
+    "aucune exposition reelle ne doit etre masquee par une supposition",
+    "la decision doit etre reverifiable (lab ou documentation officielle)"
+  ],
+  "rationale": "Terrain : sur FR1-FW01, `status disable` + `source-interface` residuel => V1 conforme, V2 indetermine. Recherche officielle : `set status [enable|disable]` est documente comme le reglage global SSL-VPN ; l'effet precis des directives residuelles lorsque le statut est disable n'est PAS documente (ni par directive, ni par version). En l'absence de preuve, le fail-closed V2 reste le choix prudent ; l'option C permet de trancher sur preuve.",
+  "constraints": [
+    "le test FortiGate en laboratoire ne bloque pas P3",
+    "toute evolution ulterieure doit reposer sur une preuve reproductible"
+  ],
+  "sources": [
+    "https://docs.fortinet.com/document/fortigate/7.4.2/cli-reference/114404382/config-vpn-ssl-settings",
+    "https://docs.fortinet.com/document/fortigate/7.2.5/ssl-vpn-to-ztna-migration-guide/31722/shut-off-all-ssl-vpn-access"
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Option A acceptee par Tetrax le 2026-09-22 ; l'option C reste une validation future non bloquante."
+  },
+  "rollback_boundary": "Aucun code modifie."
+}
