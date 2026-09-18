@@ -9224,12 +9224,12 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
 
         if regle_no_match > 0:
             resultat_pie4 = (
-                f"Vous avez {regle_with_match} règles qui ont matchées depuis le {_fmt_date_fr(system_uptime)} (System Uptime).\n Vous avez {regle_no_match} règle(s) sans match(s). Est-ce que ces règles sont légitimes ?"
+                f"Vous avez {regle_with_match} règles qui ont matchées depuis le {_fmt_date_fr(system_uptime)} (Uptime).\n Vous avez {regle_no_match} règle(s) sans match(s). Est-ce que ces règles sont légitimes ?"
                 f"\nAttention, nous vous conseillons de garder les règles en DENY (sauf si un regroupement est possible)\n et de vous concentrer sur la pertinence des règles en ACCEPT."
             )
         else:
             resultat_pie4 = (
-                f"Toutes vos règles sont utilisées, c'est à dire qu'il y a au moins un flux qui a matché chacune de vos règles depuis depuis le {_fmt_date_fr(system_uptime)} (System Uptime)."
+                f"Toutes vos règles sont utilisées, c'est à dire qu'il y a au moins un flux qui a matché chacune de vos règles depuis depuis le {_fmt_date_fr(system_uptime)} (Uptime)."
             )
 
         ws_stats["A116"] = resultat_pie4
