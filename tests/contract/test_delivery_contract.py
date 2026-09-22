@@ -64,6 +64,10 @@ def test_compose_targets_one_loopback_http_service_with_one_external_volume() ->
     assert "IMAGE_TAG" not in service["image"]
     assert "IMAGE_COMMIT" not in service["image"]
     assert "pull_policy" not in service
+    # The Portainer Git Stack consumes the CI-published digest. Keeping a
+    # Compose `build` section makes Portainer invoke `docker compose build`,
+    # which cannot tag a locally built image with a digest reference.
+    assert "build" not in service
     # Hardening of the running instance is preserved.
     assert service["read_only"] is True
     assert service["cap_drop"] == ["ALL"]

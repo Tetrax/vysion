@@ -4,7 +4,7 @@
 
 - repository GitHub privé unique ;
 - `compose.yml` versionné unique, servi par la Git Stack Portainer unique ;
-- image GHCR immuable référencée par digest OCI `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : la CI publie en plus un tag humain `sha-<commit complet>` et lie l'image à son commit par le label OCI `org.opencontainers.image.revision`, vérifié à la publication ;
+- image GHCR immuable référencée par digest OCI `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : la CI publie en plus un tag humain `sha-<commit complet>` et lie l'image à son commit par le label OCI `org.opencontainers.image.revision`, vérifié à la publication ; la stack de production ne contient volontairement aucune section `build`, car Portainer doit consommer cette image publiée et Docker ne peut pas taguer un build local avec un digest ;
 - aucun `docker compose up/down` dans le parcours normal : la bascule et le rollback utilisent Portainer, l'arrêt de l'ancienne instance est la seule opération hôte documentée ;
 - aucun secret dans Git : identifiants Git et GHCR saisis dans Portainer uniquement.
 
