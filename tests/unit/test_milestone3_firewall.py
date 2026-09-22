@@ -452,6 +452,106 @@ end
     assert audit(passing)["FW-UTM-PROFILE-BINDING-001"].status is AuditStatus.PASS
 
 
+def test_utm_control_is_not_applicable_without_a_relevant_policy() -> None:
+    raw = base_interfaces() + policy_block(
+        policy_entry(1, logtraffic="all", utm_status=None, profiles="")
+    )
+
+    finding = audit(raw)["FW-UTM-PROFILE-BINDING-001"]
+
+    assert finding.status is AuditStatus.NOT_APPLICABLE
+    assert finding.applicability is Applicability.NOT_APPLICABLE
+
+
+@pytest.mark.parametrize("logtraffic", ["all", "disable"])
+def test_utm_enabled_policy_with_explicit_non_utm_logging_is_not_applicable(
+    logtraffic: str,
+) -> None:
+    raw = base_interfaces() + policy_block(
+        policy_entry(1, logtraffic=logtraffic, utm_status="enable")
+    )
+
+    finding = audit(raw)["FW-UTM-PROFILE-BINDING-001"]
+
+    assert finding.status is AuditStatus.NOT_APPLICABLE
+    assert finding.applicability is Applicability.NOT_APPLICABLE
+
+
+@pytest.mark.parametrize(
+    ("status", "action"),
+    [("disable", "accept"), ("enable", "deny")],
+)
+def test_utm_inactive_policy_without_logtraffic_is_not_applicable(
+    status: str, action: str
+) -> None:
+    raw = base_interfaces() + policy_block(
+        policy_entry(
+            1,
+            status=status,
+            action=action,
+            logtraffic=None,
+            utm_status="enable",
+        )
+    )
+
+    finding = audit(raw)["FW-UTM-PROFILE-BINDING-001"]
+
+    assert finding.status is AuditStatus.NOT_APPLICABLE
+    assert finding.applicability is Applicability.NOT_APPLICABLE
+
+
+def test_utm_enabled_policy_without_explicit_logtraffic_is_unknown() -> None:
+    raw = base_interfaces() + policy_block(
+        policy_entry(
+            1,
+            logtraffic=None,
+            utm_status="enable",
+            profiles='        set webfilter-profile "default"\n',
+        )
+    )
+
+    finding = audit(raw)["FW-UTM-PROFILE-BINDING-001"]
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert finding.applicability is Applicability.UNKNOWN
+    assert finding.affected_objects[0].name == "1"
+    assert finding.message == (
+        "La configuration disponible ne permet pas d'établir le comportement de "
+        "journalisation de toutes les règles avec inspection UTM activée."
+    )
+
+
+def test_utm_mixed_explicit_and_missing_logtraffic_is_unknown() -> None:
+    raw = (
+        base_interfaces()
+        + """config firewall webfilter profile
+    edit "web-safe"
+        set feature-set proxy
+    next
+end
+"""
+        + policy_block(
+            policy_entry(
+                1,
+                logtraffic="utm",
+                utm_status="enable",
+                profiles='        set webfilter-profile "web-safe"\n',
+            ),
+            policy_entry(
+                2,
+                logtraffic=None,
+                utm_status="enable",
+                profiles='        set webfilter-profile "web-safe"\n',
+            ),
+        )
+    )
+
+    finding = audit(raw)["FW-UTM-PROFILE-BINDING-001"]
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert [item.name for item in finding.affected_objects] == ["2"]
+
+
 def test_utm_casefold_profile_collision_is_unknown() -> None:
     raw = (
         base_interfaces()

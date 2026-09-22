@@ -10,7 +10,7 @@ from docx import Document
 
 from vysion.adapters.fortiguard import FortiGuardResult, FortiGuardStatus
 from vysion.audit.engine import AuditEngine
-from vysion.audit.models import AuditContext
+from vysion.audit.models import AuditContext, WanSelection, WanSelectionKind
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.reports.docx_report import render_docx
@@ -31,9 +31,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _report_for(configuration_path: Path) -> JsonAuditReport:
+def _report_for(configuration_path: Path, context: AuditContext | None = None) -> JsonAuditReport:
+    context = context or AuditContext()
     configuration = FortiGateParser().parse(configuration_path.read_text(encoding="utf-8"))
-    findings = tuple(AuditEngine(default_registry()).run(configuration, AuditContext()))
+    findings = tuple(AuditEngine(default_registry()).run(configuration, context))
     presented = present_findings(findings)
     created_at = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
     return JsonAuditReport(
@@ -41,19 +42,71 @@ def _report_for(configuration_path: Path) -> JsonAuditReport:
         created_at=created_at,
         expires_at=created_at + timedelta(minutes=5),
         source_name=configuration_path.name,
-        context=AuditContext(),
+        context=context,
         device_identity=configuration.device_identity,
         fortiguard=FortiGuardResult(
             status=FortiGuardStatus.UNKNOWN,
             detail="fixture",
         ),
         findings=presented,
-        presentation=build_presentation(findings, configuration, AuditContext()),
+        presentation=build_presentation(findings, configuration, context),
     )
 
 
 def _real_report() -> JsonAuditReport:
     return _report_for(CONFIGURATION)
+
+
+@pytest.mark.skipif(
+    not SECOND_CONFIGURATION.exists(),
+    reason="second field backup not available on this machine",
+)
+def test_cf_uk_wigan_utm_policy_without_logtraffic_is_unknown() -> None:
+    configuration = FortiGateParser().parse(SECOND_CONFIGURATION.read_text(encoding="utf-8"))
+    context = AuditContext(
+        wan_selections=(
+            WanSelection(
+                name="wan1",
+                kind=WanSelectionKind.INTERFACE,
+                interfaces=("wan1",),
+            ),
+        )
+    )
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration, context)
+        if item.control_id == "FW-UTM-PROFILE-BINDING-001"
+    )
+
+    assert finding.status.value == "UNKNOWN"
+    assert finding.applicability.value == "unknown"
+    assert finding.affected_objects
+
+
+@pytest.mark.skipif(
+    not SECOND_CONFIGURATION.exists(),
+    reason="second field backup not available on this machine",
+)
+def test_cf_uk_wigan_utm_unknown_docx_uses_business_wording() -> None:
+    context = AuditContext(
+        wan_selections=(
+            WanSelection(
+                name="wan1",
+                kind=WanSelectionKind.INTERFACE,
+                interfaces=("wan1",),
+            ),
+        ),
+        utm_license=True,
+    )
+
+    body = _client_body(Document(BytesIO(render_docx(_report_for(SECOND_CONFIGURATION, context)))))
+
+    assert (
+        "La configuration disponible ne permet pas d'établir le comportement de "
+        "journalisation de toutes les règles avec inspection UTM activée."
+    ) in body
+    assert "logtraffic" not in body.casefold()
 
 
 def test_docx_uses_the_v1_document_order_and_keeps_ssl_vpn_na() -> None:

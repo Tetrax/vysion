@@ -870,11 +870,14 @@ def check_utm_profile_binding(
         groups.pop(key, None)
     failures: list[Policy] = []
     unknown: list[Policy] = []
+    unknown_logtraffic: list[Policy] = []
     compliant: list[Policy] = []
     for policy in configuration.policies:
-        if policy.logtraffic != "utm":
-            continue
         if policy.status == "disable" or policy.action == "deny":
+            continue
+        if policy.logtraffic != "utm":
+            if policy.utm_status == "enable" and policy.logtraffic not in {"all", "disable"}:
+                unknown_logtraffic.append(policy)
             continue
         if policy.action != "accept" or policy.status != "enable":
             unknown.append(policy)
@@ -946,32 +949,60 @@ def check_utm_profile_binding(
                 "profils établi."
             ),
         )
-    if unknown or section.certainty is not EvidenceCertainty.CERTAIN or scope.unresolved:
+    if (
+        unknown_logtraffic
+        or unknown
+        or section.certainty is not EvidenceCertainty.CERTAIN
+        or scope.unresolved
+    ):
+        unresolved = (*unknown_logtraffic, *unknown)
+        journalisation_unknown = bool(unknown_logtraffic)
         return _finding(
             control_id=control_id,
             title=title,
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=tuple(
-                f"policy {policy.policy_id}: binding UTM absent, ambigu ou non résolu"
-                for policy in unknown
+            evidence=(
+                tuple(
+                    f"policy {policy.policy_id}: valeur logtraffic absente ou non prouvable"
+                    for policy in unknown_logtraffic
+                )
+                + tuple(
+                    f"policy {policy.policy_id}: binding UTM absent, ambigu ou non résolu"
+                    for policy in unknown
+                )
             )
             or ("Aucune preuve complète des bindings UTM",),
             evidence_items=tuple(
                 _policy_evidence(
-                    configuration, policy, "utm-status", certainty=EvidenceCertainty.AMBIGUOUS
+                    configuration,
+                    policy,
+                    "logtraffic" if policy in unknown_logtraffic else "utm-status",
+                    certainty=EvidenceCertainty.AMBIGUOUS,
                 )
-                for policy in unknown
+                for policy in unresolved
             )
             or (
                 _section_evidence(
                     configuration, "firewall policy", certainty=EvidenceCertainty.AMBIGUOUS
                 ),
             ),
-            affected_objects=_affected((policy.policy_id for policy in unknown), "firewall-policy"),
-            message="Les profils de sécurité référencés n'ont pas tous pu être établis.",
+            affected_objects=_affected(
+                (policy.policy_id for policy in unresolved), "firewall-policy"
+            ),
+            message=(
+                "La configuration disponible ne permet pas d'établir le comportement de "
+                "journalisation de toutes les règles avec inspection UTM activée."
+                if journalisation_unknown
+                else "Les profils de sécurité référencés n'ont pas tous pu être établis."
+            ),
             risk=risk,
-            recommendation="Fournir les profils de sécurité et leurs références de façon établie.",
+            recommendation=(
+                "Fournir une configuration qui établit explicitement le comportement de "
+                "journalisation des règles UTM concernées."
+                if journalisation_unknown
+                else "Fournir les profils de sécurité et leurs références de façon établie."
+            ),
             remediation=(
                 "Corriger les incohérences ou références absentes puis "
                 "relancer l'audit."
