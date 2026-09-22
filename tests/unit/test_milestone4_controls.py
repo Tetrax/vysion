@@ -318,8 +318,12 @@ def test_m4_crypto_missing_or_orphan_is_unknown() -> None:
 def test_m4_crypto_ruleset_identity_is_visible_in_pass_evidence() -> None:
     finding = audit(strong())["VPN-CRYPTO-001"]
 
-    assert "fortigate-vpn-crypto" in " ".join(finding.evidence)
-    assert "2026-08-13" in finding.message
+    evidence_text = " ".join(str(item) for item in finding.evidence)
+    assert "fortigate-vpn-crypto" in evidence_text
+    assert "2026-08-13" in evidence_text
+    # The client-visible message carries the business outcome only.
+    assert "fortigate-vpn-crypto" not in finding.message
+    assert "2026-08-13" not in finding.message
 
 
 @pytest.mark.parametrize(

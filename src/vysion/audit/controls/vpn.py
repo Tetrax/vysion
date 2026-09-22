@@ -290,17 +290,17 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
                 ),
                 affected_objects=_affected(("ssl-vpn",), "ssl-vpn"),
                 message=(
-                    "Le statut disable contredit des directives d'usage conservées; "
-                    "l'absence effective d'exposition n'est pas prouvée."
+                    "Le SSL-VPN est désactivé, mais des directives d'usage subsistent ; "
+                    "l'absence effective d'exposition n'est pas établie."
                 ),
                 risk=_ssl_risk(),
                 recommendation=(
-                    "Retirer les directives d'usage résiduelles ou fournir une preuve "
-                    "autoritaire de l'état effectif."
+                    "Retirer les directives d'usage résiduelles ou fournir un état "
+                    "effectif établi."
                 ),
                 remediation=(
-                    "Nettoyer source-interface, source-address et default-portal, "
-                    "puis relancer l'audit."
+                    "Nettoyer les interfaces source, adresses source et portail "
+                    "par défaut, puis relancer l'audit."
                 ),
             )
         if (
@@ -326,12 +326,12 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
                 ),
                 affected_objects=(),
                 message=(
-                    "Le statut disable est explicite, mais la section ne prouve pas "
-                    "une absence complète d'utilisation SSL-VPN."
+                    "Le SSL-VPN est explicitement désactivé, mais la configuration ne "
+                    "permet pas d'établir une absence complète d'utilisation."
                 ),
                 risk=_ssl_risk(),
                 recommendation="Corriger la structure ambiguë avant de conclure.",
-                remediation="Fournir une section vpn ssl settings complète et certaine.",
+                remediation="Fournir une configuration SSL-VPN complète et établie.",
             )
         return _finding(
             control_id=control_id,
@@ -341,14 +341,14 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
             evidence=("vpn ssl settings: status disable explicite",),
             evidence_items=(_directive(configuration, "vpn ssl settings", "status"),),
             affected_objects=(),
-            message="Le SSL-VPN est explicitement désactivé et aucune utilisation n'est prouvée.",
+            message="Le SSL-VPN est explicitement désactivé et aucune utilisation n'est constatée.",
             risk=_risk(
-                "Le SSL-VPN n'est pas exposé par la configuration prouvée.",
+                "Le SSL-VPN n'est pas exposé par la configuration analysée.",
                 "La surface d'accès distant SSL est réduite.",
                 "faible",
-                "Conserver le statut disable si le service reste inutilisé.",
+                "Conserver la désactivation si le service reste inutilisé.",
             ),
-            recommendation="Conserver set status disable tant que SSL-VPN n'est pas requis.",
+            recommendation="Conserver la désactivation du SSL-VPN tant qu'il n'est pas requis.",
             remediation="Aucune remédiation immédiate.",
         )
 
@@ -415,10 +415,10 @@ def check_ssl_vpn(configuration: FortiGateConfiguration) -> AuditFinding:
             ),
         ),
         affected_objects=(),
-        message="Le statut SSL-VPN ne permet pas de conclure sans supposer une valeur FortiOS.",
+        message="L'état du SSL-VPN ne permet pas de conclure sans supposer une valeur par défaut.",
         risk=_ssl_risk(),
-        recommendation="Fournir un statut SSL-VPN explicite et non contradictoire.",
-        remediation="Corriger les mutations ou compléter la section puis relancer l'audit.",
+        recommendation="Fournir un état SSL-VPN explicite et non contradictoire.",
+        remediation="Corriger les incohérences ou compléter la section puis relancer l'audit.",
     )
 
 
@@ -451,9 +451,9 @@ def check_ikev2(configuration: FortiGateConfiguration) -> AuditFinding:
                 if section is None
             ),
             affected_objects=(),
-            message="La version IKE ne peut pas être conclue sans les namespaces IPsec complets.",
+            message="La version IKE ne peut pas être établie sans les sections IPsec complètes.",
             risk=_ike_risk(),
-            recommendation="Fournir les sections phase1-interface et phase2-interface.",
+            recommendation="Fournir les sections des phases 1 et 2 IPsec.",
             remediation="Compléter l'export puis relancer l'audit.",
         )
     namespace_status, namespace_applicability = _ipsec_namespace(configuration)
@@ -497,7 +497,7 @@ def check_ikev2(configuration: FortiGateConfiguration) -> AuditFinding:
             affected_objects=_affected((item.name for item in failures), "ipsec-phase1"),
             message="Au moins une phase 1 utilise explicitement une version IKE différente de 2.",
             risk=_ike_risk(),
-            recommendation="Configurer set ike-version 2 sur chaque phase 1 applicable.",
+            recommendation="Configurer IKEv2 sur chaque phase 1 applicable.",
             remediation="Remplacer les versions IKE faibles puis relancer l'audit.",
         )
     unknown = [item for item in items if "ike-version" not in item.parsed_keys]
@@ -523,9 +523,9 @@ def check_ikev2(configuration: FortiGateConfiguration) -> AuditFinding:
             )
             or (_section(configuration, _PHASE1_SECTION, certainty=EvidenceCertainty.AMBIGUOUS),),
             affected_objects=_affected((item.name for item in unknown), "ipsec-phase1"),
-            message="Une ou plusieurs phases 1 ne portent pas une version IKEv2 certaine.",
+            message="Une ou plusieurs phases 1 ne portent pas une version IKEv2 établie.",
             risk=_ike_risk(),
-            recommendation="Fournir ike-version 2 explicitement sur toutes les phases 1.",
+            recommendation="Fournir explicitement IKEv2 sur toutes les phases 1.",
             remediation="Corriger les valeurs absentes, mutées ou ambiguës.",
         )
     return _finding(
@@ -590,7 +590,7 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
             evidence=("Un seul namespace IPsec est présent; aucun défaut FortiOS n'est supposé.",),
             evidence_items=missing,
             affected_objects=(),
-            message="Les groupes DH ne peuvent pas être évalués avec un namespace IPsec absent.",
+            message="Les groupes DH ne peuvent pas être évalués sans les sections IPsec.",
             risk=_dh_risk(),
             recommendation="Fournir les deux sections IPsec complètes.",
             remediation="Compléter l'export puis relancer l'audit.",
@@ -663,7 +663,7 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
             message="Au moins un groupe DH n'appartient pas aux valeurs FortiOS supportées.",
             risk=_dh_risk(),
             recommendation="Utiliser un groupe DH explicitement supporté par FortiOS 7.2/7.4.",
-            remediation="Corriger dhgrp puis relancer l'audit.",
+            remediation="Corriger les groupes DH puis relancer l'audit.",
         )
 
     if failures:
@@ -686,7 +686,7 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
                 "Retirer les groupes DH faibles et conserver uniquement les groupes approuvés "
                 "par la politique FortiOS 7.2/7.4."
             ),
-            remediation="Modifier dhgrp sur les phases concernées puis relancer l'audit.",
+            remediation="Modifier les groupes DH sur les phases concernées puis relancer l'audit.",
         )
     if (
         unknown
@@ -710,11 +710,17 @@ def check_dh_groups(configuration: FortiGateConfiguration) -> AuditFinding:
             affected_objects=_affected((item.name for _, item in unknown), "ipsec-phase"),
             message=(
                 "Les groupes DH ne sont pas tous présents, entiers et "
-                "rattachés avec certitude."
+                "rattachés de façon établie."
             ),
             risk=_dh_risk(),
-            recommendation="Fournir dhgrp explicite et résoudre chaque phase 2 vers une phase 1.",
-            remediation="Corriger les mutations, valeurs non entières ou rattachements orphelins.",
+            recommendation=(
+                "Fournir les groupes DH explicitement et rattacher chaque phase 2 "
+                "à une phase 1."
+            ),
+            remediation=(
+                "Corriger les incohérences, valeurs non entières ou rattachements "
+                "orphelins."
+            ),
         )
     safe = [
         (section, item)
@@ -776,8 +782,8 @@ def check_vpn_crypto(configuration: FortiGateConfiguration) -> AuditFinding:
             ),
             affected_objects=(),
             message=(
-                "Les propositions ne peuvent pas être évaluées avec le "
-                f"ruleset {ruleset_label}."
+                "Les propositions ne peuvent pas être évaluées sans les sections "
+                "IPsec complètes."
             ),
             risk=_crypto_risk(),
             recommendation="Fournir les deux sections IPsec et leurs propositions explicites.",
@@ -793,7 +799,7 @@ def check_vpn_crypto(configuration: FortiGateConfiguration) -> AuditFinding:
             evidence=(f"ruleset {ruleset_label}; namespaces IPsec explicitement vides",),
             evidence_items=_ipsec_not_applicable_evidence(configuration),
             affected_objects=(),
-            message=f"Aucune proposition IPsec applicable; ruleset {ruleset_label}.",
+            message="Aucune proposition IPsec applicable n'est déclarée.",
             risk=_risk(
                 "Aucun tunnel IPsec applicable n'est présent.",
                 "Le contrôle cryptographique ne s'applique à aucun tunnel.",
@@ -845,13 +851,16 @@ def check_vpn_crypto(configuration: FortiGateConfiguration) -> AuditFinding:
                 for section, item, _ in failures
             ),
             affected_objects=_affected((item.name for _, item, _ in failures), "ipsec-phase"),
-            message=f"Au moins une proposition IPsec est faible ou inconnue selon {ruleset_label}.",
+            message="Au moins une proposition IPsec est faible ou inconnue.",
             risk=_crypto_risk(),
             recommendation=(
-                "Remplacer chaque proposition par un token complet "
-                "approuvé par le ruleset."
+                "Remplacer chaque proposition par une proposition conforme au "
+                "référentiel de durcissement."
             ),
-            remediation="Modifier proposal sur les phases concernées puis relancer l'audit.",
+            remediation=(
+                "Modifier les propositions sur les phases concernées puis "
+                "relancer l'audit."
+            ),
         )
     if (
         unknown
@@ -881,16 +890,13 @@ def check_vpn_crypto(configuration: FortiGateConfiguration) -> AuditFinding:
             )
             or (_section(configuration, _PHASE2_SECTION, certainty=EvidenceCertainty.AMBIGUOUS),),
             affected_objects=_affected((item.name for _, item in unknown), "ipsec-phase"),
-            message=(
-                "Toutes les propositions IPsec ne sont pas certaines; "
-                f"ruleset {ruleset_label}."
-            ),
+            message=("Toutes les propositions IPsec ne sont pas établies."),
             risk=_crypto_risk(),
             recommendation=(
                 "Fournir des propositions complètes et résoudre les "
-                "rattachements phase2."
+                "rattachements entre phases."
             ),
-            remediation="Corriger les mutations, absences et relations orphelines.",
+            remediation="Corriger les incohérences, absences et relations orphelines.",
         )
     safe = [
         (section, item)
@@ -910,13 +916,20 @@ def check_vpn_crypto(configuration: FortiGateConfiguration) -> AuditFinding:
             for section, item in safe
         ),
         affected_objects=_affected((item.name for _, item in safe), "ipsec-phase"),
-        message=f"Toutes les propositions IPsec applicables sont approuvées par {ruleset_label}.",
-        risk=_risk(
-            "Les propositions IPsec applicables sont couvertes par le ruleset versionné.",
-            "La confidentialité et l'intégrité négociées sont bornées par les tokens approuvés.",
-            "faible",
-            "Conserver les propositions approuvées et la version du ruleset.",
+        message=(
+            "Toutes les propositions IPsec applicables sont conformes au "
+            "référentiel de durcissement."
         ),
-        recommendation="Conserver uniquement les propositions du ruleset VPN versionné.",
+        risk=_risk(
+            "Les propositions IPsec applicables sont conformes au référentiel de durcissement.",
+            "La confidentialité et l'intégrité négociées sont bornées par les "
+            "propositions approuvées.",
+            "faible",
+            "Conserver les propositions approuvées et la version du référentiel.",
+        ),
+        recommendation=(
+            "Conserver uniquement les propositions conformes au référentiel de "
+            "durcissement."
+        ),
         remediation="Aucune remédiation immédiate.",
     )

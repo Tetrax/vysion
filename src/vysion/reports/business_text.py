@@ -703,12 +703,26 @@ def _clean_observation(value: str) -> str:
     text = re.sub(r"\bdefaulted\b", "par défaut", text, flags=re.I)
     text = re.sub(r"\bproven\b", "confirmé", text, flags=re.I)
     text = re.sub(r"\bpolicy\s+(\d+)\b", r"règle \1", text, flags=re.I)
-    text = re.sub(r"\s{2,}", " ", text).strip(" .;:-")
+    # Parentheses and brackets left empty by the removals above must not reach
+    # the client document as stray artifacts.  French typography keeps its
+    # space before ':' and ';', so only period/comma/!/? are tightened.
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r"\[\s*\]", "", text)
+    text = re.sub(r"\s+([.,!?])", r"\1", text)
+    text = re.sub(r"\s{2,}", " ", text).strip(" .;:,-")
     text = re.sub(r"^[=+@]", "", text)
     return text
 
 
 def _detected_values(finding: AuditFinding) -> str:
+    """Client-facing detected values.
+
+    Only structured affected objects are exposed to the client document: they
+    are the values a reader can act on (object names, rule identifiers).  Free
+    evidence strings stay in the JSON/XLSX machine exports, where technical
+    traceability is expected, and never reach the client DOCX.
+    """
+
     names = tuple(
         dict.fromkeys(
             item.name.strip()
@@ -725,39 +739,7 @@ def _detected_values(finding: AuditFinding) -> str:
         if policy_names:
             return f"Règles concernées : {', '.join(dict.fromkeys(policy_names))}."
         return f"Éléments détectés : {', '.join(dict.fromkeys(names))}."
-
-    relevant: list[str] = []
-    for item in finding.evidence:
-        if not isinstance(item, str):
-            continue
-        cleaned = _clean_observation(item)
-        if not cleaned or cleaned.casefold() in {
-            _clean_observation(finding.message).casefold(),
-            "backup complet",
-        }:
-            continue
-        if any(
-            marker in cleaned.casefold()
-            for marker in (
-                "compte",
-                "cible",
-                "flux",
-                "règle",
-                "policy",
-                "profil",
-                "route",
-                "heartbeat",
-                "connecteur",
-                "entrée",
-                "absence",
-                "configuration",
-                "section",
-            )
-        ):
-            relevant.append(cleaned)
-    if not relevant:
-        return ""
-    return "Données détectées : " + " ; ".join(dict.fromkeys(relevant[:3])) + "."
+    return ""
 
 
 def _with_detected_values(message: str, finding: AuditFinding) -> str:

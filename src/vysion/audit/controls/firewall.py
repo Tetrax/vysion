@@ -464,7 +464,7 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
         "La journalisation du deny implicite peut être insuffisante.",
         "Les tentatives refusées par défaut peuvent ne pas être traçables.",
         "indéterminée",
-        "Fournir une section log setting certaine avec fwpolicy-implicit-log enable.",
+        "Fournir un réglage de journalisation établi pour la règle 'implicit deny'.",
     )
     if section is None or configuration.log_setting is None:
         status = (
@@ -481,7 +481,7 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
                 if status is AuditStatus.FAIL
                 else Applicability.UNKNOWN
             ),
-            evidence=("log setting: section ou directive absente",),
+            evidence=("Journalisation de la règle 'implicit deny' absente",),
             evidence_items=(
                 _section_evidence(
                     configuration, "log setting", certainty=EvidenceCertainty.INVALID
@@ -489,13 +489,15 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
             ),
             affected_objects=(),
             message=(
-                "La directive fwpolicy-implicit-log est absente du backup complet."
+                "La journalisation de la règle 'implicit deny' est absente de la configuration."
                 if status is AuditStatus.FAIL
-                else "La directive fwpolicy-implicit-log n'est pas prouvée."
+                else "La journalisation de la règle 'implicit deny' n'a pas pu être établie."
             ),
             risk=base_risk,
-            recommendation="Activer explicitement fwpolicy-implicit-log.",
-            remediation="Compléter l'export de log setting puis relancer l'audit.",
+            recommendation=(
+                "Activer explicitement la journalisation de la règle 'implicit deny'."
+            ),
+            remediation="Compléter l'export des réglages de journalisation puis relancer l'audit.",
         )
     if configuration.log_setting.implicit_deny_log in {"disable", "none"}:
         return _finding(
@@ -503,22 +505,24 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
             title=title,
             status=AuditStatus.FAIL,
             applicability=Applicability.APPLICABLE,
-            evidence=(
-                f"log setting: fwpolicy-implicit-log {configuration.log_setting.implicit_deny_log}",
-            ),
+            evidence=("Journalisation de la règle 'implicit deny' désactivée",),
             evidence_items=(
                 _directive_evidence(configuration, "log setting", "fwpolicy-implicit-log"),
             ),
             affected_objects=(),
-            message="La journalisation du deny implicite est explicitement désactivée.",
+            message="La journalisation de la règle 'implicit deny' est explicitement désactivée.",
             risk=_risk(
                 "Les refus implicites ne sont pas journalisés.",
                 "Une exposition ou tentative bloquée peut ne laisser aucune trace.",
                 "élevée",
-                "Activer fwpolicy-implicit-log et vérifier les événements générés.",
+                "Activer la journalisation de la règle 'implicit deny' et vérifier "
+                "les événements générés.",
             ),
-            recommendation="Configurer set fwpolicy-implicit-log enable.",
-            remediation="Activer la journalisation du deny implicite dans config log setting.",
+            recommendation="Activer la journalisation de la règle 'implicit deny'.",
+            remediation=(
+                "Activer la journalisation de la règle 'implicit deny' dans les réglages "
+                "du FortiGate."
+            ),
         )
     if (
         configuration.log_setting.proof_state is not ProofState.PROVEN
@@ -540,38 +544,41 @@ def check_implicit_deny_log(configuration: FortiGateConfiguration) -> AuditFindi
                 if status is AuditStatus.FAIL
                 else Applicability.UNKNOWN
             ),
-            evidence=("fwpolicy-implicit-log: valeur absente, inconnue ou ambiguë",),
+            evidence=("État de la journalisation de la règle 'implicit deny' indéterminé",),
             evidence_items=(
                 _directive_evidence(configuration, "log setting", "fwpolicy-implicit-log"),
             ),
             affected_objects=(),
             message=(
-                "La directive fwpolicy-implicit-log est absente du backup complet."
+                "La journalisation de la règle 'implicit deny' est absente de la configuration."
                 if status is AuditStatus.FAIL
-                else "La valeur enable de fwpolicy-implicit-log ne peut pas être établie."
+                else "L'état de la journalisation de la règle 'implicit deny' "
+                "n'a pas pu être établi."
             ),
             risk=base_risk,
-            recommendation="Fournir une directive fwpolicy-implicit-log enable certaine.",
-            remediation="Corriger les mutations ou conflits puis relancer l'audit.",
+            recommendation=(
+                "Fournir un réglage de journalisation établi pour la règle 'implicit deny'."
+            ),
+            remediation="Corriger les incohérences de configuration puis relancer l'audit.",
         )
     return _finding(
         control_id=control_id,
         title=title,
         status=AuditStatus.PASS,
         applicability=Applicability.APPLICABLE,
-        evidence=("fwpolicy-implicit-log: enable",),
+        evidence=("Journalisation de la règle 'implicit deny' activée",),
         evidence_items=(
             _directive_evidence(configuration, "log setting", "fwpolicy-implicit-log"),
         ),
         affected_objects=(),
-        message="La journalisation du deny implicite est explicitement activée.",
+        message="La journalisation de la règle 'implicit deny' est explicitement activée.",
         risk=_risk(
             "Les refus implicites sont journalisés.",
             "La traçabilité des flux refusés est renforcée.",
             "faible",
             "Conserver l'activation et surveiller les journaux.",
         ),
-        recommendation="Conserver fwpolicy-implicit-log enable.",
+        recommendation="Conserver la journalisation de la règle 'implicit deny' activée.",
         remediation="Aucune remédiation immédiate.",
     )
 
@@ -615,7 +622,7 @@ def check_internet_all_service(
             evidence=("firewall policy: section explicitement vide",),
             evidence_items=(_section_evidence(configuration, "firewall policy"),),
             affected_objects=(),
-            message="Aucune politique n'est déclarée dans le namespace firewall policy.",
+            message="Aucune règle n'est déclarée dans la configuration analysée.",
             risk=_risk(
                 "Aucune politique Internet n'est déclarée.",
                 "Le contrôle ALL ne s'applique à aucune politique exportée.",
@@ -681,13 +688,16 @@ def check_internet_all_service(
                 (policy.policy_id for policy in failures), "firewall-policy"
             ),
             message=(
-                "Une politique acceptée et activée autorise explicitement ALL "
-                "vers une WAN prouvée."
+                "Une règle acceptée et active autorise l'ensemble des services "
+                "vers une interface WAN identifiée."
             ),
             risk=risk,
-            recommendation="Remplacer ALL par une allowlist de services nécessaire.",
+            recommendation=(
+                "Remplacer l'ensemble des services par une liste explicite des "
+                "services nécessaires."
+            ),
             remediation=(
-                "Modifier les politiques acceptées vers Internet puis vérifier "
+                "Modifier les règles acceptées vers Internet puis vérifier "
                 "leur portée WAN."
             ),
         )
@@ -717,16 +727,16 @@ def check_internet_all_service(
             ),
             affected_objects=_affected((policy.policy_id for policy in unknown), "firewall-policy"),
             message=(
-                "La portée et les services de toutes les politiques Internet "
-                "ne sont pas certains."
+                "La portée et les services de toutes les règles Internet "
+                "n'ont pas pu être établis."
             ),
             risk=risk,
             recommendation=(
-                "Fournir action, status, service et destination certains pour "
-                "chaque politique."
+                "Fournir pour chaque règle l'action, l'état, le service et la "
+                "destination."
             ),
             remediation=(
-                "Corriger les mutations ou compléter le contexte WAN puis "
+                "Corriger les incohérences ou compléter le contexte WAN puis "
                 "relancer l'audit."
             ),
         )
@@ -745,9 +755,9 @@ def check_internet_all_service(
         affected_objects=_affected(
             (policy.policy_id for policy in applicable_safe), "firewall-policy"
         ),
-        message="Aucune politique exportée ne déclare explicitement ALL.",
+        message="Aucune règle n'autorise l'ensemble des services.",
         risk=_risk(
-            "Les services Internet sont bornés par les politiques certaines.",
+            "Les services Internet sont bornés par les règles analysées.",
             "La surface de sortie non nécessaire est réduite.",
             "faible",
             "Maintenir une allowlist documentée.",
@@ -925,10 +935,16 @@ def check_utm_profile_binding(
             affected_objects=_affected(
                 (policy.policy_id for policy in failures), "firewall-policy"
             ),
-            message="Une politique logtraffic utm activée n'a pas de binding UTM valide.",
+            message=(
+                "Une règle avec inspection UTM activée ne référence aucun profil "
+                "de sécurité valide."
+            ),
             risk=risk,
-            recommendation="Activer les profils UTM et résoudre chaque référence.",
-            remediation="Lier les profils de sécurité directement ou via un profile-group certain.",
+            recommendation="Activer les profils de sécurité et résoudre chaque référence.",
+            remediation=(
+                "Lier les profils de sécurité directement ou via un groupe de "
+                "profils établi."
+            ),
         )
     if unknown or section.certainty is not EvidenceCertainty.CERTAIN or scope.unresolved:
         return _finding(
@@ -953,11 +969,11 @@ def check_utm_profile_binding(
                 ),
             ),
             affected_objects=_affected((policy.policy_id for policy in unknown), "firewall-policy"),
-            message="Les références UTM ne sont pas toutes résolubles avec certitude.",
+            message="Les profils de sécurité référencés n'ont pas tous pu être établis.",
             risk=risk,
-            recommendation="Fournir des profils UTM et bindings certains.",
+            recommendation="Fournir les profils de sécurité et leurs références de façon établie.",
             remediation=(
-                "Corriger les conflits, mutations ou références absentes puis "
+                "Corriger les incohérences ou références absentes puis "
                 "relancer l'audit."
             ),
         )
@@ -970,14 +986,14 @@ def check_utm_profile_binding(
             evidence=("Aucune politique WAN logtraffic utm applicable",),
             evidence_items=(_section_evidence(configuration, "firewall policy"),),
             affected_objects=(),
-            message="Aucune politique logtraffic utm applicable n'est déclarée.",
+            message="Aucune règle avec inspection UTM activée n'est déclarée.",
             risk=_risk(
-                "Le contrôle de liaison UTM n'est pas applicable aux politiques exportées.",
+                "Le contrôle de liaison UTM n'est pas applicable aux règles analysées.",
                 "Aucun flux UTM WAN n'a été identifié.",
                 "faible",
-                "Réévaluer après toute activation de logtraffic utm.",
+                "Réévaluer après toute activation de l'inspection UTM.",
             ),
-            recommendation="Surveiller les nouvelles politiques logtraffic utm.",
+            recommendation="Surveiller les nouvelles règles avec inspection UTM.",
             remediation="Aucune remédiation immédiate.",
         )
     return _finding(
@@ -990,14 +1006,14 @@ def check_utm_profile_binding(
             _policy_evidence(configuration, policy, "utm-status") for policy in compliant
         ),
         affected_objects=_affected((policy.policy_id for policy in compliant), "firewall-policy"),
-        message="Les bindings UTM des politiques logtraffic utm sont résolus et actifs.",
+        message="Les profils de sécurité des règles avec inspection UTM sont résolus et actifs.",
         risk=_risk(
-            "Les politiques UTM applicables lient des profils résolubles.",
+            "Les règles UTM applicables référencent des profils résolus.",
             "L'inspection configurée est traçable.",
             "faible",
             "Maintenir les profils et vérifier leurs changements.",
         ),
-        recommendation="Conserver les bindings UTM explicites.",
+        recommendation="Conserver des profils de sécurité explicitement liés.",
         remediation="Aucune remédiation immédiate.",
     )
 
@@ -1052,7 +1068,7 @@ def _check_extintf_any(
             affected_objects=(),
             message="Les objets d'exposition ne peuvent pas être déterminés.",
             risk=risk,
-            recommendation="Fournir firewall vip complet.",
+            recommendation="Fournir l'export complet des objets d'exposition.",
             remediation="Relancer l'export avec les VIP et virtual servers.",
         )
     if (
@@ -1075,10 +1091,10 @@ def _check_extintf_any(
             evidence=(f"Aucun objet {expected_type} applicable",),
             evidence_items=(_section_evidence(configuration, "firewall vip"),),
             affected_objects=(),
-            message=f"Aucun objet {expected_type} n'est déclaré dans le namespace audité.",
+            message=f"Aucun objet {expected_type} n'est déclaré dans la configuration analysée.",
             risk=_risk(
                 f"Aucun objet {expected_type} n'est applicable.",
-                "La règle extintf any ne s'applique à aucun objet prouvé.",
+                "La règle extintf any ne s'applique à aucun objet identifié.",
                 "faible",
                 "Réévaluer après toute création d'objet.",
             ),
@@ -1107,10 +1123,10 @@ def _check_extintf_any(
                 for item in failures
             ),
             affected_objects=_affected((item.name for item in failures), object_type),
-            message=f"Un objet {expected_type} expose explicitement extintf any.",
+            message=f"Un objet {expected_type} est exposé sur toutes les interfaces externes.",
             risk=risk,
-            recommendation="Remplacer extintf any par les interfaces externes nécessaires.",
-            remediation="Limiter extintf puis vérifier les objets publiés.",
+            recommendation="Limiter l'exposition aux interfaces externes nécessaires.",
+            remediation="Limiter les interfaces externes puis vérifier les objets publiés.",
         )
     if unknown or section.certainty is not EvidenceCertainty.CERTAIN:
         return _finding(
@@ -1138,10 +1154,13 @@ def _check_extintf_any(
                 ),
             ),
             affected_objects=_affected((item.name for item in unknown), object_type),
-            message=f"La restriction extintf des objets {expected_type} n'est pas complète.",
+            message=(
+                f"La restriction des interfaces externes des objets {expected_type} "
+                "n'est pas établie."
+            ),
             risk=risk,
-            recommendation="Fournir extintf et les champs de l'objet avec certitude.",
-            remediation="Corriger les mutations ou compléter les objets puis relancer l'audit.",
+            recommendation="Fournir l'interface externe et les champs de l'objet de façon établie.",
+            remediation="Corriger les incohérences ou compléter les objets puis relancer l'audit.",
         )
     return _finding(
         control_id=control_id,
@@ -1156,12 +1175,12 @@ def _check_extintf_any(
         affected_objects=_affected((item.name for item in safe), object_type),
         message=f"Les objets {expected_type} ont une interface externe explicitement bornée.",
         risk=_risk(
-            f"Les objets {expected_type} n'écoutent pas sur any de façon probante.",
+            f"Les objets {expected_type} ne sont pas exposés sur toutes les interfaces externes.",
             "La surface d'exposition est limitée aux interfaces déclarées.",
             "faible",
             "Maintenir les interfaces externes minimales.",
         ),
-        recommendation="Conserver des extintf explicitement limités.",
+        recommendation="Conserver des interfaces externes explicitement limitées.",
         remediation="Aucune remédiation immédiate.",
     )
 
@@ -1321,15 +1340,12 @@ def check_sensitive_protocol_deny(
                 ),
             ),
             affected_objects=(),
-            message=(
-                f"La couverture {SENSITIVE_PROTOCOL_RULESET_ID} "
-                f"{SENSITIVE_PROTOCOL_RULESET_VERSION} est inconnue."
-            ),
+            message=("La couverture des protocoles sensibles n'a pas pu être établie."),
             risk=risk,
-            recommendation="Fournir les politiques LAN vers WAN et leurs services résolus.",
+            recommendation="Fournir les règles LAN vers WAN et leurs services résolus.",
             remediation=(
-                "Relancer l'audit avec firewall policy, service custom et "
-                "groupes complets."
+                "Relancer l'export avec les règles, les services personnalisés "
+                "et les groupes complets."
             ),
         )
     if not section.entries and section.certainty is EvidenceCertainty.CERTAIN:
@@ -1341,17 +1357,14 @@ def check_sensitive_protocol_deny(
             evidence=("firewall policy: section explicitement vide",),
             evidence_items=(_section_evidence(configuration, "firewall policy"),),
             affected_objects=(),
-            message=(
-                f"Aucun flux LAN vers WAN à couvrir pour {SENSITIVE_PROTOCOL_RULESET_ID} "
-                f"{SENSITIVE_PROTOCOL_RULESET_VERSION}."
-            ),
+            message=("Aucun flux LAN vers WAN à couvrir."),
             risk=_risk(
-                "Aucune politique LAN vers WAN n'est déclarée.",
-                "Le contrôle n'est pas applicable au namespace vide.",
+                "Aucune règle LAN vers WAN n'est déclarée.",
+                "Le contrôle n'est pas applicable à une configuration vide.",
                 "faible",
                 "Réévaluer après toute création de politique.",
             ),
-            recommendation="Surveiller les nouvelles politiques LAN vers WAN.",
+            recommendation="Surveiller les nouvelles règles LAN vers WAN.",
             remediation="Aucune remédiation immédiate.",
         )
     scope = _context_wan_scope(configuration, context)
@@ -1419,18 +1432,15 @@ def check_sensitive_protocol_deny(
             affected_objects=_affected(
                 (observation.policy.policy_id for observation in accepting), "firewall-policy"
             ),
-            message=(
-                "Un accept LAN vers WAN couvre un protocole sensible "
-                f"({SENSITIVE_PROTOCOL_RULESET_ID} {SENSITIVE_PROTOCOL_RULESET_VERSION})."
-            ),
+            message=("Une règle acceptée du LAN vers WAN couvre un protocole sensible."),
             risk=risk,
             recommendation=(
-                "Remplacer l'accept par un deny explicite couvrant tous les "
+                "Remplacer la règle acceptée par un refus explicite couvrant tous les "
                 "ports sensibles."
             ),
             remediation=(
-                "Créer ou corriger un service résolu puis placer une politique "
-                "deny explicite."
+                "Créer un service dédié aux protocoles sensibles puis ajouter une "
+                "règle de refus explicite avant les règles d'acceptation."
             ),
         )
     if (
@@ -1471,16 +1481,16 @@ def check_sensitive_protocol_deny(
                 ),
                 "firewall-policy",
             ),
-            message=(
-                "La couverture complète des flux sensibles est inconnue "
-                f"({SENSITIVE_PROTOCOL_RULESET_ID} {SENSITIVE_PROTOCOL_RULESET_VERSION})."
-            ),
+            message=("La couverture complète des flux sensibles n'a pas pu être établie."),
             risk=risk,
             recommendation=(
                 "Résoudre chaque service et fournir action, status, source et "
                 "destination."
             ),
-            remediation="Corriger les objets mutés ou absents puis relancer l'audit.",
+            remediation=(
+                "Corriger les objets concernés ou compléter la configuration, "
+                "puis relancer l'audit."
+            ),
         )
     denies = [observation for observation in observations if observation.action == "deny"]
     if not denies:
@@ -1499,15 +1509,14 @@ def check_sensitive_protocol_deny(
                 ),
             ),
             affected_objects=(),
-            message=(
-                f"Aucun deny explicite ne prouve la couverture "
-                f"{SENSITIVE_PROTOCOL_RULESET_ID}."
-            ),
+            message=("Aucune règle de refus explicite ne couvre les protocoles sensibles."),
             risk=risk,
-            recommendation="Ajouter une politique deny explicite avant les accepts concernés.",
+            recommendation=(
+                "Ajouter une règle de refus explicite avant les règles acceptées concernées."
+            ),
             remediation=(
-                "Créer un service contenant les ports du ruleset et le refuser "
-                "sur LAN vers WAN."
+                "Créer un service regroupant les ports sensibles et le refuser "
+                "du LAN vers WAN."
             ),
         )
     deny_coverage = _PortCoverage(
@@ -1531,18 +1540,15 @@ def check_sensitive_protocol_deny(
             affected_objects=_affected(
                 (observation.policy.policy_id for observation in denies), "firewall-policy"
             ),
-            message=(
-                f"La couverture deny n'est pas complète pour {SENSITIVE_PROTOCOL_RULESET_ID} "
-                f"{SENSITIVE_PROTOCOL_RULESET_VERSION}."
-            ),
+            message=("Le refus explicite ne couvre pas encore tous les protocoles sensibles."),
             risk=risk,
             recommendation=(
                 "Couvrir TCP/UDP 88, 389, TCP 636/445, UDP 1812-1813 et "
                 "TCP/UDP 137-139."
             ),
             remediation=(
-                "Étendre le service deny avec chaque plage du ruleset puis "
-                "relancer l'audit."
+                "Étendre le service de refus à l'ensemble des ports sensibles "
+                "puis relancer l'audit."
             ),
         )
     return _finding(
@@ -1561,17 +1567,14 @@ def check_sensitive_protocol_deny(
         affected_objects=_affected(
             (observation.policy.policy_id for observation in denies), "firewall-policy"
         ),
-        message=(
-            "Les protocoles sensibles sont refusés explicitement "
-            f"({SENSITIVE_PROTOCOL_RULESET_ID} {SENSITIVE_PROTOCOL_RULESET_VERSION})."
-        ),
+        message=("Les protocoles sensibles sont refusés explicitement dans les règles analysées."),
         risk=_risk(
-            "Les flux sensibles couverts par le ruleset sont explicitement refusés.",
+            "Les flux sensibles identifiés sont explicitement refusés.",
             "La propagation de protocoles d'infrastructure vers WAN est réduite.",
             "faible",
             "Maintenir la politique deny et son service résolu.",
         ),
-        recommendation="Conserver le deny explicite et vérifier l'ordre des politiques.",
+        recommendation="Conserver le refus explicite et vérifier l'ordre des règles.",
         remediation="Aucune remédiation immédiate.",
     )
 

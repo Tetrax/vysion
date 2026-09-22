@@ -166,14 +166,20 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
         for name in directive_names
     )
     if disabled:
-        disabled_text = ", ".join(disabled)
+        disabled_text = ", ".join(
+            {
+                "revision-backup-on-logout": "sauvegarde à la déconnexion d'un administrateur",
+                "revision-image-auto-backup": "sauvegarde automatique avant mise à jour",
+            }.get(name, name)
+            for name in disabled
+        )
         return AuditFinding(
             **metadata,
             status=AuditStatus.FAIL,
             applicability=Applicability.APPLICABLE,
             evidence=tuple(f"{name}: disable" for name in disabled),
             evidence_items=evidence_items,
-            message=f"Une sauvegarde automatique de révision est désactivée: {disabled_text}.",
+            message=f"Une sauvegarde automatique de révision est désactivée : {disabled_text}.",
             risk=RiskAssessment(
                 summary=(
                     "Une partie des révisions FortiGate peut ne pas être "
@@ -181,12 +187,12 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
                 ),
                 impact="Une révision peut être perdue après une modification ou une déconnexion.",
                 likelihood="élevée",
-                treatment="Activer les deux directives de sauvegarde automatique.",
+                treatment="Activer les deux options de sauvegarde automatique.",
             ),
-            recommendation="Activer revision-backup-on-logout et revision-image-auto-backup.",
+            recommendation="Activer les deux options de sauvegarde automatique de révision.",
             remediation=(
-                "Configurer revision-backup-on-logout enable et revision-image-auto-backup enable, "
-                "puis vérifier les deux directives."
+                "Activer les deux options de sauvegarde automatique de révision "
+                "puis vérifier leur prise en compte."
             ),
         )
     if complete_section and all(values[name] is None for name in directive_names):
@@ -198,7 +204,7 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
             evidence_items=evidence_items,
             message=(
                 "Les deux sauvegardes automatiques de révision sont absentes de la "
-                "configuration complète."
+                "configuration."
             ),
             risk=RiskAssessment(
                 summary=(
@@ -207,12 +213,12 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
                 ),
                 impact="Une révision peut être perdue après une modification ou une déconnexion.",
                 likelihood="élevée",
-                treatment="Activer les deux directives de sauvegarde automatique.",
+                treatment="Activer les deux options de sauvegarde automatique.",
             ),
-            recommendation="Activer revision-backup-on-logout et revision-image-auto-backup.",
+            recommendation="Activer les deux options de sauvegarde automatique de révision.",
             remediation=(
-                "Configurer revision-backup-on-logout enable et revision-image-auto-backup enable, "
-                "puis vérifier les deux directives."
+                "Activer les deux options de sauvegarde automatique de révision "
+                "puis vérifier leur prise en compte."
             ),
         )
     enabled = (
@@ -234,9 +240,9 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
                 summary="Les révisions peuvent être sauvegardées automatiquement.",
                 impact="Risque résiduel réduit de perte de révision locale.",
                 likelihood="faible",
-                treatment="Conserver les deux directives activées.",
+                treatment="Conserver les deux options activées.",
             ),
-            recommendation="Conserver les deux directives de sauvegarde automatique activées.",
+            recommendation="Conserver les deux options de sauvegarde automatique activées.",
             remediation="Aucune remédiation immédiate; vérifier ce réglage lors des changements.",
         )
     return AuditFinding(
@@ -245,13 +251,16 @@ def check_automatic_revision_backups(configuration: FortiGateConfiguration) -> A
         applicability=Applicability.UNKNOWN,
         evidence=("Sauvegardes automatiques: preuve structurelle incomplète.",),
         evidence_items=evidence_items,
-        message="Les deux directives de sauvegarde automatique ne sont pas prouvées.",
+        message=(
+            "Les deux options de sauvegarde automatique de révision n'ont pas pu "
+            "être établies."
+        ),
         risk=RiskAssessment(
             summary="La sauvegarde automatique des révisions ne peut pas être confirmée.",
             impact="Une révision peut ne pas être récupérable après une modification.",
             likelihood="indéterminée",
-            treatment="Obtenir les deux directives system global avec une valeur certaine.",
+            treatment="Obtenir les deux options de sauvegarde avec une valeur établie.",
         ),
-        recommendation="Fournir une section system global complète avec les deux directives.",
-        remediation="Configurer puis vérifier les deux directives enable avant de conclure.",
+        recommendation="Fournir une configuration complète avec les deux options de sauvegarde.",
+        remediation="Vérifier les deux options de sauvegarde puis relancer l'audit.",
     )

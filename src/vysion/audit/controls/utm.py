@@ -195,7 +195,10 @@ def check_utm_autoupdate(
                 ),
             ),
             affected_objects=(),
-            message="La planification FortiGuard ne peut pas être validée sans licence probante.",
+            message=(
+                "La planification FortiGuard ne peut pas être validée sans licence "
+                "UTM déclarée."
+            ),
             recommendation="Valider la licence UTM avant la planification des mises à jour.",
             remediation="Compléter le contexte de licence puis relancer l'audit.",
         )
@@ -216,8 +219,8 @@ def check_utm_autoupdate(
             ),
             affected_objects=(),
             message=(
-                "Les mises à jour FortiGuard suivent le défaut automatique V1 "
-                "en l'absence de surcharge."
+                "Les mises à jour FortiGuard suivent la planification automatique "
+                "par défaut en l'absence de surcharge."
             ),
             recommendation="Conserver le défaut ou déclarer explicitement la planification.",
             remediation="Aucune remédiation immédiate.",
@@ -485,9 +488,12 @@ def check_webfilter_profiles(
                 ),
             ),
             affected_objects=(),
-            message="La licence UTM ne permet pas de conclure à la conformité WebFilter.",
+            message=(
+                "La conformité des profils Web Filter ne peut pas être conclue "
+                "sans licence UTM déclarée."
+            ),
             recommendation="Valider la licence UTM avant d'évaluer les profils.",
-            remediation="Renseigner un contexte opérateur probant puis relancer l'audit.",
+            remediation="Renseigner le contexte de licence puis relancer l'audit.",
         )
     namespace_invalid = (
         section is None
@@ -500,7 +506,10 @@ def check_webfilter_profiles(
             title=title,
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=("Namespace ou relations WebFilter incomplets.",),
+            evidence=(
+                "Les profils Web Filter utilisés et leurs relations aux règles "
+                "ne sont pas tous établis.",
+            ),
             evidence_items=(
                 EvidenceItem(
                     section="webfilter profile",
@@ -509,7 +518,7 @@ def check_webfilter_profiles(
                 ),
             ),
             affected_objects=(),
-            message="Les profils WebFilter utilisés ne peuvent pas être établis avec certitude.",
+            message="Les profils Web Filter utilisés ne peuvent pas être établis.",
             recommendation="Fournir les profils et leurs liaisons aux politiques.",
             remediation="Compléter l'export ou corriger les références orphelines.",
         )
@@ -740,7 +749,10 @@ def check_dnsfilter_profiles(
                 ),
             ),
             affected_objects=(),
-            message="La conformité DNS Filter ne peut pas être conclue sans licence probante.",
+            message=(
+                "La conformité des profils DNS Filter ne peut pas être conclue "
+                "sans licence UTM déclarée."
+            ),
             recommendation="Valider la licence UTM et sa provenance.",
             remediation="Compléter le contexte puis relancer l'audit.",
         )
@@ -762,8 +774,8 @@ def check_dnsfilter_profiles(
                 ),
             ),
             affected_objects=(),
-            message="Le ruleset DNS Filter dépend d'un modèle FortiGate certain.",
-            recommendation="Fournir un en-tête #config-version unique et valide.",
+            message="La conformité des profils DNS Filter dépend d'un modèle FortiGate identifié.",
+            recommendation="Fournir un export complet avec un en-tête de version unique et valide.",
             remediation="Régénérer l'export complet puis relancer l'audit.",
         )
 
@@ -784,7 +796,10 @@ def check_dnsfilter_profiles(
             title=title,
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=(f"Namespace ou relations DNS Filter incomplets; ruleset {ruleset}.",),
+            evidence=(
+                "Les profils DNS Filter utilisés et leurs relations aux règles "
+                "ne sont pas tous établis.",
+            ),
             evidence_items=(
                 EvidenceItem(
                     section="dnsfilter profile",
@@ -797,7 +812,7 @@ def check_dnsfilter_profiles(
             affected_objects=(),
             message="Les profils DNS Filter réellement utilisés ne sont pas tous établis.",
             recommendation="Fournir les profils et leurs relations aux politiques.",
-            remediation="Corriger le namespace ou les références puis relancer l'audit.",
+            remediation="Corriger les incohérences ou les références puis relancer l'audit.",
         )
 
     projected = {
@@ -964,6 +979,7 @@ def _check_simple_profiles(
     *,
     control_id: str,
     title: str,
+    label: str,
     section_name: str,
     profile_type: str,
     object_type: str,
@@ -998,7 +1014,10 @@ def _check_simple_profiles(
                 ),
             ),
             affected_objects=(),
-            message=f"La licence UTM ne permet pas de conclure pour {title}.",
+            message=(
+                f"La conformité des profils {label} ne peut pas être conclue "
+                "sans licence UTM déclarée."
+            ),
             recommendation="Valider la licence UTM et sa provenance.",
             remediation="Compléter le contexte puis relancer l'audit.",
         )
@@ -1011,7 +1030,10 @@ def _check_simple_profiles(
             title=title,
             status=AuditStatus.UNKNOWN,
             applicability=Applicability.UNKNOWN,
-            evidence=(f"Namespace ou relations {section_name} incomplets.",),
+            evidence=(
+                f"Les profils {label} utilisés et leurs relations aux règles "
+                "ne sont pas tous établis.",
+            ),
             evidence_items=(
                 EvidenceItem(
                     section=section_name,
@@ -1022,8 +1044,8 @@ def _check_simple_profiles(
                 ),
             ),
             affected_objects=(),
-            message="Les profils réellement utilisés ne sont pas tous prouvés.",
-            recommendation="Fournir le namespace et les relations aux politiques.",
+            message="Les profils réellement utilisés ne sont pas tous établis.",
+            recommendation="Fournir les profils et leurs relations aux règles.",
             remediation="Compléter l'export puis relancer l'audit.",
         )
 
@@ -1057,17 +1079,17 @@ def _check_simple_profiles(
         status = AuditStatus.FAIL
         selected = failures
         applicability = Applicability.APPLICABLE
-        message = f"Au moins un profil {section_name} utilisé est explicitement non conforme."
+        message = f"Au moins un profil {label} utilisé est explicitement non conforme."
     elif unknown:
         status = AuditStatus.UNKNOWN
         selected = unknown
         applicability = Applicability.UNKNOWN
-        message = f"La conformité de tous les profils {section_name} n'est pas prouvée."
+        message = f"La conformité de tous les profils {label} n'est pas établie."
     else:
         status = AuditStatus.PASS
         selected = tuple(evaluated)
         applicability = Applicability.APPLICABLE
-        message = f"Tous les profils {section_name} utilisés sont explicitement conformes."
+        message = f"Tous les profils {label} utilisés sont explicitement conformes."
 
     evidence_items: list[EvidenceItem] = []
     for name, _, _, entry in selected:
@@ -1101,7 +1123,7 @@ def _check_simple_profiles(
         status=status,
         applicability=applicability,
         evidence=tuple(
-            f"Profil {section_name} {name}: {item_status.value}"
+            f"Profil {label} {name}: {item_status.value}"
             for name, item_status, _, _ in selected
         ),
         evidence_items=evidence_items,
@@ -1126,6 +1148,7 @@ def check_antivirus_profiles(
         context,
         control_id="UTM-ANTIVIRUS-001",
         title="Conformité des profils Antivirus utilisés",
+        label="Antivirus",
         section_name="antivirus profile",
         profile_type="antivirus profile",
         object_type="antivirus-profile",
@@ -1146,6 +1169,7 @@ def check_ips_profiles(
         context,
         control_id="UTM-IPS-001",
         title="Conformité des profils IPS utilisés",
+        label="IPS",
         section_name="ips sensor",
         profile_type="ips sensor",
         object_type="ips-profile",
@@ -1163,6 +1187,7 @@ def check_appcontrol_profiles(
         context,
         control_id="UTM-APPCONTROL-001",
         title="Conformité des profils Application Control utilisés",
+        label="Application Control",
         section_name="application list",
         profile_type="application list",
         object_type="application-control-profile",

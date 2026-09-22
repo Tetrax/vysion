@@ -708,8 +708,12 @@ end
     assert audit(deceptive)["FW-SENSITIVE-PROTOCOL-DENY-001"].status is AuditStatus.UNKNOWN
     finding = audit(exposed)["FW-SENSITIVE-PROTOCOL-DENY-001"]
     assert finding.status is AuditStatus.FAIL
-    assert SENSITIVE_PROTOCOL_RULESET_ID in " ".join(finding.evidence)
-    assert SENSITIVE_PROTOCOL_RULESET_VERSION in finding.message
+    evidence_text = " ".join(str(item) for item in finding.evidence)
+    assert SENSITIVE_PROTOCOL_RULESET_ID in evidence_text
+    assert SENSITIVE_PROTOCOL_RULESET_VERSION in evidence_text
+    # The client-visible message stays business-worded: the versioned ruleset
+    # identity is traceability data and lives in the evidence only.
+    assert "fortigate-sensitive-protocols" not in finding.message
 
 
 def test_sensitive_protocols_pass_only_with_explicit_deny_coverage() -> None:

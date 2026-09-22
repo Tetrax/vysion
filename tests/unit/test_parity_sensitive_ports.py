@@ -123,8 +123,9 @@ def test_global_any_deny_with_complete_typed_ports_covers_lan_to_wan() -> None:
     assert finding.status is AuditStatus.PASS
     assert finding.affected_objects[0].name == "100"
     evidence_text = " ".join(str(item) for item in finding.evidence)
-    assert SENSITIVE_PROTOCOL_RULESET_ID in finding.message
     assert SENSITIVE_PROTOCOL_RULESET_VERSION in evidence_text
+    # Client wording stays business-worded; the ruleset identity is evidence.
+    assert SENSITIVE_PROTOCOL_RULESET_ID not in finding.message
     assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
 
 
