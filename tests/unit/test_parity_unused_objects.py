@@ -1,3 +1,5 @@
+import pytest
+
 from vysion.audit.engine import AuditEngine
 from vysion.audit.models import AuditStatus, EvidenceCertainty
 from vysion.audit.parser import FortiGateParser
@@ -141,3 +143,57 @@ end
 """
 
     assert _unused_finding(raw).status is AuditStatus.NOT_APPLICABLE
+
+
+@pytest.mark.parametrize(
+    "section_spelling",
+    ["application list", "firewall application list"],
+)
+def test_unset_options_on_application_list_does_not_make_unused_objects_indeterminate(
+    section_spelling: str,
+) -> None:
+    """Real 7.4 backup: ``unset options`` on application-list entries.
+
+    The mutation does not touch any reference the usage graph relies on, so it
+    must not turn the whole control into UNKNOWN.  Both the modern and the
+    compatibility section spellings must behave identically.
+    """
+
+    raw = f"""config firewall service custom
+end
+config firewall service group
+end
+config {section_spelling}
+    edit "APPCTRL_USERS"
+        unset options
+    next
+end
+config firewall policy
+end
+"""
+
+    finding = _unused_finding(raw)
+
+    assert finding.status is AuditStatus.FAIL
+    assert [(item.object_type, item.name) for item in finding.affected_objects] == [
+        ("appcontrol", "APPCTRL_USERS")
+    ]
+
+
+def test_unset_reference_bearing_directive_stays_unknown() -> None:
+    """A mutation on a reference carrier can hide usage and stays fail-closed."""
+
+    raw = """config firewall service custom
+end
+config firewall service group
+end
+config firewall addrgrp
+    edit "group-a"
+        unset member
+    next
+end
+config firewall policy
+end
+"""
+
+    assert _unused_finding(raw).status is AuditStatus.UNKNOWN

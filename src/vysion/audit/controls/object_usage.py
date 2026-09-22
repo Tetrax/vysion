@@ -97,8 +97,11 @@ def _family_objects(
         entries = tuple(_iter_entries(section))
         for entry in entries:
             if entry.invalidated_keys or (
-                any(item.mutation for item in entry.directives)
-                and not entry.parsed_keys
+                not entry.parsed_keys
+                and any(
+                    item.mutation and item.name not in _REFERENCE_NEUTRAL_MUTATIONS
+                    for item in entry.directives
+                )
             ):
                 incomplete = True
             key = entry.name.casefold()
@@ -122,6 +125,17 @@ def _family_objects(
 _NON_REFERENCE_DIRECTIVES = frozenset({
     "alias", "comment", "comments", "description", "email-to", "global-label",
     "label", "name", "password", "sms-phone", "timezone", "uuid",
+})
+
+# Mutations on these directives cannot add or remove object references the
+# usage graph relies on, so they must not make the whole control
+# indeterminate.  Real 7.4 backups carry ``unset options`` on application-list
+# entries (APPCTRL_USERS and peers), which previously turned CFG-UNUSED into
+# UNKNOWN.  Mutations on reference carriers (``member``, ``srcaddr``, ...)
+# remain fail-closed.
+_REFERENCE_NEUTRAL_MUTATIONS = _NON_REFERENCE_DIRECTIVES | frozenset({
+    "deep-app-inspection",
+    "options",
 })
 
 

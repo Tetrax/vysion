@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 from vysion.audit.models import (
     Applicability,
     AuditContext,
@@ -111,6 +113,80 @@ def _graph_has_cycle(groups: dict[str, object]) -> bool:
     return any(visit(name) for name in groups)
 
 
+# A geography object always carries ``set type geography`` in a FortiOS backup
+# (non-default ``type`` values are written out; the V1 legacy check reads that
+# literal line).  An entry without a ``type`` directive is therefore provably
+# not a geography object, and only a present-but-uncertain ``type`` directive
+# can hide one.
+# Policy directives that carry the address/interface references the GEO-IP
+# usage question relies on.  Other policy fields (action, service, profiles,
+# logging) cannot add or remove a geography reference.
+_GEO_POLICY_REFERENCE_KEYS = frozenset({"dstaddr", "dstintf", "srcaddr", "srcintf"})
+
+
+def _geographic_facts_indeterminate(configuration: FortiGateConfiguration) -> bool:
+    """Fail-closed check limited to the facts the GEO-IP question needs.
+
+    The historical guard required full object/group/policy proof, but real
+    7.2/7.4 backups omit defaults (address ``type``, policy ``action``,
+    ``srcaddr``/``dstaddr`` on internet-service rules) and kept the control
+    indeterminate.  Genuine uncertainty on the address nature, the group
+    memberships and the policy address/interface references stays
+    fail-closed.
+    """
+
+    address_section = configuration.document.section("firewall address")
+    if address_section is not None:
+        for entry in address_section.entries:
+            if "type" in entry.invalidated_keys or any(
+                directive.name == "type"
+                and (directive.mutation or directive.certainty is not EvidenceCertainty.CERTAIN)
+                for directive in entry.directives
+            ):
+                return True
+    group_section = configuration.document.section("firewall addrgrp")
+    if group_section is not None:
+        for entry in group_section.entries:
+            if "member" in entry.invalidated_keys or any(
+                directive.name == "member"
+                and (directive.mutation or directive.certainty is not EvidenceCertainty.CERTAIN)
+                for directive in entry.directives
+            ):
+                return True
+    policy_section = configuration.document.section("firewall policy")
+    if policy_section is not None:
+        for entry in policy_section.entries:
+            if entry.certainty is not EvidenceCertainty.CERTAIN:
+                return True
+            for directive in entry.directives:
+                if directive.name in _GEO_POLICY_REFERENCE_KEYS and (
+                    directive.mutation
+                    or directive.certainty is not EvidenceCertainty.CERTAIN
+                ):
+                    return True
+    return False
+
+
+def _duplicated_geographic_names(configuration: FortiGateConfiguration) -> bool:
+    """Only a duplicated *geography* name makes the GEO-IP answer ambiguous.
+
+    Real 7.4 backups carry case-variant duplicates of plain ipmask/fqdn
+    objects (``CFP-PCD-MAR08``/``cfp-pcd-mar08``); they cannot change the
+    geographic set nor a geography reference.
+    """
+
+    counts: Counter[str] = Counter(
+        item.name.casefold() for item in configuration.address_objects
+    )
+    duplicated = {name for name, count in counts.items() if count > 1}
+    if not duplicated:
+        return False
+    return any(
+        item.address_type == "geography" and item.name.casefold() in duplicated
+        for item in configuration.address_objects
+    )
+
+
 def check_legacy_geo_ip_usage(
     configuration: FortiGateConfiguration,
     context: AuditContext | None = None,
@@ -129,9 +205,15 @@ def check_legacy_geo_ip_usage(
             "Aucune sélection WAN n'a été fournie pour évaluer ce point.",
         )
     sections = (address_section, group_section, policy_section)
+    # A complete export without one of the three sections proves the family is
+    # empty (nothing to reference), so the control can still conclude; an
+    # incomplete export keeps the historical fail-closed result.  A section
+    # that exists but is not certain always stays indeterminate.
     if any(
-        section is None or section.certainty is not EvidenceCertainty.CERTAIN
+        section is not None and section.certainty is not EvidenceCertainty.CERTAIN
         for section in sections
+    ) or (
+        not configuration.complete_backup and any(section is None for section in sections)
     ):
         return _unknown(
             control_id,
@@ -142,14 +224,10 @@ def check_legacy_geo_ip_usage(
     objects = {item.name.casefold(): item for item in configuration.address_objects}
     groups = {item.name.casefold(): item for item in configuration.address_groups}
     if (
-        len(objects) != len(configuration.address_objects)
+        _duplicated_geographic_names(configuration)
         or len(groups) != len(configuration.address_groups)
-        or any(
-            item.proof_state is not ProofState.PROVEN
-            for item in (*objects.values(), *groups.values())
-        )
         or _graph_has_cycle(groups)
-        or any(policy.proof_state is not ProofState.PROVEN for policy in configuration.policies)
+        or _geographic_facts_indeterminate(configuration)
     ):
         return _unknown(
             control_id,
