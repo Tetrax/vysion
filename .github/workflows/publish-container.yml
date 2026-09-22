@@ -1,22 +1,123 @@
-name: Publish container image
+name: CI and publish container image
 
 on:
+  pull_request:
   push:
     branches:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-
 concurrency:
-  group: publish-container-main
+  group: ci-publish-container-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  publish:
+  python:
+    name: Python tests and Ruff
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install locked dependencies
+        run: uv sync --group dev
+
+      - name: Run the test suite
+        run: uv run pytest -q
+
+      - name: Run Ruff
+        run: uv run ruff check src tests
+
+  frontend:
+    name: Frontend tests, lint and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run the frontend tests
+        run: npm test
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Audit the frontend dependencies
+        run: npm audit --audit-level=high
+
+  stack:
+    name: Compose stack contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Refuse to resolve without an immutable image tag
+        run: |
+          if docker compose config --quiet; then
+            echo "compose.yml resolved without IMAGE_TAG, the immutable tag must be required" >&2
+            exit 1
+          fi
+
+      - name: Render the final stack on 127.0.0.1:8080
+        run: IMAGE_TAG="sha-$(git rev-parse HEAD)" docker compose config > /tmp/vysion-stack-8080.yml
+
+      - name: Render the temporary validation stack on 127.0.0.1:18080
+        run: HOST_PORT=18080 IMAGE_TAG="sha-$(git rev-parse HEAD)" docker compose config > /tmp/vysion-stack-18080.yml
+
+      - name: Assert loopback bind, exact external volume and no obsolete network
+        run: |
+          for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do
+            grep -q 'host_ip: 127.0.0.1' "$rendered"
+            grep -q 'name: vysion-reports' "$rendered"
+            grep -q 'external: true' "$rendered"
+            if grep -q 'Subnet-Docker' "$rendered"; then
+              echo "obsolete Subnet-Docker network found in $rendered" >&2
+              exit 1
+            fi
+            if grep -q 'ssl' "$rendered"; then
+              echo "internal TLS material found in $rendered" >&2
+              exit 1
+            fi
+          done
+          grep -q 'published: "8080"' /tmp/vysion-stack-8080.yml
+          grep -q 'published: "18080"' /tmp/vysion-stack-18080.yml
+
+  publish:
+    name: Publish container image
+    needs:
+      - python
+      - frontend
+      - stack
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
