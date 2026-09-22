@@ -4,7 +4,7 @@
 
 - repository GitHub privé unique ;
 - `compose.yml` versionné unique, servi par la Git Stack Portainer unique ;
-- image GHCR immuable `ghcr.io/tetrax/vysion:sha-<commit complet>`, jamais `latest` ;
+- image GHCR immuable `ghcr.io/tetrax/vysion:sha-<commit complet>`, jamais `latest` : la CI ne publie que des tags `sha-<commit complet>` ;
 - aucun `docker compose up/down` dans le parcours normal : la bascule et le rollback utilisent Portainer, l'arrêt de l'ancienne instance est la seule opération hôte documentée ;
 - aucun secret dans Git : identifiants Git et GHCR saisis dans Portainer uniquement.
 
@@ -20,20 +20,24 @@
 
 | Variable | Rôle | Valeur |
 | --- | --- | --- |
-| `IMAGE_TAG` | tag GHCR immuable `sha-<commit complet>` | **requis**, aucune valeur par défaut |
+| `IMAGE_COMMIT` | commit complet (40 hex) de l'image déployée ; Compose en ajoute le préfixe `sha-` | **requis**, aucune valeur par défaut |
 | `BIND_ADDRESS` | IP publiée sur l'hôte (IP uniquement) | `127.0.0.1` |
 | `HOST_PORT` | port publié sur l'hôte (port uniquement) | `8080` en production, `18080` pendant la validation |
 | `VYSION_REVISION` | révision compilée dans l'image | renseignée par CI |
 
 `BIND_ADDRESS` et `HOST_PORT` sont indépendants : on ne change jamais l'IP pour changer le port.
 
+`IMAGE_COMMIT` est le commit seul (40 hex minuscules) : Compose construit `ghcr.io/tetrax/vysion:sha-${IMAGE_COMMIT}`, seule référence déployable. Sans `IMAGE_COMMIT`, avec l'ancien nom `IMAGE_TAG` ou avec une valeur `latest`, la pile refuse de se résoudre ; le contrat CI rejette en plus tout rendu différent de `ghcr.io/tetrax/vysion:sha-[0-9a-f]{40}`.
+
 ```bash
-# la pile refuse de se résoudre sans tag immuable
+# la pile refuse de se résoudre sans le commit d'image
 docker compose config --quiet                       # échec attendu
-# cible finale
-HOST_PORT=8080  IMAGE_TAG=sha-<commit complet> docker compose config --quiet
+# l'ancien nom mutable ne résout plus rien
+IMAGE_TAG=latest docker compose config --quiet      # échec attendu
+# cible finale (IMAGE_COMMIT = git rev-parse HEAD, sans préfixe)
+HOST_PORT=8080  IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet
 # validation temporaire à côté de l'instance en service
-HOST_PORT=18080 IMAGE_TAG=sha-<commit complet> docker compose config --quiet
+HOST_PORT=18080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet
 ```
 
 ## Volume des rapports
@@ -114,8 +118,8 @@ docker volume rm "$CHECK"
 
 ### G3 — validation temporaire sur `HOST_PORT=18080`
 
-1. `HOST_PORT=18080 IMAGE_TAG=sha-<commit complet> docker compose config --quiet` (contrat de la pile) ;
-2. déployer dans Portainer une pile temporaire `vysion-smoke` depuis le même `compose.yml`, avec `HOST_PORT=18080`, `BIND_ADDRESS=127.0.0.1`, `IMAGE_TAG=sha-<commit complet>` ;
+1. `HOST_PORT=18080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet` (contrat de la pile) ;
+2. déployer dans Portainer une pile temporaire `vysion-smoke` depuis le même `compose.yml`, avec `HOST_PORT=18080`, `BIND_ADDRESS=127.0.0.1`, `IMAGE_COMMIT=<commit complet 40 hex>` ;
 3. contrôles :
    - `docker inspect --format '{{.State.Health.Status}}' <conteneur>` → `healthy` ;
    - `curl -s http://127.0.0.1:18080/healthz` → JSON `status: ok` ;
@@ -143,8 +147,8 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 ### G5 — déploiement final sur `HOST_PORT=8080`
 
-1. `HOST_PORT=8080 IMAGE_TAG=sha-<commit complet> docker compose config --quiet` ;
-2. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_TAG=sha-<commit complet>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1` (plus les variables métier si nécessaires) ;
+1. `HOST_PORT=8080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet` ;
+2. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_COMMIT=<commit complet 40 hex>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1` (plus les variables métier si nécessaires) ;
 3. ne jamais utiliser `latest`.
 
 ### G6 — contrôles post-bascule
@@ -173,7 +177,7 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 **Actions, dans cet ordre** :
 
-1. **Régression applicative, pile saine** : dans Portainer, remettre `IMAGE_TAG=sha-<dernier commit sain connu>` puis **Update the stack** (jamais `latest`). La configuration et le volume ne changent pas.
+1. **Régression applicative, pile saine** : dans Portainer, remettre `IMAGE_COMMIT=<dernier commit sain connu 40 hex>` puis **Update the stack** (jamais de tag mutable). La configuration et le volume ne changent pas.
 2. **Pile inutilisable** : dans Portainer, arrêter puis supprimer la stack `vysion` — un volume déclaré `external` n'est jamais supprimé avec la stack — puis restaurer l'ancienne instance :
 
    ```bash
