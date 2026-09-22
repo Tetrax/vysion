@@ -193,6 +193,40 @@ end
     assert all(item.certainty is EvidenceCertainty.CERTAIN for item in finding.evidence_items)
 
 
+def test_sdwan_empty_selection_is_unknown_instead_of_vacuously_passing() -> None:
+    raw = """config system interface
+    edit "wan1"
+        set role wan
+    next
+end
+config system sdwan
+    set status enable
+    config zone
+        edit "virtual-wan-link"
+        next
+    end
+    config members
+        edit 1
+            set interface "wan1"
+            set zone "virtual-wan-link"
+        next
+    end
+end
+"""
+    configuration = FortiGateParser().parse(raw)
+    context = AuditContext(wan_selections=())
+
+    finding = next(
+        item
+        for item in AuditEngine(default_registry()).run(configuration, context=context)
+        if item.control_id == "NET-SDWAN-USAGE-001"
+    )
+
+    assert finding.status is AuditStatus.UNKNOWN
+    assert finding.applicability.value == "unknown"
+    assert finding.message == "Aucune sélection WAN n'a été fournie pour évaluer ce point."
+
+
 def test_sdwan_missing_selected_interface_is_a_certain_failure() -> None:
     raw = """config system sdwan
     set status enable
