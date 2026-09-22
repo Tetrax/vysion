@@ -1,6 +1,6 @@
 services:
   vysion:
-    image: ghcr.io/tetrax/vysion:${IMAGE_TAG:?set IMAGE_TAG to an immutable ghcr.io/tetrax/vysion:sha-<full commit> tag}
+    image: ghcr.io/tetrax/vysion:sha-${IMAGE_COMMIT:?set IMAGE_COMMIT to the full 40-hex commit sha of the image to deploy, without the sha- prefix}
     build:
       context: .
       dockerfile: Dockerfile
