@@ -2,9 +2,13 @@
 
 ## Frontière d'exposition
 
-- seul Nginx écoute sur le port conteneur `8443` ;
+- seul Nginx écoute sur le port conteneur `8080`, en HTTP clair ;
+- le Nginx de l'hôte termine TLS pour `vysion.valdev.me` : aucun certificat ni clé dans le conteneur ;
 - FastAPI écoute sur `127.0.0.1:8000` ;
-- le port hôte est lié à `${BIND_ADDRESS}:8080` ;
+- le port hôte est lié à `${BIND_ADDRESS}:${HOST_PORT}` (`127.0.0.1` et `8080` par défaut), seul ingress de la pile ;
+- aucune IP Docker statique et aucun réseau externe (`Subnet-Docker` supprimé) ;
+- l'image est référencée par un tag GHCR immuable `sha-<commit complet>`, jamais `latest` ;
+- le volume `vysion-reports` est déclaré externe : la pile ne le crée ni ne le supprime ;
 - l'accès reste limité par le firewall externe du fournisseur VPS et la source réseau configurée.
 
 ## Défense en profondeur du conteneur
@@ -16,17 +20,17 @@
 - tmpfs bornés ;
 - volume unique pour les rapports ;
 - limites CPU, mémoire et PID ;
-- certificats montés en lecture seule ;
+- configuration HTTP versionnée dans l'image, sans montage de configuration ni de certificat ;
 - aucun Node/Vite dans le runtime.
 
 ## HTTP
 
+Le TLS (1.2/1.3, Let's Encrypt) est terminé par le Nginx de l'hôte. Dans le conteneur,
 Nginx applique :
 
 - `client_max_body_size 5m` ;
 - `client_body_timeout 15s` ;
 - timeouts proxy bornés ;
-- TLS 1.2/1.3 ;
 - CSP restrictive ;
 - `X-Content-Type-Options` ;
 - `X-Frame-Options` ;

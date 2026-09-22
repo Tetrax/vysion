@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "decision_id": "0006-host-terminated-tls-loopback-http",
+  "status": "accepted",
+  "scope": "Vysion v2 - edge HTTP/TLS, ports et volume pour la Git Stack Portainer sur le VPS",
+  "decision": "DECISION ACCEPTEE : le TLS est terminé par le Nginx de l'hôte (vysion.valdev.me, Let's Encrypt) et le conteneur parle HTTP clair sur le port 8080, publié uniquement via le bind 127.0.0.1:${HOST_PORT:-8080}, référence une image GHCR immuable sha-<commit complet> et attache le volume externe exact vysion-reports. Cette décision restreint la contrainte TLS du conteneur issue de 0001 sans remettre en cause son choix d'un conteneur unique.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Conserver TLS dans le conteneur (certificats montés, port 8443)",
+      "assessment": {
+        "tls": "Second terminaison TLS derrière celui de l'hôte, sans valeur ajoutée : deux couches TLS pour un seul vhost.",
+        "certificat_renouvellement": "Montage hôte vers /run/vysion/tls et redéploiement Portainer à chaque renouvellement, en plus du renouvellement hôte.",
+        "portainer": "La pile doit monter un chemin hôte hors Git ; le healthcheck dépend d'un certificat lisible par l'UID 10001.",
+        "rollback": "Le repli dépend de fichiers hôtes non versionnés.",
+        "cohabitation": "Le bind hôte 8080 doit rediriger vers 8443, ce qui sépare la configuration hôte de la configuration de la pile."
+      }
+    },
+    {
+      "id": "B",
+      "name": "TLS terminé par l'hôte, HTTP clair strictement loopback dans le conteneur",
+      "assessment": {
+        "tls": "Une seule couche TLS, déjà opérationnelle et renouvelée par Let's Encrypt sur l'hôte.",
+        "certificat_renouvellement": "Aucun certificat dans le conteneur : rien à monter ni à renouveler côté pile.",
+        "portainer": "Aucun montage hors Git : la configuration HTTP est versionnée dans deploy/nginx.conf et copiée dans l'image.",
+        "rollback": "Le repli ne dépend que de la pile versionnée et du volume externes.",
+        "cohabitation": "HOST_PORT=18080 permet une validation à côté de l'instance en service sur 8080, BIND_ADDRESS restant réservé à l'IP."
+      }
+    }
+  ],
+  "criteria": [
+    "une seule couche TLS, terminée là où elle l'est déjà",
+    "aucun fichier hors Git requis pour démarrer le conteneur",
+    "cohabitation possible avec l'instance en service pendant la validation",
+    "continuité exacte du volume de rapports vysion-reports",
+    "image de déploiement immuable et auditable",
+    "durcissement du conteneur préservé"
+  ],
+  "rationale": [
+    "L'instance en service tourne déjà derrière le Nginx hôte en 127.0.0.1:8080 avec une configuration HTTP montée depuis un fichier non versionné : la versionner dans l'image supprime cette dépendance sans changer le comportement observé.",
+    "Séparer HOST_PORT de BIND_ADDRESS permet de valider une pile temporaire sur 18080 sans toucher au bind 8080 de l'instance en service, puis de revenir explicitement à HOST_PORT=8080 pour la bascule.",
+    "Le volume doit être déclaré externe avec le nom exact vysion-reports : un volume implicite serait créé sous un autre nom et isolerait les rapports existants.",
+    "Le réseau statique Subnet-Docker et l'IP Docker fixe ne servent plus : le seul ingress est le bind loopback."
+  ],
+  "constraints": [
+    "BIND_ADDRESS ne porte qu'une IP, HOST_PORT qu'un port ; la cible de production est HOST_PORT=8080.",
+    "Aucun certificat, aucune clé et aucun montage TLS dans le conteneur.",
+    "Aucune IP Docker statique et aucun réseau externe Subnet-Docker.",
+    "Volume externe nommé exactement vysion-reports, jamais créé ni supprimé par la pile.",
+    "Image référencée par ghcr.io/tetrax/vysion:sha-<commit complet>, jamais latest.",
+    "Durcissement préservé : utilisateur non-root, read_only, cap_drop ALL, no-new-privileges, limites CPU/RAM/PID et tmpfs.",
+    "Aucun secret dans Git : credentials Git et GHCR saisis dans Portainer.",
+    "La publication GHCR est conditionnée aux gates CI (tests Python, Ruff, tests/lint/build frontend, contrat Compose)."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Instance en service inspectée sur le VPS (bind 127.0.0.1:8080, healthcheck HTTP, volume vysion-reports, montage de deploy/nginx-container-http.conf non versionné)",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "Inspection en lecture seule de l'instance vysion-vysion-1 durant la tâche t_8ff502c4."
+    },
+    {
+      "url": null,
+      "purpose": "Verdict de l'audit parent t_67eb5d54 : séparateur HOST_PORT/BIND_ADDRESS, continuité du volume, alignement HTTP/TLS, suppression de Subnet-Docker, gates CI",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "Exigences bloquantes transférées à la tâche d'implémentation t_8ff502c4."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Cible HTTP loopback définie au cadrage de la tâche t_8ff502c4 ; décision humaine explicite du 2026-09-22 après la seconde review de l'audit t_67eb5d54 : corriger avec un HOST_PORT séparé, ne pas accepter le risque.",
+    "remote_publication": "not approved",
+    "portainer_deployment": "prepared, not executed"
+  },
+  "rollback_boundary": "Aucun déploiement actif n'est modifié par cette décision. Tant que la bascule n'est pas validée, l'instance en service et son volume restent intacts ; le runbook docs/OPERATIONS.md conserve un conteneur de repli et des déclencheurs de rollback explicites."
+}
