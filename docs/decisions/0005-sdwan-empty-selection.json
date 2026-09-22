@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "decision_id": "0005-sdwan-empty-selection",
+  "status": "accepted",
+  "scope": "Vysion audit - selection WAN vide (NET-SDWAN-USAGE-001 et controles dependants)",
+  "decision": "DECISION ACCEPTEE : une selection WAN vide doit produire un resultat explicitement indetermine / A VERIFIER, jamais CONFORME. Une amelioration GUI empechant ou signalant une selection vide pourra etre traitee separement.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Uniformiser : selection vide => indetermine explicite (motif unique)",
+      "assessment": {
+        "fidelite": "Coherent avec GEO-IP ('Aucune selection WAN n'a ete fournie...').",
+        "client": "Evite un PASS trompeur sur un point non evalue.",
+        "risque": "Changement de statut pour les runs sans selection (nosel) ; test transversal a mettre a jour."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Conserver V2 : PASS a vide avec wording dedie",
+      "assessment": {
+        "fidelite": "Conserve le passe ; le lecteur voit un point conforme non evalue.",
+        "client": "Peut etre lu comme une validation qui n'a pas eu lieu.",
+        "risque": "Faux sentiment de conformite."
+      }
+    }
+  ],
+  "criteria": [
+    "un point non evalue ne doit pas etre presente comme conforme",
+    "un seul motif pour toutes les selections vides (lisibilite client)"
+  ],
+  "rationale": "Constat terrain : avec une selection vide, NET-SDWAN-USAGE-001 renvoie PASS sans qu'aucune WAN n'ait ete analysee, tandis que NET-GEO-IP-USAGE-001 renvoie un indetermine explicite. Les deux reponses coexistent dans le meme rapport, ce qui est incoherent pour le lecteur client. Aucune source officielle FortiOS n'est necessaire ici : l'arbitrage est un choix de restitution.",
+  "constraints": [
+    "aucune modification fonctionnelle dans cette PR documentaire",
+    "tout ecart du moteur doit etre traite dans un item separe avec TDD"
+  ],
+  "sources": [],
+  "approval": {
+    "status": "accepted",
+    "note": "Option A acceptee par Tetrax le 2026-09-22."
+  },
+  "rollback_boundary": "Aucun code modifie."
+}

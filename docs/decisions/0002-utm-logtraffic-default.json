@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "decision_id": "0002-utm-logtraffic-default",
+  "status": "accepted",
+  "scope": "Vysion audit parite V1/V2 - controle UTM logs (FW-UTM-PROFILE-BINDING-001)",
+  "decision": "DECISION ACCEPTEE : conserver un resultat indetermine / A VERIFIER lorsque `logtraffic` est absent et qu'aucune valeur explicite ni source ne permet de prouver le defaut FortiOS. Ne pas reproduire l'inference V1 sans preuve.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Conserver V2 : absence de logtraffic => indetermine documente",
+      "assessment": {
+        "fidelite": "Ne suppose aucune valeur par defaut non documentee ; reste fail-closed.",
+        "client": "Le point est marque a investiguer avec une explication metier ; le client peut fournir le contexte manquant.",
+        "risque": "Ecart residuel avec V1 qui appliquait son hypothese implicite (NC sur CF-UK-WIGAN)."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Aligner sur V1 : absence de logtraffic => UTM par defaut suppose",
+      "assessment": {
+        "fidelite": "Reproduit la lecture V1 mais s'appuie sur une valeur par defaut NON documentee dans la documentation officielle consultee.",
+        "client": "Resultat deterministe comme V1.",
+        "risque": "CONCLUSION POTENTIELLEMENT FAUSSE si le defaut reel n'est pas celui suppose : le rapport client affirmerait une couverture UTM non prouvee."
+      }
+    },
+    {
+      "id": "C",
+      "name": "Exiger un contexte operateur explicite (valeur par defaut declaree)",
+      "assessment": {
+        "fidelite": "Sourcable et reversible ; tracable dans le JSON.",
+        "client": "Demande une action supplementaire pour conclure.",
+        "risque": "Complexite de saisie ; a coupler avec le contexte de licence deja existant."
+      }
+    }
+  ],
+  "criteria": [
+    "aucune conclusion client ne doit reposer sur une valeur par defaut non etablie",
+    "l'ecart avec V1 doit etre documente et arbitre, pas corrige par une supposition",
+    "la decision doit rester reversible sans migration de donnees"
+  ],
+  "rationale": "Constat terrain (validation du 2026-09-18) : sur CF-UK-WIGAN (7.4.9), 18 regles portent des profils UTM par defaut sans `logtraffic` explicite ; V1 concluait non conforme en supposant la journalisation UTM active, V2 conclut non concluable. Recherche documentaire officielle : la CLI Reference documente les valeurs all/utm/disable mais PAS la valeur par defaut ; aucune difference de version 6.4/7.0/7.2/7.4 etablie. La representation d'un defaut dans un backup est en revanche documentee : `show` n'affiche que les valeurs non par defaut (cf. sources) - l'absence de la directive dans un backup n'est donc PAS une preuve de sa valeur. Toute conclusion positive/négative sur `logtraffic` exigerait de trancher le defaut : non etabli a ce jour.",
+  "constraints": [
+    "conserver le comportement fail-closed tant que le defaut FortiOS n'est pas etabli par une source probante",
+    "toute modification ulterieure devra etre un correctif cible avec TDD"
+  ],
+  "sources": [
+    "https://docs.fortinet.com/document/fortigate/7.4.2/cli-reference/293620/config-firewall-security-policy",
+    "https://docs.fortinet.com/document/fortigate/6.2.0/cookbook/627485/subcommands"
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Option A acceptee par Tetrax le 2026-09-22."
+  },
+  "rollback_boundary": "Aucun code modifie ; la note peut etre revisee ou retiree sans impact."
+}
