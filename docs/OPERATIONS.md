@@ -4,7 +4,7 @@
 
 - repository GitHub privé unique ;
 - `compose.yml` versionné unique, servi par la Git Stack Portainer unique ;
-- image GHCR immuable `ghcr.io/tetrax/vysion:sha-<commit complet>`, jamais `latest` : la CI ne publie que des tags `sha-<commit complet>` ;
+- image GHCR immuable référencée par digest OCI `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : la CI publie en plus un tag humain `sha-<commit complet>` et lie l'image à son commit par le label OCI `org.opencontainers.image.revision`, vérifié à la publication ;
 - aucun `docker compose up/down` dans le parcours normal : la bascule et le rollback utilisent Portainer, l'arrêt de l'ancienne instance est la seule opération hôte documentée ;
 - aucun secret dans Git : identifiants Git et GHCR saisis dans Portainer uniquement.
 
@@ -20,25 +20,50 @@
 
 | Variable | Rôle | Valeur |
 | --- | --- | --- |
-| `IMAGE_COMMIT` | commit complet (40 hex) de l'image déployée ; Compose en ajoute le préfixe `sha-` | **requis**, aucune valeur par défaut |
+| `IMAGE_DIGEST` | digest OCI `sha256:<64 hex>` de l'image déployée (voir « Obtenir et saisir la référence immuable ») | **requis**, aucune valeur par défaut |
 | `BIND_ADDRESS` | IP publiée sur l'hôte (IP uniquement) | `127.0.0.1` |
 | `HOST_PORT` | port publié sur l'hôte (port uniquement) | `8080` en production, `18080` pendant la validation |
 | `VYSION_REVISION` | révision compilée dans l'image | renseignée par CI |
 
 `BIND_ADDRESS` et `HOST_PORT` sont indépendants : on ne change jamais l'IP pour changer le port.
 
-`IMAGE_COMMIT` est le commit seul (40 hex minuscules) : Compose construit `ghcr.io/tetrax/vysion:sha-${IMAGE_COMMIT}`, seule référence déployable. Sans `IMAGE_COMMIT`, avec l'ancien nom `IMAGE_TAG` ou avec une valeur `latest`, la pile refuse de se résoudre ; le contrat CI rejette en plus tout rendu différent de `ghcr.io/tetrax/vysion:sha-[0-9a-f]{40}`.
+`IMAGE_DIGEST` est le digest complet `sha256:<64 hex>` de l'image : Compose ne peut rendre que `ghcr.io/tetrax/vysion@${IMAGE_DIGEST}`, une référence adressée par le contenu. Un tag n'est tout simplement pas exprimable à cet endroit. Sans `IMAGE_DIGEST` ou avec une valeur vide, la pile refuse de se résoudre (interpolation Compose). Pour toute autre valeur non conforme — `latest`, `sha-latest`, un SHA court, une valeur majuscule ou non hexadécimale — Compose rend la référence mais Docker lui-même la refuse à l'acquisition de l'image (`invalid reference format` / `invalid checksum digest format`), avant tout contact au registre et avant toute création de conteneur : aucun service ne peut devenir `healthy`. Une image construite localement ne peut pas non plus usurper la référence déployée, Docker refusant de taguer un digest (`build tag cannot contain a digest`). Le contrat CI rejette en plus tout rendu différent de `ghcr.io/tetrax/vysion@sha256:[0-9a-f]{64}` et toute référence que `docker pull` accepterait.
 
 ```bash
-# la pile refuse de se résoudre sans le commit d'image
+# la pile refuse de se résoudre sans le digest d'image
 docker compose config --quiet                       # échec attendu
+IMAGE_DIGEST= docker compose config --quiet         # échec attendu (valeur vide)
 # l'ancien nom mutable ne résout plus rien
 IMAGE_TAG=latest docker compose config --quiet      # échec attendu
-# cible finale (IMAGE_COMMIT = git rev-parse HEAD, sans préfixe)
-HOST_PORT=8080  IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet
+# cible finale (IMAGE_DIGEST = sha256:<64 hex> publié par la CI)
+HOST_PORT=8080  IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
 # validation temporaire à côté de l'instance en service
-HOST_PORT=18080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet
+HOST_PORT=18080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
 ```
+
+## Obtenir et saisir la référence immuable
+
+1. relever le commit à déployer (`git rev-parse HEAD`, 40 hex) et vérifier que la CI **exact-head** de ce commit est entièrement verte ;
+2. obtenir le digest `sha256:<64 hex>` publié par la CI pour ce commit, au choix :
+   - journal de l'étape « Verify the commit link and print the immutable digest » du job **Publish container image** : la ligne affichée est `ghcr.io/tetrax/vysion@sha256:<64 hex>` — copier la partie après `@` ;
+   - `docker buildx imagetools inspect ghcr.io/tetrax/vysion:sha-<commit complet>` → ligne `Digest: sha256:<64 hex>` ;
+3. le lien digest ↔ commit est prouvé à la publication : la même étape CI compare `org.opencontainers.image.revision` du push réel à `github.sha` et refuse sinon ;
+4. saisir dans Portainer, variables de la stack : `IMAGE_DIGEST=sha256:<64 hex>`, `HOST_PORT`, `BIND_ADDRESS` (plus les variables métier) ;
+5. contrôler le rendu avant déploiement : `HOST_PORT=<port> IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet`.
+
+## Vérifier l'image réellement exécutée
+
+```bash
+# la référence configurée du conteneur : doit être ghcr.io/tetrax/vysion@sha256:<64 hex>
+docker inspect --format '{{.Config.Image}}' vysion-vysion-1
+# le digest réellement présent dans le daemon, attaché au nom de l'image
+docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+  "$(docker inspect --format '{{.Image}}' vysion-vysion-1)"
+# le commit attendu : preuve digest <-> commit via le label OCI
+docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' vysion-vysion-1
+```
+
+Le premier doit être la saisie `IMAGE_DIGEST`, le troisième doit être le commit 40 hex déployé. Un digest local reconstruit (RepoDigests vide) ou un label absent signe une image qui n'a pas été publiée par la CI : rollback.
 
 ## Volume des rapports
 
@@ -80,7 +105,7 @@ Les étapes sont séquencées. Un gate non vert interdit de passer à l'étape s
 ### G0 — conditions d'arrêt (gate d'entrée)
 
 - PR vérifiée fusionnée sur `main`, CI verte au HEAD exact ;
-- image `ghcr.io/tetrax/vysion:sha-<commit complet>` publiée par CI et visible dans GHCR ;
+- image `ghcr.io/tetrax/vysion:sha-<commit complet>` publiée par CI et visible dans GHCR, digest `sha256:<64 hex>` relevé (journal CI ou `docker buildx imagetools inspect`) ;
 - sauvegarde du volume réalisée **et** restaurée avec succès sur un volume jetable (G1) ;
 - credential Git et credential GHCR opérationnels dans Portainer (G2) ;
 - pile de validation saine sur `HOST_PORT=18080` (G3) ;
@@ -118,10 +143,12 @@ docker volume rm "$CHECK"
 
 ### G3 — validation temporaire sur `HOST_PORT=18080`
 
-1. `HOST_PORT=18080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet` (contrat de la pile) ;
-2. déployer dans Portainer une pile temporaire `vysion-smoke` depuis le même `compose.yml`, avec `HOST_PORT=18080`, `BIND_ADDRESS=127.0.0.1`, `IMAGE_COMMIT=<commit complet 40 hex>` ;
+1. `HOST_PORT=18080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet` (contrat de la pile) ;
+2. déployer dans Portainer une pile temporaire `vysion-smoke` depuis le même `compose.yml`, avec `HOST_PORT=18080`, `BIND_ADDRESS=127.0.0.1`, `IMAGE_DIGEST=sha256:<64 hex>` ;
 3. contrôles :
    - `docker inspect --format '{{.State.Health.Status}}' <conteneur>` → `healthy` ;
+   - `docker inspect --format '{{.Config.Image}}' <conteneur>` → `ghcr.io/tetrax/vysion@sha256:<64 hex>` saisi ;
+   - `docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' <conteneur>` → commit 40 hex attendu ;
    - `curl -s http://127.0.0.1:18080/healthz` → JSON `status: ok` ;
    - UI chargée sur `http://127.0.0.1:18080/` ;
    - création d'audit avec un export JSON, DOCX et XLSX ;
@@ -147,13 +174,15 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 ### G5 — déploiement final sur `HOST_PORT=8080`
 
-1. `HOST_PORT=8080 IMAGE_COMMIT=<commit complet 40 hex> docker compose config --quiet` ;
-2. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_COMMIT=<commit complet 40 hex>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1` (plus les variables métier si nécessaires) ;
-3. ne jamais utiliser `latest`.
+1. `HOST_PORT=8080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet` ;
+2. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_DIGEST=sha256:<64 hex>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1` (plus les variables métier si nécessaires) ;
+3. ne jamais utiliser `latest` : toute référence non immuable est refusée par Docker avant le démarrage du conteneur.
 
 ### G6 — contrôles post-bascule
 
 - `docker inspect --format '{{.State.Health.Status}}' vysion-vysion-1` → `healthy` ;
+- `docker inspect --format '{{.Config.Image}}' vysion-vysion-1` → `ghcr.io/tetrax/vysion@sha256:<64 hex>` déployé ;
+- `docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' vysion-vysion-1` → commit 40 hex attendu (voir « Vérifier l'image réellement exécutée ») ;
 - `curl -s http://127.0.0.1:8080/healthz` → JSON `status: ok` avec la bonne révision ;
 - `curl -sI https://vysion.valdev.me/` depuis l'extérieur → réponse TLS du Nginx hôte puis 200 ;
 - UI chargée, création d'audit, exports JSON / DOCX / XLSX ;
@@ -177,7 +206,7 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 **Actions, dans cet ordre** :
 
-1. **Régression applicative, pile saine** : dans Portainer, remettre `IMAGE_COMMIT=<dernier commit sain connu 40 hex>` puis **Update the stack** (jamais de tag mutable). La configuration et le volume ne changent pas.
+1. **Régression applicative, pile saine** : dans Portainer, remettre `IMAGE_DIGEST=<sha256:<64 hex> du dernier état sain>` (variable `IMAGE_DIGEST` actuellement déployée, visible dans Portainer, ou digest affiché par la CI du commit sain) puis **Update the stack** (jamais de tag mutable). La configuration et le volume ne changent pas.
 2. **Pile inutilisable** : dans Portainer, arrêter puis supprimer la stack `vysion` — un volume déclaré `external` n'est jamais supprimé avec la stack — puis restaurer l'ancienne instance :
 
    ```bash

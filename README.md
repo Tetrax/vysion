@@ -85,15 +85,19 @@ npm audit --audit-level=high
 
 ## Validation de livraison
 
-`IMAGE_COMMIT` est obligatoire et vaut le commit complet (40 hex) de l'image :
-Compose en déduit la référence immuable `ghcr.io/tetrax/vysion:sha-<commit>`.
-Sans lui la commande échoue, l'ancien nom `IMAGE_TAG` ne résout plus rien, et
-une valeur mutable ne peut jamais produire une référence déployable.
+`IMAGE_DIGEST` est obligatoire et vaut le digest OCI `sha256:<64 hex>` de
+l'image : Compose en déduit la référence immuable `ghcr.io/tetrax/vysion@<digest>`.
+Sans lui — ou avec une valeur vide — la commande échoue ; `latest`, `sha-latest`,
+un SHA court ou une valeur non hexadécimale sont refusés par Docker lui-même
+à l'acquisition de l'image, avant tout conteneur. Le digest se lit dans le
+journal de la CI de publication ou avec
+`docker buildx imagetools inspect ghcr.io/tetrax/vysion:sha-<commit>`.
 
 ```bash
-IMAGE_COMMIT="$(git rev-parse HEAD)" docker compose config --quiet
-HOST_PORT=18080 IMAGE_COMMIT="$(git rev-parse HEAD)" docker compose config --quiet
-IMAGE_COMMIT="$(git rev-parse HEAD)" docker compose build --pull
+IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+HOST_PORT=18080 IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+docker build --pull -t vysion:local .   # un build local ne peut jamais porter la
+                                        # référence de déploiement (digest non taguable)
 ```
 
 Aucun certificat n'est nécessaire pour démarrer le conteneur : le TLS est terminé

@@ -7,7 +7,7 @@
 - FastAPI écoute sur `127.0.0.1:8000` ;
 - le port hôte est lié à `${BIND_ADDRESS}:${HOST_PORT}` (`127.0.0.1` et `8080` par défaut), seul ingress de la pile ;
 - aucune IP Docker statique et aucun réseau externe (`Subnet-Docker` supprimé) ;
-- l'image est référencée par un tag GHCR immuable `sha-<commit complet>`, jamais `latest` : `IMAGE_COMMIT` (40 hex) est obligatoire, Compose ajoute le préfixe `sha-`, le contrat CI rejette tout rendu hors `ghcr.io/tetrax/vysion:sha-[0-9a-f]{40}` et la CI ne publie que ce format ;
+- l'image est référencée par digest OCI immuable `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : `IMAGE_DIGEST` (`sha256:<64 hex>`) est obligatoire, Compose ne rend que `ghcr.io/tetrax/vysion@${IMAGE_DIGEST}` (aucun tag n'est exprimable), Docker refuse toute référence malformée (`latest`, `sha-latest`, SHA court, hex majuscule ou non hexadécimale) à l'acquisition de l'image avant tout conteneur, le contrat CI exige `ghcr.io/tetrax/vysion@sha256:[0-9a-f]{64}` et la publication vérifie le lien avec le label `org.opencontainers.image.revision` ;
 - le volume `vysion-reports` est déclaré externe : la pile ne le crée ni ne le supprime ;
 - l'accès reste limité par le firewall externe du fournisseur VPS et la source réseau configurée.
 

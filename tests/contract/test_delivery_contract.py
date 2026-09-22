@@ -10,9 +10,29 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 
-# The only deployable image reference: compose hard-codes the `sha-` prefix and
-# requires the full commit, so a mutable tag can never satisfy the contract.
-IMMUTABLE_IMAGE_PATTERN = re.compile(r"^ghcr\.io/tetrax/vysion:sha-[0-9a-f]{40}$")
+# The only deployable image reference: compose hard-codes the registry and
+# repository and interpolates only into the digest position of `name@digest`,
+# so a tag — mutable by definition — can never be expressed in the rendered
+# reference.
+IMMUTABLE_IMAGE_PATTERN = re.compile(r"^ghcr\.io/tetrax/vysion@sha256:[0-9a-f]{64}$")
+
+# Every non-immutable value must be refused before a container can exist:
+# compose refuses the empty value at interpolation time, and Docker itself
+# refuses the malformed references while acquiring the image ("invalid
+# reference format" / "invalid checksum digest format", before any registry
+# contact and before any container is created).
+NON_IMMUTABLE_IMAGE_VALUES = (
+    "latest",  # mutable tag
+    "sha-latest",  # legacy pseudo-tag from the previous contract
+    "deadbeef",  # short SHA, bare
+    "sha256:deadbeef",  # short SHA with algorithm
+    "sha256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789",  # uppercase hex
+    "sha256:zzzz0123456789zzzz0123456789zzzz0123456789zzzz0123456789zzzz0123",  # non-hex
+)
+
+# Format-valid digest used to render the stack: rendering never needs the
+# image to exist — only the reference must be immutable and well-formed.
+VALID_DIGEST = "sha256:" + "0123456789abcdef" * 4
 
 
 def test_runtime_reports_ignore_is_anchored_without_hiding_source_modules() -> None:
@@ -36,12 +56,13 @@ def test_compose_targets_one_loopback_http_service_with_one_external_volume() ->
     # port so a temporary 18080 stack can coexist with the running instance
     # before the final 8080 cutover.
     assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"]
-    # The stack refuses to resolve without the full image commit, and compose
-    # hard-codes the `sha-` prefix so a mutable tag such as `latest` is
+    # The stack refuses to resolve without the image digest, and compose
+    # interpolates only into the digest position of `name@digest`: a tag is
     # structurally impossible in the rendered image reference.
-    assert service["image"].startswith("ghcr.io/tetrax/vysion:sha-${IMAGE_COMMIT:")
+    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST:")
     assert ":?" in service["image"]
     assert "IMAGE_TAG" not in service["image"]
+    assert "IMAGE_COMMIT" not in service["image"]
     assert "pull_policy" not in service
     # Hardening of the running instance is preserved.
     assert service["read_only"] is True
@@ -78,75 +99,140 @@ def _require_docker_compose() -> None:
         pytest.skip("the docker compose plugin is required to render compose.yml")
 
 
-def _compose_config(empty_env: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
-    """Render compose.yml deterministically: IMAGE_* never leaks from the
-    caller's environment and --env-file replaces any local .env file."""
+def _require_docker_daemon() -> None:
+    probe = subprocess.run(["docker", "info"], capture_output=True, check=False)
+    if probe.returncode != 0:
+        pytest.skip("a running docker daemon is required to prove the refusal gate")
+
+
+def _clean_env(**env: str) -> dict[str, str]:
+    """IMAGE_* never leaks from the caller's environment; --env-file replaces
+    any local .env file."""
     clean = {key: value for key, value in os.environ.items() if not key.startswith("IMAGE_")}
     clean.update(env)
+    return clean
+
+
+def _compose_config(empty_env: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["docker", "compose", "--env-file", str(empty_env), "config", *args],
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env=clean,
+        env=_clean_env(**env),
+        check=False,
+    )
+
+
+def _compose_pull(empty_env: Path, value: str) -> subprocess.CompletedProcess:
+    """The deployment step that runs before any container exists: acquiring
+    the image, exactly as `docker compose up` does on the host."""
+    return subprocess.run(
+        ["docker", "compose", "--env-file", str(empty_env), "pull", "vysion"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=_clean_env(IMAGE_DIGEST=value),
+        check=False,
+    )
+
+
+def _compose_ps(empty_env: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["docker", "compose", "--env-file", str(empty_env), "ps", "-a"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=_clean_env(IMAGE_DIGEST=VALID_DIGEST),
         check=False,
     )
 
 
 def test_compose_refuses_every_non_immutable_image_reference(tmp_path: Path) -> None:
-    """Negative contract: without the full image commit the stack must not
-    resolve at all — neither with no value nor with the legacy mutable
-    `IMAGE_TAG=latest` — and a mutable value must never yield a deployable
-    immutable reference."""
+    """Negative contract: `latest`, `sha-latest`, short SHAs, uppercase or
+    non-hex values and the empty value are all refused — the empty value by
+    compose at interpolation time, the others by Docker itself while acquiring
+    the image — and no container of the stack is ever created, so Vysion can
+    never become healthy with them."""
     _require_docker_compose()
+    _require_docker_daemon()
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("")
 
     missing = _compose_config(empty_env, "--quiet")
     assert missing.returncode != 0, missing.stdout + missing.stderr
 
-    # The reported reproduction: the legacy mutable tag must not resolve.
+    empty = _compose_config(empty_env, "--quiet", IMAGE_DIGEST="")
+    assert empty.returncode != 0, empty.stdout + empty.stderr
+
+    # The legacy mutable variables must not resolve either.
     legacy = _compose_config(empty_env, "--quiet", IMAGE_TAG="latest")
     assert legacy.returncode != 0, legacy.stdout + legacy.stderr
+    legacy_commit = _compose_config(empty_env, "--quiet", IMAGE_COMMIT="latest")
+    assert legacy_commit.returncode != 0, legacy_commit.stdout + legacy_commit.stderr
 
-    mutable = _compose_config(empty_env, IMAGE_COMMIT="latest")
-    if mutable.returncode == 0:
-        image = yaml.safe_load(mutable.stdout)["services"]["vysion"]["image"]
-        # The `sha-` prefix is structural: the bare mutable tag can never be
-        # rendered, and the result fails the immutable deployment contract.
-        assert image.startswith("ghcr.io/tetrax/vysion:sha-")
-        assert "vysion:latest" not in image
-        assert IMMUTABLE_IMAGE_PATTERN.fullmatch(image) is None
+    for value in NON_IMMUTABLE_IMAGE_VALUES:
+        rendered = _compose_config(empty_env, IMAGE_DIGEST=value)
+        if rendered.returncode != 0:
+            continue  # already refused by compose itself
+        image = yaml.safe_load(rendered.stdout)["services"]["vysion"]["image"]
+        # Every rendered non-immutable reference must be rejected while the
+        # image is acquired: through compose, and directly at the daemon with
+        # the exact reference compose would pull.
+        pull = _compose_pull(empty_env, value)
+        assert pull.returncode != 0, pull.stdout + pull.stderr
+        direct = subprocess.run(
+            ["docker", "pull", image],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+            check=False,
+        )
+        assert direct.returncode != 0, direct.stdout + direct.stderr
+
+    # Nothing was ever created for the stack: no container can become healthy.
+    ps = _compose_ps(empty_env)
+    assert ps.returncode == 0, ps.stdout + ps.stderr
+    rows = [line for line in ps.stdout.splitlines() if line.strip() and not line.startswith("NAME")]
+    assert rows == [], rows
 
 
-def test_compose_renders_the_exact_immutable_reference_for_a_full_commit(
+def test_compose_renders_the_exact_immutable_reference_for_a_valid_digest(
     tmp_path: Path,
 ) -> None:
-    """Positive contract: a full 40-hex commit renders exactly the immutable
-    GHCR reference used for the deployment."""
+    """Positive contract: a format-valid OCI digest renders exactly the
+    immutable GHCR reference used for the deployment, on both cutover ports."""
     _require_docker_compose()
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("")
-    commit = "0123456789abcdef0123456789abcdef01234567"
 
-    rendered = _compose_config(empty_env, IMAGE_COMMIT=commit)
-    assert rendered.returncode == 0, rendered.stdout + rendered.stderr
-    image = yaml.safe_load(rendered.stdout)["services"]["vysion"]["image"]
-    assert image == f"ghcr.io/tetrax/vysion:sha-{commit}"
-    assert IMMUTABLE_IMAGE_PATTERN.fullmatch(image)
+    for host_port in ("8080", "18080"):
+        rendered = _compose_config(empty_env, HOST_PORT=host_port, IMAGE_DIGEST=VALID_DIGEST)
+        assert rendered.returncode == 0, rendered.stdout + rendered.stderr
+        service = yaml.safe_load(rendered.stdout)["services"]["vysion"]
+        image = service["image"]
+        assert image == f"ghcr.io/tetrax/vysion@{VALID_DIGEST}"
+        assert IMMUTABLE_IMAGE_PATTERN.fullmatch(image)
+        # The port scenarios stay valid: loopback bind, target 8080 inside,
+        # the requested port published outside.
+        port = service["ports"][0]
+        assert port["host_ip"] == "127.0.0.1"
+        assert port["target"] == 8080
+        assert str(port["published"]) == host_port
 
 
-def test_env_example_pins_an_immutable_image_commit_and_a_separate_host_port() -> None:
+def test_env_example_pins_an_immutable_image_digest_and_a_separate_host_port() -> None:
     entries = dict(
         line.split("=", maxsplit=1)
         for line in (ROOT / ".env.example").read_text().splitlines()
         if line and not line.startswith("#")
     )
 
-    # The example itself satisfies the immutable contract: a full 40-hex commit,
-    # never a mutable tag and never the legacy variable name.
-    assert re.fullmatch(r"[0-9a-f]{40}", entries["IMAGE_COMMIT"])
+    # The example itself satisfies the immutable contract: a full sha256
+    # digest, never a mutable tag and never a legacy variable name.
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", entries["IMAGE_DIGEST"])
     assert "IMAGE_TAG" not in entries
+    assert "IMAGE_COMMIT" not in entries
     assert entries["BIND_ADDRESS"] == "127.0.0.1"
     assert entries["HOST_PORT"] == "8080"
     assert "TLS_CERTS_DIR" not in entries
@@ -165,8 +251,28 @@ def test_operations_doc_publishes_the_sequenced_cutover_and_rollback_checklist()
         "restauration",
         "rollback",
         "ghcr",
+        # The runbook must say how to obtain and enter the immutable
+        # reference, and how to verify the image actually running.
+        "image_digest",
+        "imagetools",
+        "org.opencontainers.image.revision",
     ):
         assert marker in operations, marker
+
+
+def test_ci_publishes_the_commit_tag_and_verifies_the_revision_label_link() -> None:
+    """Traceability contract: CI still publishes the human tag sha-<commit>
+    and ties the image back to its commit through the OCI label
+    org.opencontainers.image.revision — verified at publish time against
+    github.sha — while the publish job prints the digest operators paste into
+    IMAGE_DIGEST."""
+    workflow = (ROOT / ".github/workflows/publish-container.yml").read_text()
+
+    assert "tags: ghcr.io/tetrax/vysion:sha-${{ github.sha }}" in workflow
+    assert "org.opencontainers.image.revision=${{ github.sha }}" in workflow
+    # The publish job proves the link on the pushed image, not only in source.
+    assert 'index .Config.Labels "org.opencontainers.image.revision"' in workflow
+    assert "RepoDigests" in workflow
 
 
 def test_field_backup_module_collects_without_permission_errors() -> None:

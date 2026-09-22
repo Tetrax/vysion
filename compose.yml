@@ -1,6 +1,10 @@
 services:
   vysion:
-    image: ghcr.io/tetrax/vysion:sha-${IMAGE_COMMIT:?set IMAGE_COMMIT to the full 40-hex commit sha of the image to deploy, without the sha- prefix}
+    # Only a content-addressed OCI digest can be rendered: a tag (latest,
+    # sha-latest, short or non-hex SHA) is structurally inexpressible here and
+    # Docker refuses every malformed reference while acquiring the image,
+    # before any container exists.
+    image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
     build:
       context: .
       dockerfile: Dockerfile
