@@ -1,22 +1,160 @@
-name: Publish container image
+name: CI and publish container image
 
 on:
+  pull_request:
   push:
     branches:
       - main
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-
 concurrency:
-  group: publish-container-main
+  group: ci-publish-container-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  publish:
+  python:
+    name: Python tests and Ruff
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install locked dependencies
+        run: uv sync --group dev
+
+      - name: Run the test suite
+        run: uv run pytest -q
+
+      - name: Run Ruff
+        run: uv run ruff check src tests
+
+  frontend:
+    name: Frontend tests, lint and build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run the frontend tests
+        run: npm test
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Build the frontend
+        run: npm run build
+
+      - name: Audit the frontend dependencies
+        run: npm audit --audit-level=high
+
+  stack:
+    name: Compose stack contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Refuse to resolve without the immutable image digest
+        run: |
+          if docker compose config --quiet; then
+            echo "compose.yml resolved without IMAGE_DIGEST, the immutable digest must be required" >&2
+            exit 1
+          fi
+          if IMAGE_DIGEST= docker compose config --quiet; then
+            echo "compose.yml resolved with an empty IMAGE_DIGEST" >&2
+            exit 1
+          fi
+          if IMAGE_TAG=latest docker compose config --quiet; then
+            echo "compose.yml still resolves with the legacy mutable IMAGE_TAG=latest" >&2
+            exit 1
+          fi
+
+      - name: Render both port scenarios with the immutable digest reference
+        run: |
+          DIGEST="sha256:$(printf 'a%.0s' {1..64})"
+          IMAGE_DIGEST="$DIGEST" HOST_PORT=8080  docker compose config > /tmp/vysion-stack-8080.yml
+          IMAGE_DIGEST="$DIGEST" HOST_PORT=18080 docker compose config > /tmp/vysion-stack-18080.yml
+          for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do
+            if ! grep -Eq '^ *image: ghcr\.io/tetrax/vysion@sha256:[0-9a-f]{64}$' "$rendered"; then
+              echo "$rendered does not reference ghcr.io/tetrax/vysion@sha256:<64 hex>" >&2
+              exit 1
+            fi
+          done
+
+      - name: Refuse every non-immutable value while acquiring the image
+        run: |
+          # latest, sha-latest, short SHAs, uppercase and non-hex values must
+          # all be rejected by docker itself — before any container can exist.
+          for value in latest sha-latest deadbeef sha256:deadbeef \
+            sha256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789 \
+            sha256:zzzz0123456789zzzz0123456789zzzz0123456789zzzz0123456789zzzz0123; do
+            if rendered="$(IMAGE_DIGEST="$value" docker compose config 2>/dev/null)"; then
+              image="$(printf '%s\n' "$rendered" | awk '/^ *image:/{print $2; exit}')"
+              if [ -z "$image" ]; then
+                echo "no image rendered for IMAGE_DIGEST=$value" >&2
+                exit 1
+              fi
+              if docker pull "$image" >/tmp/vysion-pull.log 2>&1; then
+                echo "docker accepted the non-immutable reference $image" >&2
+                exit 1
+              fi
+              echo "refused $image: $(head -1 /tmp/vysion-pull.log)"
+            else
+              echo "compose refused IMAGE_DIGEST=$value (acceptable, immutable references only)"
+            fi
+          done
+
+      - name: Assert loopback bind, exact external volume and no obsolete network
+        run: |
+          for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do
+            grep -q 'host_ip: 127.0.0.1' "$rendered"
+            grep -q 'name: vysion-reports' "$rendered"
+            grep -q 'external: true' "$rendered"
+            if grep -q 'Subnet-Docker' "$rendered"; then
+              echo "obsolete Subnet-Docker network found in $rendered" >&2
+              exit 1
+            fi
+            if grep -q 'ssl' "$rendered"; then
+              echo "internal TLS material found in $rendered" >&2
+              exit 1
+            fi
+          done
+          grep -q 'published: "8080"' /tmp/vysion-stack-8080.yml
+          grep -q 'published: "18080"' /tmp/vysion-stack-18080.yml
+
+  publish:
+    name: Publish container image
+    needs:
+      - python
+      - frontend
+      - stack
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -38,9 +176,7 @@ jobs:
           file: ./Dockerfile
           push: true
           pull: true
-          tags: |
-            ghcr.io/tetrax/vysion:latest
-            ghcr.io/tetrax/vysion:sha-${{ github.sha }}
+          tags: ghcr.io/tetrax/vysion:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -48,3 +184,15 @@ jobs:
             VYSION_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify the commit link and print the immutable digest
+        run: |
+          docker pull "ghcr.io/tetrax/vysion:sha-${{ github.sha }}"
+          revision="$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "ghcr.io/tetrax/vysion:sha-${{ github.sha }}")"
+          if [ "$revision" != "${{ github.sha }}" ]; then
+            echo "org.opencontainers.image.revision=$revision does not match ${{ github.sha }}" >&2
+            exit 1
+          fi
+          echo "Link digest <-> commit verified (revision label == github.sha)."
+          echo "IMAGE_DIGEST value for the Portainer stack (copy after the @):"
+          docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "ghcr.io/tetrax/vysion:sha-${{ github.sha }}"

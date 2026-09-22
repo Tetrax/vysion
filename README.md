@@ -11,8 +11,9 @@ Vysion v2 est le nouveau socle interne SNS Security d'audit de configurations Fo
 - stockage par UUID v4 avec timestamps UTC, TTL, purge au démarrage, avant écriture et à la lecture ;
 - adaptateur FortiGuard fail-closed pour la disponibilité et la corrélation PSIRT (`UNKNOWN` ou `ERROR`, jamais `PASS` implicite) ;
 - interface React minimale compilée au build, avec téléchargement des trois formats ;
-- un Dockerfile multi-stage, un conteneur, un service Compose et un volume ;
-- Nginx interne pour TLS, limites HTTP, headers, statiques et proxy `/api` ;
+- un Dockerfile multi-stage, un conteneur, un service Compose et un volume externe `vysion-reports` ;
+- Nginx interne en HTTP sur `8080` pour les limites HTTP, les headers, les statiques et le proxy `/api` ;
+- TLS terminé par le Nginx de l'hôte : aucun certificat, aucune clé et aucun montage TLS dans le conteneur ;
 - FastAPI accessible uniquement sur `127.0.0.1` dans le conteneur.
 
 Ce socle ne porte volontairement pas toutes les règles legacy. Le rapport JSON typé est la source
@@ -34,15 +35,16 @@ Le contrôle MFA ne conclut `PASS` que pour les méthodes actuellement reconnues
 ## Architecture
 
 ```text
-HTTPS :443
-   │
-   ▼
+HTTPS :443                     Nginx de l'hôte (Let's Encrypt)
+   │                                   │
+   └────────────► 127.0.0.1:${HOST_PORT:-8080}
+                              │
+                              ▼
 ┌──────────────────────────────────────┐
 │ Conteneur unique Vysion             │
 │                                      │
-│ Nginx non-root :8443                │
-│ ├─ TLS et headers                   │
-│ ├─ limite upload et timeouts        │
+│ Nginx non-root :8080 (HTTP clair)    │
+│ ├─ limites HTTP et headers           │
 │ ├─ fichiers React compilés          │
 │ └─ /api → 127.0.0.1:8000            │
 │                    │                 │
@@ -55,10 +57,16 @@ HTTPS :443
 │              └─ exports DOCX/XLSX   │
 └───────────────────┬──────────────────┘
                     ▼
-           volume vysion-reports
+     volume externe vysion-reports
 ```
 
-Décision HTTPS : `docs/decisions/0001-single-container-http-edge.json`.
+Le conteneur n'écoute qu'à travers le bind `${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}` :
+pas d'IP Docker statique, pas de réseau externe. `BIND_ADDRESS` sélectionne l'IP,
+`HOST_PORT` sélectionne le port (`8080` en production, `18080` pendant une validation
+temporaire).
+
+Décision d'edge : `docs/decisions/0001-single-container-http-edge.json` et
+`docs/decisions/0006-host-terminated-tls-loopback-http.json`.
 
 ## Développement local
 
@@ -77,19 +85,28 @@ npm audit --audit-level=high
 
 ## Validation de livraison
 
+`IMAGE_DIGEST` est obligatoire et vaut le digest OCI `sha256:<64 hex>` de
+l'image : Compose en déduit la référence immuable `ghcr.io/tetrax/vysion@<digest>`.
+Sans lui — ou avec une valeur vide — la commande échoue ; `latest`, `sha-latest`,
+un SHA court ou une valeur non hexadécimale sont refusés par Docker lui-même
+à l'acquisition de l'image, avant tout conteneur. Le digest se lit dans le
+journal de la CI de publication ou avec
+`docker buildx imagetools inspect ghcr.io/tetrax/vysion:sha-<commit>`.
+
 ```bash
-docker compose config --quiet
-docker compose build --pull
+IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+HOST_PORT=18080 IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+docker build --pull -t vysion:local .   # un build local ne peut jamais porter la
+                                        # référence de déploiement (digest non taguable)
 ```
 
-Le démarrage nécessite un certificat et une clé hors Git :
+Aucun certificat n'est nécessaire pour démarrer le conteneur : le TLS est terminé
+par le Nginx de l'hôte, et la configuration HTTP du conteneur est versionnée dans
+`deploy/nginx.conf` puis copiée dans l'image.
 
-```text
-/opt/vysion/tls/tls.crt
-/opt/vysion/tls/tls.key
-```
-
-Aucun déploiement Portainer n'est autorisé par la création de ce socle. La méthode future unique sera Portainer Git Stack après validation explicite.
+Aucun déploiement automatique n'est autorisé par la création de ce socle. Le chemin
+unique est la Git Stack Portainer, avec la checklist de bascule et de rollback de
+`docs/OPERATIONS.md`.
 
 ## Données et confidentialité
 
