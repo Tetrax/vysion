@@ -46,7 +46,7 @@ def test_runtime_reports_ignore_is_anchored_without_hiding_source_modules() -> N
     assert (ROOT / "src/vysion/reports/json_report.py").is_file()
 
 
-def test_compose_targets_one_loopback_http_service_with_one_external_volume() -> None:
+def test_compose_targets_one_loopback_http_service_with_stable_external_volumes() -> None:
     raw = (ROOT / "compose.yml").read_text()
     compose = yaml.safe_load(raw)
 
@@ -77,11 +77,17 @@ def test_compose_targets_one_loopback_http_service_with_one_external_volume() ->
     assert service["cpus"] == "${CPU_LIMIT:-1.0}"
     assert service["tmpfs"]
     assert service["restart"] == "unless-stopped"
-    # Exactly one named volume, declared external so the reports data keeps its
-    # identity across stacks; no bind mount, no static IP, no external network.
-    assert list(compose["volumes"]) == ["vysion-reports"]
+    # Two named volumes, declared external so the reports data and the durable
+    # administration state keep their identity across stacks; no bind mount,
+    # no static IP, no external network. The certificate volume only exists in
+    # the standalone stack (compose.standalone.yml).
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state"]
     assert compose["volumes"]["vysion-reports"] == {"external": True, "name": "vysion-reports"}
-    assert service["volumes"] == ["vysion-reports:/app/data/reports"]
+    assert compose["volumes"]["vysion-state"] == {"external": True, "name": "vysion-state"}
+    assert service["volumes"] == [
+        "vysion-reports:/app/data/reports",
+        "vysion-state:/app/data/state",
+    ]
     assert "networks" not in service
     assert "networks" not in compose
     # No internal TLS: the host Nginx already terminates TLS for the vhost.
@@ -315,9 +321,14 @@ def test_nginx_serves_plain_http_on_8080_and_forwards_the_host_proxy_headers() -
         "location = /healthz",
         "location /api/",
         "proxy_pass http://127.0.0.1:8000",
+        # $http_host keeps the client port: the origin check compares against
+        # the exact Host the browser used (18080/18443 staging included).
+        "proxy_set_header Host $http_host;",
         "proxy_set_header X-Real-IP $http_x_real_ip;",
         "proxy_set_header X-Forwarded-For $http_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;",
+        "proxy_set_header X-Forwarded-Proto $vysion_forwarded_proto;",
+        "map $http_x_forwarded_proto $vysion_forwarded_proto {",
+        "default $http_x_forwarded_proto;",
         "try_files $uri $uri/ /index.html",
     ):
         assert directive in nginx, directive
@@ -346,7 +357,11 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
     assert "USER vysion:vysion" in runtime
     assert "--host 127.0.0.1" in entrypoint
     assert "--factory" in entrypoint
-    assert "nginx -g 'daemon off;'" in entrypoint
+    # The default runtime stays plain HTTP: the standalone TLS terminator is
+    # an explicit opt-in (VYSION_TLS_BACKEND=local selects the separate
+    # nginx-standalone.conf), never the default config.
+    assert "nginx -c \"$nginx_config\" -g 'daemon off;'" in entrypoint
+    assert "nginx_config=/etc/nginx/nginx.conf" in entrypoint
     assert "trap 'shutdown 0' INT TERM" in entrypoint
     assert "shutdown 1" in entrypoint
     for path in (
@@ -357,6 +372,45 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
         "/tmp/nginx/scgi_temp",
     ):
         assert path in entrypoint
+
+
+def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -> None:
+    """Decision 0007: the standalone stack terminates TLS itself and must
+    resolve only with an immutable digest plus an explicit hostname, while
+    mounting the three stable external volumes (certificates live apart from
+    state and reports)."""
+    raw = (ROOT / "compose.standalone.yml").read_text()
+    compose = yaml.safe_load(raw)
+
+    service = compose["services"]["vysion"]
+    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST:")
+    assert ":?" in service["image"]
+    environment = service["environment"]
+    assert environment["VYSION_TLS_BACKEND"] == "local"
+    assert environment["VYSION_TLS_HOSTNAME"].startswith("${VYSION_TLS_HOSTNAME:?")
+    assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"]
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["tmpfs"]
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state", "vysion-certs"]
+    for volume, mount in (
+        ("vysion-reports", "vysion-reports:/app/data/reports"),
+        ("vysion-state", "vysion-state:/app/data/state"),
+        ("vysion-certs", "vysion-certs:/app/certs"),
+    ):
+        assert compose["volumes"][volume] == {"external": True, "name": volume}
+        assert mount in service["volumes"]
+    assert service["healthcheck"]["test"][-1] == (
+        "curl --fail --silent --show-error http://127.0.0.1:8080/healthz"
+    )
+    # Certificates are only referenced by the dedicated standalone config and
+    # entrypoint bootstrap, never by the proxy runtime config.
+    assert "ssl" not in (ROOT / "deploy/nginx.conf").read_text()
+    standalone = (ROOT / "deploy/nginx-standalone.conf").read_text()
+    assert "listen 443 ssl;" in standalone
+    assert "ssl_certificate /app/certs/active/fullchain.pem;" in standalone
+    assert "ssl_certificate_key /app/certs/active/key.pem;" in standalone
 
 
 def test_runtime_presentation_map_is_readable_by_non_root_runtime_user() -> None:

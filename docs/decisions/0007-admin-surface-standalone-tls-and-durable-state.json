@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "decision_id": "0007-admin-surface-standalone-tls-and-durable-state",
+  "status": "accepted",
+  "scope": "Vysion v2 - surface d'administration securisee, etat durable, TLS standalone gere par l'admin, volumes stables et backup/restauration",
+  "decision": "DECISION ACCEPTEE : seule la partie /admin et ses API /api/admin/* exigent une session (cookies vysion_session + CSRF + Origin + verrouillage) ; le parcours principal (upload/preview/creation d'audit/telechargement UUID+TTL) reste anonyme derriere la frontiere reseau, sans token ni API key. L'etat durable vit dans le volume externe vysion-state (SQLite prive), les certificats standalone dans vysion-certs. Deux modes coexistent : proxy VPS (0006, VYSION_TLS_BACKEND=none, TLS hote, chemin Portainer inchange) et standalone (VYSION_TLS_BACKEND=local, TLS termine dans le conteneur, import PEM/PKCS#12 depuis l'admin avec ticket lie a la session, activation atomique et rollback automatique). Backup et restauration restent manuels (scripts/ + runbook), sans timer hote.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Authentifier toute l'application et ajouter des tokens de telechargement",
+      "assessment": {
+        "perimetre": "Rejete explicitement par l'operateur : aucune regression UX sur le parcours principal, aucun token/API key/signature d'URL dans ce chantier.",
+        "securite": "Le parcours reste protege par la frontiere reseau existante (allowlist + 403 loopback conserves).",
+        "compatibilite": "Preserve exactement le contrat VPS/Portainer de la decision 0006.",
+        "reversibilite": "Aucune porte de sortie a reconstituer : rien a derouter cote clients."
+      }
+    },
+    {
+      "id": "B",
+      "name": "TLS standalone avec import admin, staging prive et activation atomique",
+      "assessment": {
+        "tls": "Certificat valide (dates, SAN, chaine OpenSSL, chargement TLS), jamais de fallback silencieux ; ACME DNS-01 hors perimetre.",
+        "securite": "Ticket d'activation hache, usage unique, lie a la session et au digest du candidat ; relecture de l'empreinte servie apres reload.",
+        "reversibilite": "Generations immutables + pointeur actif atomique : rollback vers la generation precedente en un geste, volumes stables nommes.",
+        "cohabitation": "Le mode proxy (0006) reste le defaut et le chemin de production : aucun changement de runtime VPS."
+      }
+    }
+  ],
+  "criteria": [
+    "parcours principal anonyme sans regression et /admin strictement protege (tests de non-regression)",
+    "aucun secret en argument de processus, en environnement ni dans une reponse HTTP",
+    "volumes externes stables vysion-state, vysion-certs, vysion-reports separes et restaurables sur VM vierge",
+    "activation de certificat atomique avec verification de l'empreinte servie et rollback automatique",
+    "chemin VPS/Portainer preserve et reversible, sans modification du runtime en production",
+    "gates CI inchangees pour le mode proxy et validation separee du mode standalone",
+    "backup et restauration manuels runbookises, sans timer hote"
+  ],
+  "rationale": [
+    "Seules les mutations administratives justifient une session : imposer l'authentification au parcours d'audit casserait le contrat reseau deja homologue (decision 0006, allowlist + 403 loopback).",
+    "SQLite dans un volume externe dedie rend l'etat durable, sauvegardable et restaurable sans toucher aux rapports TTL.",
+    "L'import admin (PEM/PKCS#12) evite toute dependance ACME/DNS dans ce chantier tout en gardant un parcours de renouvellement manuel clair.",
+    "Le ticket lie au digest du candidat empeche d'activer un fichier modifie apres validation ; la relecture de l'empreinte servie empeche de croire un reload qui n'a pas pris.",
+    "Les scripts manuels + runbook repondent a l'exigence de reversibilite sans introduire de scheduler hote a maintenir."
+  ],
+  "constraints": [
+    "Ne jamais merger vers main ni deployer/modifier le runtime VPS/Portainer/Nginx/certificat actif depuis ce chantier : livrer une PR prete et revue.",
+    "Aucun token, API key ou signature d'URL ; sessions/cookies uniquement, SameSite=Strict, Secure en HTTPS.",
+    "Le TLS proxy (0006) ne change pas : allowlist hote et 403 loopback conserves, pas de allow 127.0.0.1 en production.",
+    "SMTP et certificats : secrets write-only dans l'etat prive, saisis via stdin CLI ou multipart, jamais en argument argv ni en variable d'environnement.",
+    "Pas de fallback silencieux entre sources d'authentification, de SMTP ou de certificats : chaque indisponibilite est une erreur explicite.",
+    "Volumes externes nommes exactement vysion-state, vysion-certs, vysion-reports ; jamais supprimes par la pile ni par un rollback.",
+    "Gates CI : pytest + Ruff, tests/lint/build/audit frontend, contrat compose.yml inaltere + validation separee de compose.standalone.yml avec TLS attendu."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Rapport d'audit parent t_498b3a36-audit-vysion.md : surface admin, etat durable, SMTP de recuperation, TLS standalone, volumes, backup, CI",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "Document de cadrage de la tache t_d8d702ff."
+    },
+    {
+      "url": null,
+      "purpose": "10 decisions d'orchestration de l'operateur (dont la correction de perimetre de Valentin : /admin seulement, parcours principal anonyme) et directive d'autonomie : livrer la PR, CI exact-head verte, review independante, sans merge ni modification du runtime VPS",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "Transmises en message hors-band durant la tache t_d8d702ff."
+    },
+    {
+      "url": null,
+      "purpose": "Mecanismes reels de reference FortiUpgrade/Hub : cert admin avec generation/rollback, tls_lock, sessions reelles",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "Inspection en lecture seule /home/tetrax/workspace/Fortiupgrade/scripts."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Cadrage operateur 'go pour tout' + correction de perimetre de Valentin remplaceant la decision initiale n'1 ; directive d'autonomie pour la suite : decisions restantes selon simplicite, securite, mecanismes reels FortiUpgrade/Hub, compatibilite VPS, reversibilite.",
+    "remote_publication": "PR uniquement, revue independante demandee, pas de merge",
+    "portainer_deployment": "not executed - runtime VPS, Nginx hote et certificat actif inchanges"
+  },
+  "rollback_boundary": "Ce changement ne touche ni l'instance en service ni son volume vysion-reports : la PR se revert sans effet sur le runtime. En standalone, le rollback d'un certificat est la restauration de la generation precedente (pointeur actif) ou du volume vysion-certs sauvegarde ; en mode proxy, aucun certificat n'est embarque. Le runbook docs/OPERATIONS.md decrit sauvegarde, restauration sur VM vierge et bascule."
+}

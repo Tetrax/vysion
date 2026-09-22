@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/opt/vysion-venv/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ca-certificates curl nginx \
+    && apt-get install --no-install-recommends -y ca-certificates curl nginx openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid ${VYSION_GID} vysion \
     && useradd --uid ${VYSION_UID} --gid ${VYSION_GID} --no-create-home --shell /usr/sbin/nologin vysion
@@ -31,15 +31,17 @@ RUN python -m venv /opt/vysion-venv \
 COPY VERSION ./VERSION
 COPY docs/V1_V2_CAPABILITY_MAP.json ./docs/V1_V2_CAPABILITY_MAP.json
 COPY src/ ./src/
-RUN mkdir -p /app/data/reports /tmp/nginx/client_temp /tmp/nginx/proxy_temp \
-    && chown -R vysion:vysion /app/data /tmp/nginx
+RUN mkdir -p /app/data/reports /app/data/state /app/certs /tmp/nginx/client_temp /tmp/nginx/proxy_temp \
+    && chown -R vysion:vysion /app/data /app/certs /tmp/nginx
 
 COPY --from=frontend-build /build/frontend/dist/ /app/static/
 COPY deploy/nginx.conf /etc/nginx/nginx.conf
+COPY deploy/nginx-standalone.conf /etc/nginx/nginx-standalone.conf
 COPY deploy/entrypoint.sh /usr/local/bin/vysion-entrypoint
 RUN chmod 0555 /usr/local/bin/vysion-entrypoint \
     && chmod 0755 /etc/nginx \
     && chmod 0644 /etc/nginx/nginx.conf \
+    && chmod 0644 /etc/nginx/nginx-standalone.conf \
     && chmod 0644 /app/VERSION \
     && chmod -R a=rX /app/static /app/src /app/docs \
     && rm -rf /var/log/nginx /var/cache/nginx

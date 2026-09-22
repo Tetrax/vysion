@@ -126,6 +126,22 @@ jobs:
             fi
           done
 
+      - name: Validate the standalone stack with the expected TLS material
+        run: |
+          DIGEST="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          if IMAGE_DIGEST="$DIGEST" docker compose -f compose.standalone.yml config --quiet; then
+            echo "compose.standalone.yml resolved without VYSION_TLS_HOSTNAME, it must be required" >&2
+            exit 1
+          fi
+          IMAGE_DIGEST="$DIGEST" VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config > /tmp/vysion-standalone.yml
+          grep -Eq '^ *image: ghcr\.io/tetrax/vysion@sha256:[0-9a-f]{64}$' /tmp/vysion-standalone.yml
+          grep -q 'VYSION_TLS_BACKEND: local' /tmp/vysion-standalone.yml
+          grep -q 'VYSION_TLS_HOSTNAME: vysion.example.com' /tmp/vysion-standalone.yml
+          grep -q 'host_ip: 127.0.0.1' /tmp/vysion-standalone.yml
+          grep -q 'target: 443' /tmp/vysion-standalone.yml
+          grep -q 'name: vysion-certs' /tmp/vysion-standalone.yml
+          grep -q 'name: vysion-state' /tmp/vysion-standalone.yml
+
       - name: Assert loopback bind, exact external volume and no obsolete network
         run: |
           for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do

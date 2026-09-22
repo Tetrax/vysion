@@ -1,0 +1,860 @@
+"""HTTP contract of the secured /api/admin surface and its non-regression.
+
+The main audit flow (upload, preview, audit creation, report downloads by
+UUID+TTL) must stay anonymous behind the existing network boundary; only the
+administrator surface demands a session plus CSRF and Origin on mutations.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import httpx
+import pytest
+
+from vysion.adapters.fortiguard import FortiGuardResult, FortiGuardStatus
+from vysion.api.app import create_app
+from vysion.config import Settings
+from vysion.security import MAX_PASSWORD_BYTES
+from vysion.state import StateError
+
+ORIGIN = "http://vysion.test"
+STRONG_PASSWORD = "a-first-admin-password"
+OTHER_PASSWORD = "a-second-admin-password"
+SYNTHETIC_CONFIG = b"""\
+config system global
+    set hostname "admin-lab.example"
+end
+config system interface
+    edit "wan1"
+        set ip 192.0.2.20 255.255.255.0
+        set role wan
+        set allowaccess ping
+    next
+end
+"""
+
+
+class SilentFortiGuard:
+    async def check(self) -> FortiGuardResult:
+        return FortiGuardResult(status=FortiGuardStatus.AVAILABLE, detail="fixture")
+
+    async def check_psirt(self, version: str):  # pragma: no cover - never reached
+        return None
+
+
+class RecordingMailer:
+    """Test transport: captures what recovery would have sent."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, str]] = []
+
+    def send(self, *, to: str, subject: str, body: str) -> None:
+        self.messages.append({"to": to, "subject": subject, "body": body})
+
+
+class MutableClock:
+    def __init__(self, start: datetime) -> None:
+        self.current = start
+
+    def __call__(self) -> datetime:
+        return self.current
+
+    def advance(self, seconds: int) -> None:
+        self.current = self.current + timedelta(seconds=seconds)
+
+
+class _PeerApp:
+    """Force the direct peer the application observes (proxy trust tests)."""
+
+    def __init__(self, app, peer: tuple[str, int]) -> None:
+        self._app = app
+        self._peer = peer
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") == "http":
+            scope["client"] = self._peer
+        await self._app(scope, receive, send)
+
+
+def cookie_flags(header: str) -> dict[str, str | bool]:
+    """Split a Set-Cookie header into attribute names/values (case-folded)."""
+    flags: dict[str, str | bool] = {}
+    for part in header.split(";")[1:]:
+        item = part.strip()
+        if not item:
+            continue
+        if "=" in item:
+            name, value = item.split("=", 1)
+            flags[name.strip().casefold()] = value.strip()
+        else:
+            flags[item.casefold()] = True
+    return flags
+
+
+def api_client(
+    app,
+    *,
+    peer: tuple[str, int] = ("testclient", 50000),
+    origin: str | None = ORIGIN,
+    headers: dict[str, str] | None = None,
+) -> httpx.AsyncClient:
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_PeerApp(app, peer)),
+        base_url="http://vysion.test",
+    )
+    if origin is not None:
+        client.headers["Origin"] = origin
+    if headers:
+        client.headers.update(headers)
+    return client
+
+
+def build_app(
+    tmp_path: Path,
+    *,
+    clock=None,
+    mailer=None,
+    state_directory: Path | None = None,
+):
+    settings = Settings(
+        report_directory=tmp_path / "reports",
+        state_directory=state_directory or (tmp_path / "state"),
+    )
+    return create_app(
+        settings=settings,
+        fortiguard=SilentFortiGuard(),
+        **({"clock": clock} if clock else {}),
+        **({"recovery_mailer": mailer} if mailer else {}),
+    )
+
+
+async def setup_admin(client: httpx.AsyncClient, password: str = STRONG_PASSWORD):
+    response = await client.post(
+        "/api/admin/setup", json={"password": password}, headers={"Origin": ORIGIN}
+    )
+    assert response.status_code == 201, response.text
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Non-regression: the main audit flow stays anonymous
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_audit_flow_stays_anonymous_without_any_session(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        preview = await client.post(
+            "/api/audits/preview",
+            files={"configuration": ("lab.conf", SYNTHETIC_CONFIG, "text/plain")},
+        )
+        created = await client.post(
+            "/api/audits",
+            files={"configuration": ("lab.conf", SYNTHETIC_CONFIG, "text/plain")},
+            data={"context_source": "operator-form", "context_method": "manual"},
+        )
+        assert preview.status_code == 200, preview.text
+        assert created.status_code == 201, created.text
+        report_id = created.json()["report_id"]
+        downloaded = await client.get(f"/api/reports/{report_id}.json")
+
+    assert downloaded.status_code == 200, downloaded.text
+    assert "set-cookie" not in {key.casefold() for key in preview.headers}
+    assert "set-cookie" not in {key.casefold() for key in created.headers}
+
+
+@pytest.mark.asyncio
+async def test_health_stays_public(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        response = await client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# First run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_status_reports_first_run_state(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        response = await client.get("/api/admin/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["setup_required"] is True
+    assert payload["authenticated"] is False
+    assert payload["recovery_enabled"] is False
+    assert payload["tls_backend"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_setup_creates_the_single_administrator_and_signs_it_in(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        created = await setup_admin(client)
+        status = await client.get("/api/admin/status")
+        session = await client.get("/api/admin/session")
+
+    assert created.status_code == 201
+    assert created.json()["csrf_token"]
+    flags = cookie_flags(created.headers.get("set-cookie", ""))
+    assert "vysion_session=" in created.headers["set-cookie"]
+    assert flags["httponly"] is True
+    assert flags["samesite"] == "strict"
+    assert flags["path"] == "/"
+    assert "secure" not in flags  # plain HTTP in this scenario
+    assert status.json()["setup_required"] is False
+    assert status.json()["authenticated"] is True
+    assert session.status_code == 200
+    assert session.json()["csrf_token"] == created.json()["csrf_token"]
+
+
+@pytest.mark.asyncio
+async def test_setup_refuses_a_weak_password_and_keeps_first_run_open(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        weak = await client.post(
+            "/api/admin/setup",
+            json={"password": "short"},
+            headers={"Origin": ORIGIN},
+        )
+        huge = await client.post(
+            "/api/admin/setup",
+            json={"password": "x" * (MAX_PASSWORD_BYTES + 1)},
+            headers={"Origin": ORIGIN},
+        )
+        status = await client.get("/api/admin/status")
+
+    assert weak.status_code == 422
+    assert huge.status_code == 422
+    assert status.json()["setup_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_setup_is_refused_once_an_account_exists(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as first:
+        await setup_admin(first)
+    async with api_client(app) as second:
+        replay = await second.post(
+            "/api/admin/setup",
+            json={"password": "another-admin-password"},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert replay.status_code == 409
+
+
+def test_concurrent_setup_creates_exactly_one_admin(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    def attempt() -> int:
+        async def run() -> int:
+            async with api_client(app) as client:
+                response = await client.post(
+                    "/api/admin/setup",
+                    json={"password": STRONG_PASSWORD},
+                    headers={"Origin": ORIGIN},
+                )
+                return response.status_code
+
+        return asyncio.run(run())
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = sorted(pool.map(lambda _: attempt(), range(2)))
+
+    assert statuses == [201, 409]
+
+
+# ---------------------------------------------------------------------------
+# Login, cookies, lockout
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_a_bad_password_and_sets_a_strict_cookie(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    async with api_client(app) as client:
+        refused = await client.post(
+            "/api/admin/login",
+            json={"password": "definitely-not-the-password"},
+            headers={"Origin": ORIGIN},
+        )
+        accepted = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert refused.status_code == 401
+    assert refused.json()["detail"] == "identifiants invalides"
+    assert "set-cookie" not in {key.casefold() for key in refused.headers}
+    assert accepted.status_code == 200
+    assert accepted.json()["csrf_token"]
+    flags = cookie_flags(accepted.headers["set-cookie"])
+    assert flags["httponly"] is True
+    assert flags["samesite"] == "strict"
+    assert "secure" not in flags
+
+
+@pytest.mark.asyncio
+async def test_login_locks_the_account_after_five_failures(tmp_path: Path) -> None:
+    clock = MutableClock(datetime(2026, 9, 22, 12, 0, tzinfo=UTC))
+    app = build_app(tmp_path, clock=clock)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    async with api_client(app) as client:
+        outcomes = []
+        for attempt in range(5):
+            response = await client.post(
+                "/api/admin/login",
+                json={"password": f"wrong-password-{attempt}"},
+                headers={"Origin": ORIGIN},
+            )
+            outcomes.append(response.status_code)
+        while_locked = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        clock.advance(901)
+        after_lock = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert outcomes[:4] == [401, 401, 401, 401]
+    assert outcomes[4] == 429
+    assert while_locked.status_code == 429
+    assert while_locked.headers.get("retry-after") == "900"
+    assert after_lock.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_session_cookie_expires_after_the_configured_ttl(tmp_path: Path) -> None:
+    clock = MutableClock(datetime(2026, 9, 22, 12, 0, tzinfo=UTC))
+    app = build_app(tmp_path, clock=clock)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    async with api_client(app) as client:
+        await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        before = await client.get("/api/admin/session")
+        clock.advance(43_201)
+        after = await client.get("/api/admin/session")
+
+    assert before.status_code == 200
+    assert after.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_revokes_the_session_and_clears_the_cookie(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as client:
+        created = await setup_admin(client)
+        csrf = created.json()["csrf_token"]
+        closed = await client.post(
+            "/api/admin/logout", headers={"X-CSRF-Token": csrf, "Origin": ORIGIN}
+        )
+        reused = await client.get("/api/admin/session")
+
+    assert closed.status_code == 200
+    assert cookie_flags(closed.headers.get("set-cookie", ""))["max-age"] == "0"
+    assert reused.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# CSRF / Origin / trusted proxies
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_endpoints_refuse_anonymous_requests(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    targets = [
+        ("GET", "/api/admin/session", None),
+        ("GET", "/api/admin/sessions", None),
+        ("POST", "/api/admin/logout", {}),
+        (
+            "POST",
+            "/api/admin/password",
+            {"current_password": STRONG_PASSWORD, "password": OTHER_PASSWORD},
+        ),
+        ("POST", "/api/admin/sessions/revoke", {}),
+    ]
+    async with api_client(app) as anonymous:
+        for method, path, body in targets:
+            kwargs = {"json": body} if body is not None else {}
+            response = await anonymous.request(method, path, headers={"Origin": ORIGIN}, **kwargs)
+            assert response.status_code == 401, (method, path, response.status_code)
+
+
+@pytest.mark.asyncio
+async def test_mutations_require_csrf_and_an_exact_origin(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as signed_in:
+        await setup_admin(signed_in)
+
+    async with api_client(app) as client:
+        await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        session = await client.get("/api/admin/session")
+        live_csrf = session.json()["csrf_token"]
+
+        no_csrf = await client.post("/api/admin/sessions/revoke", headers={"Origin": ORIGIN})
+        session_token = client.cookies.get("vysion_session") or ""
+        foreign = await client.post(
+            "/api/admin/sessions/revoke",
+            headers={"X-CSRF-Token": live_csrf, "Origin": "https://evil.example"},
+        )
+
+        # A session replayed without any Origin header (curl-style call).
+        async with api_client(app, origin=None) as without_origin:
+            no_origin = await without_origin.post(
+                "/api/admin/sessions/revoke",
+                headers={
+                    "X-CSRF-Token": live_csrf,
+                    "Cookie": f"vysion_session={session_token}",
+                },
+            )
+
+        allowed = await client.post(
+            "/api/admin/sessions/revoke",
+            headers={"X-CSRF-Token": live_csrf, "Origin": ORIGIN},
+        )
+        reuse = await client.get("/api/admin/session")
+
+    assert no_csrf.status_code == 403
+    assert no_origin.status_code == 403
+    assert foreign.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json()["revoked"] >= 1
+    assert reuse.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_mutations_still_require_an_exact_origin(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app, origin=None) as client:  # type: ignore[arg-type]
+        client.headers.pop("Origin", None)
+        no_origin = await client.post("/api/admin/setup", json={"password": STRONG_PASSWORD})
+        wrong_origin = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": "https://evil.example"},
+        )
+
+    assert no_origin.status_code == 403
+    assert wrong_origin.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_forwarded_headers_are_only_honoured_from_a_trusted_peer(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    trusted = api_client(
+        app,
+        peer=("127.0.0.1", 40000),
+        origin="https://vysion.test",
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    async with trusted:
+        accepted = await trusted.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": "https://vysion.test"},
+        )
+    assert accepted.status_code == 200
+    assert cookie_flags(accepted.headers["set-cookie"])["secure"] is True
+
+    untrusted = api_client(
+        app,
+        peer=("198.51.100.9", 40000),
+        origin=ORIGIN,
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    async with untrusted:
+        ignored = await untrusted.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        claiming_https = await untrusted.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": "https://vysion.test"},
+        )
+    assert ignored.status_code == 200
+    assert "secure" not in cookie_flags(ignored.headers["set-cookie"])
+    # The claimed https scheme is refused: the peer is not a trusted proxy.
+    assert claiming_https.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Blank X-Forwarded-Proto on a direct plain-HTTP hop (smoke-caught defect)
+
+
+class _EmptySchemeApp:
+    """Simulate uvicorn --proxy-headers with a blank X-Forwarded-Proto: the
+    inner nginx used to pass the empty value through and uvicorn recorded an
+    empty scope scheme, which the origin check must never believe."""
+
+    def __init__(self, app, peer: tuple[str, int]) -> None:
+        self._app = app
+        self._peer = peer
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") == "http":
+            scope["client"] = self._peer
+            scope["scheme"] = ""
+        await self._app(scope, receive, send)
+
+
+@pytest.mark.asyncio
+async def test_blank_forwarded_proto_from_the_local_proxy_never_breaks_origin(
+    tmp_path: Path,
+) -> None:
+    """A direct plain-HTTP hop sends X-Forwarded-Proto: empty (or blank):
+    setup and login must authenticate against the connection scheme instead
+    of a poisoned empty scheme."""
+    app = build_app(tmp_path)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=_EmptySchemeApp(app, ("127.0.0.1", 41000))),
+        base_url="http://vysion.test",
+        headers={"Origin": ORIGIN},
+    )
+    async with client:
+        client.headers["X-Forwarded-Proto"] = ""
+        created = await client.post(
+            "/api/admin/setup", json={"password": STRONG_PASSWORD}
+        )
+        client.headers["X-Forwarded-Proto"] = " "
+        login = await client.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+
+    assert created.status_code == 201, created.text
+    assert login.status_code == 200, login.text
+    assert "secure" not in cookie_flags(login.headers["set-cookie"])
+
+
+# ---------------------------------------------------------------------------
+# Account management
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_password_change_invalidates_every_session(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as client:
+        created = await setup_admin(client)
+        csrf = created.json()["csrf_token"]
+        changed = await client.post(
+            "/api/admin/password",
+            json={"current_password": STRONG_PASSWORD, "password": OTHER_PASSWORD},
+            headers={"X-CSRF-Token": csrf, "Origin": ORIGIN},
+        )
+        after_change = await client.get("/api/admin/session")
+
+    async with api_client(app) as fresh:
+        old = await fresh.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        new = await fresh.post(
+            "/api/admin/login",
+            json={"password": OTHER_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert changed.status_code == 200
+    assert after_change.status_code == 401
+    assert old.status_code == 401
+    assert new.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_password_change_requires_the_current_password(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as client:
+        created = await setup_admin(client)
+        csrf = created.json()["csrf_token"]
+        refused = await client.post(
+            "/api/admin/password",
+            json={"current_password": "not-the-current-password", "password": OTHER_PASSWORD},
+            headers={"X-CSRF-Token": csrf, "Origin": ORIGIN},
+        )
+        still_valid = await client.get("/api/admin/session")
+
+    assert refused.status_code == 401
+    assert still_valid.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_sessions_can_be_listed_and_all_revoked(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as first:
+        await setup_admin(first)
+    async with api_client(app) as second:
+        await second.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        session = await second.get("/api/admin/session")
+        csrf = session.json()["csrf_token"]
+        listed = await second.get("/api/admin/sessions")
+        revoked = await second.post(
+            "/api/admin/sessions/revoke",
+            headers={"X-CSRF-Token": csrf, "Origin": ORIGIN},
+        )
+        after = await second.get("/api/admin/session")
+
+    assert listed.status_code == 200
+    assert len(listed.json()["sessions"]) >= 2
+    assert revoked.json()["revoked"] >= 2
+    assert after.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Recovery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recovery_is_unavailable_without_an_smtp_transport(
+    tmp_path: Path,
+) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    async with api_client(app) as client:
+        request = await client.post("/api/admin/recovery/request", headers={"Origin": ORIGIN})
+        confirm = await client.post(
+            "/api/admin/recovery/confirm",
+            json={"token": "any-token", "password": OTHER_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert request.status_code == 503
+    assert confirm.status_code == 400
+    assert confirm.json()["detail"] == "jeton de récupération invalide"
+
+
+@pytest.mark.asyncio
+async def test_recovery_sends_a_single_use_token_and_resets_the_password(
+    tmp_path: Path,
+) -> None:
+    mailer = RecordingMailer()
+    app = build_app(tmp_path, mailer=mailer)
+    async with api_client(app) as client:
+        await setup_admin(client)
+
+    # The transport is configured in the private state, never in the environment.
+    store = app.state.state_store
+    store.set_smtp_config(
+        host="smtp.internal.example",
+        port=587,
+        from_address="vysion@internal.example",
+        starttls=True,
+        recovery_email="operator@internal.example",
+        password="write-only-secret",
+    )
+
+    async with api_client(app) as client:
+        requested = await client.post("/api/admin/recovery/request", headers={"Origin": ORIGIN})
+        assert requested.status_code == 200, requested.text
+        assert requested.json() == {"status": "pending"}
+
+    assert len(mailer.messages) == 1
+    message = mailer.messages[0]
+    assert message["to"] == "operator@internal.example"
+    assert "write-only-secret" not in message["body"]
+    token = message["body"].split("token=", 1)[1].split()[0].strip("<>\"'")
+
+    async with api_client(app) as client:
+        confirmed = await client.post(
+            "/api/admin/recovery/confirm",
+            json={"token": token, "password": OTHER_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        reused = await client.post(
+            "/api/admin/recovery/confirm",
+            json={"token": token, "password": "a-third-admin-password"},
+            headers={"Origin": ORIGIN},
+        )
+
+    assert confirmed.status_code == 200
+    assert reused.status_code == 400
+
+    # Every session was invalidated by the reset.
+    async with api_client(app) as old_session:
+        stale = await old_session.get("/api/admin/session")
+    assert stale.status_code == 401
+
+    async with api_client(app) as fresh:
+        login = await fresh.post(
+            "/api/admin/login",
+            json={"password": OTHER_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+    assert login.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_recovery_request_answers_uniformly_and_is_rate_limited(
+    tmp_path: Path,
+) -> None:
+    mailer = RecordingMailer()
+    app = build_app(tmp_path, mailer=mailer)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+    app.state.state_store.set_smtp_config(
+        host="smtp.internal.example",
+        port=587,
+        from_address="vysion@internal.example",
+        starttls=True,
+        recovery_email="operator@internal.example",
+    )
+
+    async with api_client(app) as client:
+        bodies = []
+        statuses = []
+        for _ in range(6):
+            response = await client.post("/api/admin/recovery/request", headers={"Origin": ORIGIN})
+            statuses.append(response.status_code)
+            bodies.append(response.content)
+
+        assert statuses[:4] == [200] * 4
+        assert statuses[4:] == [429] * 2
+        assert len(set(bodies[:4])) == 1
+        assert len(mailer.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_recovery_confirmation_is_rate_limited(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+
+    async with api_client(app) as client:
+        statuses = []
+        for attempt in range(7):
+            response = await client.post(
+                "/api/admin/recovery/confirm",
+                json={"token": f"guessed-token-{attempt}", "password": OTHER_PASSWORD},
+                headers={"Origin": ORIGIN},
+            )
+            statuses.append(response.status_code)
+
+    assert statuses[:4] == [400] * 4
+    assert statuses[4:] == [429] * 3
+
+
+@pytest.mark.asyncio
+async def test_recovery_never_leaks_state_over_public_endpoints(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+    async with api_client(app) as admin:
+        await setup_admin(admin)
+    app.state.state_store.set_smtp_config(
+        host="smtp.internal.example",
+        port=587,
+        from_address="vysion@internal.example",
+        starttls=True,
+        recovery_email="operator@internal.example",
+        password="write-only-secret",
+    )
+
+    async with api_client(app) as anonymous:
+        status = await anonymous.get("/api/admin/status")
+
+    assert status.status_code == 200
+    assert status.json()["recovery_enabled"] is True
+    assert "write-only-secret" not in status.text
+    assert "operator@internal.example" not in status.text
+
+
+# ---------------------------------------------------------------------------
+# Bounds and fail-closed state
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_admin_mutations_bound_the_request_body(tmp_path: Path) -> None:
+    app = build_app(tmp_path)
+
+    async with api_client(app) as client:
+        oversized = await client.post(
+            "/api/admin/login",
+            content=b"x" * (2 * 1024 * 1024),
+            headers={"Origin": ORIGIN, "Content-Type": "application/json"},
+        )
+
+        async def chunked_body():
+            yield b'{"password":"a-first-admin-password"}'
+
+        without_length = await client.post(
+            "/api/admin/login",
+            content=chunked_body(),
+            headers={"Origin": ORIGIN, "Content-Type": "application/json"},
+        )
+
+    assert oversized.status_code == 413
+    assert without_length.status_code == 411
+
+
+def test_corrupt_state_fails_closed_before_any_route_can_reopen_first_run(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "vysion-state.db").write_bytes(b"definitely not a database\n")
+
+    with pytest.raises(StateError):
+        build_app(tmp_path, state_directory=state)

@@ -58,3 +58,11 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 - stockage mono-instance local, cohérent avec un unique conteneur ;
 - purge TTL au démarrage, avant écriture et à la lecture ; une sauvegarde externe du volume conserve sa propre politique de rétention ;
 - aucune homologation de production n'est revendiquée.
+
+## Surface d'administration, état durable et certificats (V2)
+
+- **Périmètre** : seule `/admin` et ses API `/api/admin/*` exigent une session ; aucune authentification globale n'est installée, le parcours principal reste anonyme derrière la frontière réseau existante, et aucun token, API key ni signature d'URL n'existe dans ce périmètre (sessions/cookies uniquement). Non-régression prouvée par `tests/integration/test_admin_api.py` et `tests/integration/test_admin_certificates.py` ;
+- **mutations** : session + jeton `X-CSRF-Token` + `Origin` exact ; verrous par portée (compte, setup, récupération, client) avec TTL ; anti-énumération (réponses identiques puis 429) ; corps limités (1 Mo admin, 512 Ko certificat) ;
+- **état durable** : SQLite privé dans `vysion-state` (fichier 0600, répertoire 0700, échec fail-closed si corrompu ou schéma plus récent) ; mots de passe scrypt ; secrets SMTP write-only dans l'état, jamais dans l'environnement ni dans une réponse ; tickets de récupération et d'activation hachés (`token_digest`), usage unique, liés à la session (et, pour l'activation, au digest exact du candidat) ; `vysion-admin` n'accepte les secrets que sur stdin, jamais en argument, et ne les ré-échoue jamais ;
+- **certificats** : validation stricte (format PEM/PKCS#12, dates sur horloge injectée, SAN/hostname avec wildcard RFC 6125, vérification de chaîne OpenSSL, chargement TLS réel), staging privé 0700/0600, générations immutables, pointeur `active` basculé atomiquement, relecture de l'empreinte SHA-256 servie après activation avec rollback automatique ; la passphrase PKCS#12 transite par stdin (`fd:0`), jamais dans `argv` ; le bootstrap standalone auto-signé (2 jours) est remplacé dès le premier import admin ;
+- **volumes** : externes et stables `vysion-state`, `vysion-certs`, `vysion-reports`, séparés, jamais supprimés par la pile ; backup/restauration manuels runbookisés (`scripts/backup.sh`, `scripts/restore.sh`).

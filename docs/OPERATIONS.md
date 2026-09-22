@@ -223,3 +223,27 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 - le conteneur de repli référence en lecture le fichier hôte `deploy/nginx-container-http.conf` (non versionné) : ne pas le supprimer tant que le repli existe. Sa version versionnée, octet pour octet identique, est `deploy/nginx.conf` dans ce repository ;
 - l'ancien répertoire de travail contient un `compose.yml` qui ne correspond plus à l'instance en service : ne pas l'exécuter après la bascule ;
 - un rollback applicatif ne supprime, ne renomme ni ne recrée jamais `vysion-reports`.
+
+## Surface d'administration (V2)
+
+- URL : `/admin` (SPA servie par nginx via `try_files`), API sous `/api/admin/*` ; première exécution : le formulaire « Configuration initiale » crée l'unique compte administrateur (12 à 1024 octets UTF-8), puis connexion normale ;
+- protections : session `vysion_session` (HttpOnly, SameSite=Strict, Secure en HTTPS), jeton `X-CSRF-Token`, `Origin` exact sur toute mutation, verrouillage après échecs et anti-énumération (réponses uniformes puis 429) ;
+- **le parcours d'audit reste anonyme** (upload, preview, création d'audit, téléchargements UUID+TTL) : aucune authentification globale n'est installée, non-régression prouvée par `tests/integration/test_admin_api.py` et `tests/integration/test_admin_certificates.py` ;
+- SMTP et adresse de récupération : `vysion-admin configure-smtp` (secrets saisis sur stdin, jamais en argument). Sans SMTP, la récupération par courriel reste proprement indisponible ; le recours break-glass est `vysion-admin reset-password` ;
+- sessions : liste et révocation depuis le tableau de bord ; changement de mot de passe depuis le tableau de bord (révoque les sessions).
+
+## Modes TLS
+
+- **Proxy hôte (défaut, `VYSION_TLS_BACKEND=none`, VPS Portainer)** : TLS terminé par le Nginx hôte (décision 0006), HTTP loopback 8080 dans le conteneur, allowlist et 403 loopback conservés, aucun volume de certificats. Aucun changement par rapport à l'instance en service.
+- **Standalone (`compose.standalone.yml`, `VYSION_TLS_BACKEND=local`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé dans le conteneur sur 443. Au premier démarrage, l'entrypoint génère un certificat auto-signé de 2 jours (bootstrap) pour rendre l'UI accessible en HTTPS ; importer ensuite le vrai certificat depuis `/admin` : PEM complet + clé, ou PKCS#12 + passphrase. La validation refuse tout certificat expiré/à venir, SAN incompatible, chaîne incohérente ou clé non correspondante (test de chargement TLS réel). L'activation passe par un ticket à usage unique lié à la session et au digest du candidat (300 s), puis `nginx -t` + rechargement + vérification de l'empreinte servie, avec rollback automatique vers la génération précédente en cas d'échec.
+
+## Sauvegarde et restauration (manuelles)
+
+1. **Sauvegarde** : `scripts/backup.sh /chemin/destination` crée un répertoire horodaté contenant `vysion-state.tar.gz`, `vysion-certs.tar.gz`, `vysion-reports.tar.gz` (volumes absents ignorés) ; aucun timer hôte.
+2. **Restauration (même hôte ou VM vierge)** : `docker volume create vysion-state vysion-certs vysion-reports` puis `scripts/restore.sh /chemin/destination/vysion-HORODATAGE` puis `docker compose up -d` (ou Git Stack Portainer) — la restauration de `vysion-certs` réactive HTTPS standalone sans re-import.
+3. **Vérification** : `GET /healthz`, `GET /api/admin/status`, connexion sur `/admin`, téléchargement d'un rapport existant par UUID, `GET /api/admin/certificates` en standalone.
+4. **Rollback applicatif** : `git revert` / repointage de la stack sur le digest d'image précédent ; aucun rollback ne supprime ni ne recrée `vysion-state`, `vysion-certs` ou `vysion-reports`.
+
+## Déploiement et rollback VPS (inchangé)
+
+Le chemin de production reste la Git Stack Portainer sur `compose.yml` avec `IMAGE_DIGEST` immuable (0006) : ce chantier ne modifie ni le runtime VPS, ni Portainer, ni le Nginx hôte, ni le certificat actif. Rollback : digest précédent côté Portainer, le conteneur de repli du runbook historique demeurant disponible.
