@@ -958,6 +958,17 @@ def check_sdwan_usage(
             recommendation="Sélectionner les WAN via le contexte typé.",
         )
 
+    if not context.wan_selections:
+        return _sdwan_finding(
+            status=AuditStatus.UNKNOWN,
+            applicability=Applicability.UNKNOWN,
+            evidence=("WAN sélectionnées: sélection vide",),
+            evidence_items=(evidence_for_section(configuration.document, "system sdwan"),),
+            affected=(),
+            message="Aucune sélection WAN n'a été fournie pour évaluer ce point.",
+            recommendation="Sélectionner au moins une WAN avant de relancer l’audit.",
+        )
+
     required: dict[str, str] = {}
     for selection in context.wan_selections:
         if selection.kind is WanSelectionKind.SDWAN:
