@@ -15,7 +15,6 @@ ARG VYSION_REVISION=unknown
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src \
-    VYSION_TLS_SERVER_NAME=vysion.internal.example \
     VYSION_REVISION=${VYSION_REVISION} \
     PATH=/opt/vysion-venv/bin:$PATH
 
@@ -46,7 +45,7 @@ RUN chmod 0555 /usr/local/bin/vysion-entrypoint \
     && rm -rf /var/log/nginx /var/cache/nginx
 
 USER vysion:vysion
-EXPOSE 8443
+EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl --fail --silent --show-error --cacert /run/vysion/tls/tls.crt --resolve ${VYSION_TLS_SERVER_NAME}:8443:127.0.0.1 https://${VYSION_TLS_SERVER_NAME}:8443/healthz || exit 1
+  CMD curl --fail --silent --show-error http://127.0.0.1:8080/healthz || exit 1
 ENTRYPOINT ["/usr/local/bin/vysion-entrypoint"]
