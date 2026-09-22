@@ -22,11 +22,25 @@ SECOND_CONFIGURATION = Path(
     "/home/hermes/.hermes/attachments/CF-UK-WIGAN-MASTER_7-4_2829_202609090946.conf"
 )
 
+
+def _field_backup_exists(path: Path) -> bool:
+    """Report whether a field backup can be read by the current user.
+
+    ``Path.exists()`` raises ``PermissionError`` on Python 3.12 when an
+    ancestor directory is unreadable (typically another user's home), which
+    aborts the whole collection instead of skipping the test.
+    """
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    not CONFIGURATION.exists(),
+    not _field_backup_exists(CONFIGURATION),
     reason=(
-        "real FortiGate backup required: place the field backup under "
-        "/home/hermes/.hermes/attachments/ (see OPERATIONS.md)"
+        "real FortiGate backup required and readable by the current user: place the "
+        "field backup under /home/hermes/.hermes/attachments/ (see OPERATIONS.md)"
     ),
 )
 
@@ -58,7 +72,7 @@ def _real_report() -> JsonAuditReport:
 
 
 @pytest.mark.skipif(
-    not SECOND_CONFIGURATION.exists(),
+    not _field_backup_exists(SECOND_CONFIGURATION),
     reason="second field backup not available on this machine",
 )
 def test_cf_uk_wigan_utm_policy_without_logtraffic_is_unknown() -> None:
@@ -85,7 +99,7 @@ def test_cf_uk_wigan_utm_policy_without_logtraffic_is_unknown() -> None:
 
 
 @pytest.mark.skipif(
-    not SECOND_CONFIGURATION.exists(),
+    not _field_backup_exists(SECOND_CONFIGURATION),
     reason="second field backup not available on this machine",
 )
 def test_cf_uk_wigan_utm_unknown_docx_uses_business_wording() -> None:
@@ -273,7 +287,7 @@ def _client_body(document) -> str:
         pytest.param(
             SECOND_CONFIGURATION,
             marks=pytest.mark.skipif(
-                not SECOND_CONFIGURATION.exists(),
+                not _field_backup_exists(SECOND_CONFIGURATION),
                 reason="second field backup not available on this machine",
             ),
         ),
