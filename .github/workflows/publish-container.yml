@@ -76,18 +76,43 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Refuse to resolve without an immutable image tag
+      - name: Refuse to resolve without the full image commit
         run: |
           if docker compose config --quiet; then
-            echo "compose.yml resolved without IMAGE_TAG, the immutable tag must be required" >&2
+            echo "compose.yml resolved without IMAGE_COMMIT, the full image commit must be required" >&2
+            exit 1
+          fi
+          if IMAGE_TAG=latest docker compose config --quiet; then
+            echo "compose.yml still resolves with the legacy mutable IMAGE_TAG=latest" >&2
             exit 1
           fi
 
       - name: Render the final stack on 127.0.0.1:8080
-        run: IMAGE_TAG="sha-$(git rev-parse HEAD)" docker compose config > /tmp/vysion-stack-8080.yml
+        run: IMAGE_COMMIT="$(git rev-parse HEAD)" HOST_PORT=8080 docker compose config > /tmp/vysion-stack-8080.yml
 
       - name: Render the temporary validation stack on 127.0.0.1:18080
-        run: HOST_PORT=18080 IMAGE_TAG="sha-$(git rev-parse HEAD)" docker compose config > /tmp/vysion-stack-18080.yml
+        run: HOST_PORT=18080 IMAGE_COMMIT="$(git rev-parse HEAD)" docker compose config > /tmp/vysion-stack-18080.yml
+
+      - name: Assert the immutable image reference and reject every mutable value
+        run: |
+          for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do
+            if ! grep -Eq 'image: ghcr\.io/tetrax/vysion:sha-[0-9a-f]{40}$' "$rendered"; then
+              echo "$rendered does not reference ghcr.io/tetrax/vysion:sha-<full commit>" >&2
+              exit 1
+            fi
+          done
+          if mutable="$(IMAGE_COMMIT=latest docker compose config 2>/dev/null)"; then
+            if printf '%s\n' "$mutable" | grep -Eq 'image: ghcr\.io/tetrax/vysion:sha-[0-9a-f]{40}$'; then
+              echo "IMAGE_COMMIT=latest produced a deployable immutable reference" >&2
+              exit 1
+            fi
+            if printf '%s\n' "$mutable" | grep -q 'vysion:latest'; then
+              echo "the mutable tag latest was rendered into the image reference" >&2
+              exit 1
+            fi
+          else
+            echo "compose refused IMAGE_COMMIT=latest (acceptable, immutable references only)" >&2
+          fi
 
       - name: Assert loopback bind, exact external volume and no obsolete network
         run: |
@@ -139,9 +164,7 @@ jobs:
           file: ./Dockerfile
           push: true
           pull: true
-          tags: |
-            ghcr.io/tetrax/vysion:latest
-            ghcr.io/tetrax/vysion:sha-${{ github.sha }}
+          tags: ghcr.io/tetrax/vysion:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
