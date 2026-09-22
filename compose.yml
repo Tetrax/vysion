@@ -5,11 +5,6 @@ services:
     # Docker refuses every malformed reference while acquiring the image,
     # before any container exists.
     image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        VYSION_REVISION: ${VYSION_REVISION:-unknown}
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"
