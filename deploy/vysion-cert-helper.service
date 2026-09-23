@@ -1,0 +1,49 @@
+[Unit]
+Description=Vysion certificate helper (root, private Unix socket)
+Documentation=https://github.com/Tetrax/vysion
+After=local-fs.target
+Before=nginx.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vysion/cert-helper.env
+Environment=PYTHONPATH=/opt/vysion/src
+# No project virtualenv on the host: the helper deliberately depends on the
+# standard library only, so the distribution's python3 is enough.
+ExecStart=/usr/bin/python3 -m vysion.certhelper serve \
+    --socket ${HELPER_SOCKET} \
+    --certs-dir ${HELPER_CERTS_DIR} \
+    --hostname ${VYSION_TLS_HOSTNAME} \
+    --uid ${VYSION_PUID} \
+    --gid ${VYSION_PGID}
+Restart=on-failure
+RestartSec=5
+ExecReload=/bin/kill -HUP $MAINPID
+TimeoutStopSec=20
+
+# Root — because it must read /etc/letsencrypt and reload the host nginx —
+# and nothing beyond that: the filesystem it may write stays tiny.
+User=root
+Group=root
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_NET_BIND_SERVICE
+AmbientCapabilities=
+# /var/lib (generations, staging) and /var/log/nginx (nginx -t) stay writable;
+# /etc, /usr and /boot are read-only for this service.
+ReadWritePaths=/var/lib/vysion /var/log/nginx /run/vysion-cert-helper
+
+[Install]
+WantedBy=multi-user.target

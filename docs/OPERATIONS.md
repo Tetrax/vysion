@@ -276,6 +276,57 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
   - `PUBLIC_ORIGIN` doit porter l'origine publique exacte du navigateur (par ex. `https://vysion.valdev.me`) : sans elle, **toute mutation `/api/admin/*` est refusée en 503** (setup, connexion, récupération, certificats), la première exécution restant fermée plutôt que d'être réalisée sous une autorité arbitraire.
 - **Standalone (`compose.standalone.yml`, `VYSION_TLS_BACKEND=local`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé dans le conteneur sur 443. Au premier démarrage, l'entrypoint génère un certificat auto-signé de 2 jours (bootstrap) pour rendre l'UI accessible en HTTPS ; importer ensuite le vrai certificat depuis `/admin` : PEM complet + clé, ou PKCS#12 + passphrase. La validation refuse tout certificat expiré/à venir, SAN incompatible, chaîne incohérente ou clé non correspondante (test de chargement TLS réel). L'activation passe par un ticket à usage unique lié à la session et au digest du candidat (300 s), puis `nginx -t` + rechargement + vérification de l'empreinte servie, avec rollback automatique vers la génération précédente en cas d'échec. Une chaîne de type production (feuille + intermédiaires, sans racine — la racine vit chez les clients) est acceptée ; une feuille sans son émetteur ou une chaîne incohérente reste refusée.
 - **Proxy externe (`compose.proxy.yml`, `VYSION_TLS_BACKEND=none`)** : TLS terminé par le reverse proxy de l'opérateur, conteneur en HTTP clair sur 8080. `TRUSTED_PROXY_CIDRS` est **obligatoire — aucun défaut silencieux** — et décrit les seules sources dont l'application accepte `X-Forwarded-*` / `X-Real-IP` (couche interne : le Nginx du conteneur rejette les en-têtes clients, réécrit `X-Real-IP` sur l'observation locale et complète `X-Forwarded-For`, uvicorn tourne sans confiance forwarded). `PUBLIC_ORIGIN` fixe l'autorité de toute mutation `/api/admin/*` et des liens de récupération : sans elle, ces mutations sont refusées en 503 — jamais fabriquées depuis un `Host` contrôlable.
+- **Helper VPS (`compose.helper.yml`, `VYSION_TLS_BACKEND=helper`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé par le Nginx hôte comme en mode `none`, mais `/admin` gère réellement le certificat. Le conteneur reste non-root et read-only : il ne parle qu'à la socket Unix privée du service root `vysion-cert-helper`, montée **lecture seule**. Voir « Certificats en mode helper » ci-dessous.
+
+## Certificats en mode helper (VPS administrable)
+
+Certbot reste l'**autorité ACME** (il signe et renouvelle) ; le service root devient l'**autorité servie** (générations, `nginx -t`, rechargement, empreinte relue). Une seule mécanique, donc aucun conflit entre renouvellement automatique et import manuel.
+
+### Installation (une fois)
+
+```bash
+# 1. Sources du helper sur l'hôte (stdlib uniquement, sans virtualenv)
+sudo install -d -m 0755 /opt/vysion
+sudo cp -r src /opt/vysion/
+sudo install -d -m 0755 /etc/vysion
+sudo cp deploy/vysion-cert-helper.env.example /etc/vysion/cert-helper.env
+sudo $EDITOR /etc/vysion/cert-helper.env     # VYSION_TLS_HOSTNAME, PUID/PGID, chemins
+
+# 2. Répertoire de socket (0750 root:<PGID>) puis service
+sudo install -d -m 0750 -o root -g root /run/vysion-cert-helper
+sudo cp deploy/vysion-cert-helper.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vysion-cert-helper
+sudo -u root PYTHONPATH=/opt/vysion/src python3 -m vysion.certhelper ping \
+  --socket /run/vysion-cert-helper/helper.sock
+
+# 3. Import idempotent du certificat déjà servi (génération 1)
+sudo /opt/vysion/deploy/vysion-cert-bootstrap.sh
+
+# 4. Renouvellement automatique : Certbot délègue au même mécanisme
+sudo ln -s /opt/vysion/deploy/certbot-vysion-deploy.sh \
+           /etc/letsencrypt/renewal-hooks/deploy/vysion-helper.sh
+```
+
+### Fonctionnement
+
+- **Socket** : `/run/vysion-cert-helper/helper.sock`, `0660 root:<VYSION_PGID>` dans un répertoire `0750` ; le pair est vérifié par `SO_PEERCRED` sur le uid **et** le gid — tout autre processus est refusé. Le conteneur la monte en `:ro` (`compose.helper.yml`).
+- **Protocole** : JSON préfixé longueur, versionné, avec bornes de taille, rejet des clés dupliquées et des clés inattendues. Quatre actions seulement : `ping`, `status`, `validate`, `activate`. `install` et `renew` **n'existent qu'en CLI root**, jamais sur la socket.
+- **Activation** : ticket d'administration (usage unique, lié à la session et au digest) → digest du staging re-vérifié par le helper → génération immuable promue → `nginx -t` **puis** rechargement → empreinte SHA-256 réellement servie relue sur `127.0.0.1:443` → rollback automatique en cas d'écart.
+- **Staging** : privé (`0700`) et purgé par TTL (10 min) : un candidat jamais activé disparaît tout seul.
+- **Idempotence** : `install`/`renew` comparent l'empreinte de la lignée à celle déjà servie ; si elle coïncide, aucune génération n'est créée et aucun rechargement n'a lieu. Un hook Certbot rejoué est donc toujours sans effet.
+
+### Opérations
+
+```bash
+# État lu par l'application elle-même (même chemin que /admin)
+sudo PYTHONPATH=/opt/vysion/src python3 -m vysion.certhelper status \
+  --socket /run/vysion-cert-helper/helper.sock
+journalctl -u vysion-cert-helper -f
+systemctl status vysion-cert-helper
+```
+
+Le service ne journalise jamais de clé ni de secret : seuls les messages OpenSSL/nginx normalisés et le résultat des actions sortent.
 
 ## Sauvegarde et restauration (manuelles, frontière cohérente)
 
