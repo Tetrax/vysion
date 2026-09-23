@@ -8,6 +8,9 @@
 # already is the served certificate, no generation is created.
 #
 #   sudo /opt/vysion/deploy/vysion-cert-bootstrap.sh
+#
+# Test/deployment override: VYSION_LETSENCRYPT_LIVE_DIR (default
+# /etc/letsencrypt/live) — used to replay the sequence in a sandbox.
 set -eu
 
 env_file=${VYSION_CERT_HELPER_ENV:-/etc/vysion/cert-helper.env}
@@ -20,7 +23,7 @@ fi
 : "${VYSION_CERT_HELPER:=python3 -m vysion.certhelper}"
 export PYTHONPATH=${VYSION_PYTHONPATH:-/opt/vysion/src}
 
-lineage="/etc/letsencrypt/live/${VYSION_TLS_HOSTNAME}"
+lineage="${VYSION_LETSENCRYPT_LIVE_DIR:-/etc/letsencrypt/live}/${VYSION_TLS_HOSTNAME}"
 if [ ! -r "$lineage/fullchain.pem" ] || [ ! -r "$lineage/privkey.pem" ]; then
     echo "bootstrap impossible : lineage absent ou illisible dans $lineage" >&2
     exit 1

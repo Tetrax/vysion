@@ -285,16 +285,16 @@ Certbot reste l'**autorité ACME** (il signe et renouvelle) ; le service root de
 ### Installation (une fois)
 
 ```bash
-# 1. Sources du helper sur l'hôte (stdlib uniquement, sans virtualenv)
-sudo install -d -m 0755 /opt/vysion
-sudo cp -r src /opt/vysion/
-sudo install -d -m 0755 /etc/vysion
-sudo cp deploy/vysion-cert-helper.env.example /etc/vysion/cert-helper.env
+# 1. Séquence d'installation idempotente : sources, scripts déployés,
+#    unité systemd et TOUS les répertoires que l'unité exige avant démarrage
+#    (/var/lib/vysion compris — un ReadWritePaths sans cible existante fait
+#    échouer le démarrage du service ; /run/vysion-cert-helper est recréé
+#    par systemd après un reboot). Réexécuter ce script est sans effet :
+#    /etc/vysion/cert-helper.env n'est jamais écrasé.
+sudo deploy/vysion-cert-install.sh
 sudo $EDITOR /etc/vysion/cert-helper.env     # VYSION_TLS_HOSTNAME, PUID/PGID, chemins
 
-# 2. Répertoire de socket (0750 root:<PGID>) puis service
-sudo install -d -m 0750 -o root -g root /run/vysion-cert-helper
-sudo cp deploy/vysion-cert-helper.service /etc/systemd/system/
+# 2. Répertoire de socket déjà en place, puis service
 sudo systemctl daemon-reload
 sudo systemctl enable --now vysion-cert-helper
 sudo -u root PYTHONPATH=/opt/vysion/src python3 -m vysion.certhelper ping \
@@ -310,6 +310,23 @@ sudo /opt/vysion/deploy/vysion-cert-migrate-nginx.sh
 sudo ln -s /opt/vysion/deploy/certbot-vysion-deploy.sh \
            /etc/letsencrypt/renewal-hooks/deploy/vysion-helper.sh
 ```
+
+`deploy/vysion-cert-install.sh` est la seule voie décrite : il installe `src`
+(la `PYTHONPATH` de l'unité), les **quatre** scripts que les étapes 3 à 5
+invoquent sous `/opt/vysion/deploy` (exécutables `0755`), l'unité dans
+`/etc/systemd/system` (`0644`), l'exemple de configuration dans
+`/etc/vysion` (`0644`, créé **une seule fois** puis propriété de
+l'opérateur), et les répertoires `0750` de l'état et de la socket ainsi que
+`/var/log/nginx` s'il manque. Il échoue explicitement si une source ou un
+script manque, ne démarre aucun service (l'édition du fichier
+d'environnement reste l'étape suivante) et refuse de tourner sans root
+au-dessus des chemins par défaut. L'unité crée de son côté
+`StateDirectory=vysion` et `RuntimeDirectory=vysion-cert-helper` avant
+`ExecStart`, donc un redémarrage de l'hôte ne laisse jamais un
+`ReadWritePaths` pointer vers un répertoire absent. Toute la séquence
+documentée ci-dessus — installation, `ping`, bootstrap, migration, hook —
+est rejouée dans une sandbox (racine alternative, nginx en stub, serveur TLS
+local, jamais `/etc`) par `tests/contract/test_helper_install.py`.
 
 ### Bascule du Nginx hôte (migration vers l'autorité servie)
 

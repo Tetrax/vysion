@@ -113,7 +113,10 @@ Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans
   relue et l'ancienne génération est restaurée en cas d'échec. Le bootstrap
   (`deploy/vysion-cert-bootstrap.sh`) et le hook Certbot
   (`deploy/certbot-vysion-deploy.sh`) passent par ce même mécanisme et sont
-  idempotents : aucune seconde autorité de certificat n'est créée. Voir
+  idempotents : aucune seconde autorité de certificat n'est créée. L'installation
+  fraîche sur l'hôte passe par `deploy/vysion-cert-install.sh`, séquence
+  idempotente qui installe les sources, les scripts exécutables, l'unité
+  systemd et les répertoires que cette unité exige avant démarrage. Voir
   `docs/OPERATIONS.md` et `docs/SECURITY.md`.
 
 Les piles déclarent les mêmes volumes externes (créés une fois par

@@ -43,6 +43,15 @@ CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH 
 AmbientCapabilities=
 # /var/lib (generations, staging) and /var/log/nginx (nginx -t) stay writable;
 # /etc, /usr and /boot are read-only for this service.
+# StateDirectory= and RuntimeDirectory= make systemd create the state and
+# socket directories itself before ExecStart: a ReadWritePaths target must
+# exist when the namespace is set up, and /run does not survive a reboot.
+# deploy/vysion-cert-install.sh creates the very same paths for the first
+# start, so the documented fresh sequence never starts from a missing path.
+StateDirectory=vysion
+StateDirectoryMode=0750
+RuntimeDirectory=vysion-cert-helper
+RuntimeDirectoryMode=0750
 ReadWritePaths=/var/lib/vysion /var/log/nginx /run/vysion-cert-helper
 
 [Install]

@@ -464,7 +464,14 @@ def main(
         smoke = (
             smoker
             if smoker is not None
-            else tls_fingerprint_smoker(hostname)
+            # Same override names as deploy/vysion-cert-migrate-nginx.sh: a
+            # sandboxed runbook replay reads back what its local TLS server
+            # serves instead of the production 127.0.0.1:443.
+            else tls_fingerprint_smoker(
+                hostname,
+                host=os.environ.get("SMOKE_HOST", "127.0.0.1"),
+                port=int(os.environ.get("SMOKE_PORT", "443")),
+            )
         )
         return _import_lineage(
             store, lineage=lineage, hostname=hostname, reloader=reload_hook, smoker=smoke
