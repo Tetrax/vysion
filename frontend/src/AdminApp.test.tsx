@@ -380,4 +380,33 @@ describe('interface d’administration Vysion', () => {
     expect(screen.getByText('Laisser vide pour conserver le mot de passe enregistré.')).toBeInTheDocument()
     expect(screen.queryByLabelText(/Secret de l’application/)).not.toBeInTheDocument()
   })
+
+  it('isole les champs des deux transports en cas de bascule', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/email': () => jsonResponse(emptyEmail),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('heading', { name: 'Email' })).toBeInTheDocument()
+    // The SMTP shape comes first and its port carries its default value.
+    expect(screen.getByLabelText('Port')).toHaveValue(587)
+
+    await user.selectOptions(screen.getByLabelText('Transport'), 'microsoft365')
+
+    // The Microsoft 365 fields must mount empty: React must not reuse the
+    // SMTP inputs (the port default would otherwise leak into the client ID,
+    // and a typed host into the tenant field).
+    expect(screen.getByLabelText(/client ID/i)).toHaveValue('')
+    expect(screen.getByLabelText(/locataire/)).toHaveValue('')
+    expect(screen.getByLabelText(/boîte/)).toHaveValue('')
+    expect(screen.getByLabelText(/Secret de l’application/)).toHaveValue('')
+
+    await user.selectOptions(screen.getByLabelText('Transport'), 'smtp')
+
+    // And back: the SMTP defaults are pristine, no Microsoft 365 leftovers.
+    expect(screen.getByLabelText('Port')).toHaveValue(587)
+    expect(screen.getByLabelText('Serveur SMTP')).toHaveValue('')
+  })
 })

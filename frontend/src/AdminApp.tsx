@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { FormEvent, Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import './app.css'
 
 type AdminStatus = {
@@ -885,7 +885,10 @@ function AdminApp() {
                     </div>
 
                     {emailTransport === 'smtp' ? (
-                      <>
+                      // Keyed: switching transport must remount the fields,
+                      // never reuse the other transport's inputs (React would
+                      // otherwise carry the port default into the client ID).
+                      <Fragment key="smtp-fields">
                         <div className="admin-field">
                           <label htmlFor="smtp-host">Serveur SMTP</label>
                           <input id="smtp-host" name="smtp_host" type="text" required autoComplete="off" />
@@ -929,9 +932,9 @@ function AdminApp() {
                             Laisser vide pour conserver le mot de passe enregistré.
                           </span>
                         </div>
-                      </>
+                      </Fragment>
                     ) : (
-                      <>
+                      <Fragment key="m365-fields">
                         <div className="admin-field">
                           <label htmlFor="m365-tenant">Identifiant de locataire (tenant)</label>
                           <input id="m365-tenant" name="m365_tenant_id" type="text" required autoComplete="off" />
@@ -959,7 +962,7 @@ function AdminApp() {
                           <label htmlFor="m365-mailbox">Identité de boîte (facultatif)</label>
                           <input id="m365-mailbox" name="m365_mailbox" type="email" autoComplete="off" />
                         </div>
-                      </>
+                      </Fragment>
                     )}
 
                     <button type="submit" className="button primary admin-submit">
