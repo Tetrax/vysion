@@ -64,3 +64,49 @@ def test_json_report_rejects_expiration_not_after_creation() -> None:
             ),
             findings=(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Authoritative public origin (review finding: Host-header poisoning)
+# ---------------------------------------------------------------------------
+
+
+def test_public_origin_is_normalized_to_a_bare_lowercase_origin() -> None:
+    assert Settings(public_origin="HTTPS://Vysion.Test:443").public_origin == (
+        "https://vysion.test"
+    )
+    assert Settings(public_origin="http://vysion.test:80").public_origin == (
+        "http://vysion.test"
+    )
+    assert Settings(public_origin="https://vysion.test:8443").public_origin == (
+        "https://vysion.test:8443"
+    )
+    assert Settings().public_origin == ""
+
+
+def test_public_origin_refuses_anything_but_scheme_authority() -> None:
+    for value in (
+        "https://vysion.test/path",
+        "https://vysion.test/admin?x=1",
+        "https://vysion.test#frag",
+        "vysion.test",
+        "ftp://vysion.test",
+        "https://user@vysion.test",
+        "https://",
+        "https://vysion.test:99999",
+    ):
+        with pytest.raises(ValidationError):
+            Settings(public_origin=value)
+
+
+def test_standalone_mode_derives_its_public_origin_from_the_tls_hostname() -> None:
+    derived = Settings(tls_backend="local", tls_hostname="Vysion.Example")
+    assert derived.public_origin == "https://vysion.example"
+    explicit = Settings(
+        tls_backend="local",
+        tls_hostname="vysion.example",
+        public_origin="https://admin.example:8443",
+    )
+    assert explicit.public_origin == "https://admin.example:8443"
+    # The proxy/VPS mode has no authoritative host: nothing is invented.
+    assert Settings().public_origin == ""

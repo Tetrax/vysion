@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -12,6 +12,11 @@ from vysion.adapters.fortiguard import (
     FortiGuardClient,
     FortiGuardService,
     error_psirt_observation,
+)
+from vysion.api.admin import (
+    STATE_UNAVAILABLE,
+    build_admin_router,
+    install_admin_hardening,
 )
 from vysion.audit.engine import AuditEngine
 from vysion.audit.models import (
@@ -29,11 +34,15 @@ from vysion.audit.models import (
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.build_info import VYSION_REVISION, VYSION_VERSION
+from vysion.certificates import CertificateStore, nginx_reloader, tls_fingerprint_smoker
 from vysion.config import Settings
+from vysion.mail import RecoveryMailer, SmtpMailer
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.presentation import build_presentation, present_findings
 from vysion.reports.xlsx_report import render_xlsx
+from vysion.security import TrustedProxy
+from vysion.state import StateError, StateStore
 from vysion.storage.reports import Clock, JsonReportStore, utc_now
 
 
@@ -556,8 +565,30 @@ def create_app(
     settings: Settings | None = None,
     fortiguard: FortiGuardService | None = None,
     clock: Clock = utc_now,
+    recovery_mailer: RecoveryMailer | None = None,
+    certificate_reloader: Callable[[], None] | None = None,
+    certificate_smoker: Callable[[], str] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings()
+    # The durable state is built before any route exists: a corrupt state
+    # refuses the whole application instead of reading as "first run".
+    state_directory = (
+        resolved_settings.state_directory
+        or resolved_settings.report_directory.parent / "state"
+    )
+    state_store = StateStore(state_directory, clock=clock)
+    trusted_proxy = TrustedProxy.parse(resolved_settings.trusted_proxy_cidrs)
+    certificate_store: CertificateStore | None = None
+    reloader_hook: Callable[[], None] | None = certificate_reloader
+    smoker_hook: Callable[[], str] | None = certificate_smoker
+    if resolved_settings.tls_backend == "local":
+        # Standalone only: the certificate volume must exist and be writable,
+        # so an unusable directory refuses the application at startup.
+        certificate_store = CertificateStore(resolved_settings.certs_directory, clock=clock)
+        if reloader_hook is None:
+            reloader_hook = nginx_reloader
+        if smoker_hook is None:
+            smoker_hook = tls_fingerprint_smoker(resolved_settings.tls_hostname)
     store = JsonReportStore(resolved_settings.report_directory, clock=clock)
     parser = FortiGateParser()
     engine = AuditEngine(default_registry())
@@ -571,6 +602,26 @@ def create_app(
         )
 
     app = FastAPI(title="Vysion", version=VYSION_VERSION, docs_url=None, redoc_url=None)
+
+    app.state.settings = resolved_settings
+    app.state.state_store = state_store
+    app.state.trusted_proxy = trusted_proxy
+    app.state.recovery_mailer = (
+        recovery_mailer if recovery_mailer is not None else SmtpMailer(state_store)
+    )
+    app.state.certificate_store = certificate_store
+    app.state.certificate_reloader = reloader_hook
+    app.state.certificate_smoker = smoker_hook
+    install_admin_hardening(app)
+    app.include_router(build_admin_router())
+
+    @app.exception_handler(StateError)
+    async def admin_state_unavailable(request: Request, exc: StateError) -> JSONResponse:
+        # Fail closed: privileged operations refuse when the state is unusable.
+        return JSONResponse(
+            {"detail": STATE_UNAVAILABLE},
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
 
     if managed_http is not None:
         client = managed_http

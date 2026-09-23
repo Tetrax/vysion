@@ -1,9 +1,19 @@
+# Mode VM : Docker derrière un reverse proxy externe qui termine HTTPS.
+# Aucun certificat n'est embarqué (le conteneur sert en HTTP clair sur
+# 8080), aucun chemin hôte, aucune IP, aucun domaine ni subnet ne sont
+# imposés : TRUSTED_PROXY_CIDRS décrit explicitement les seules sources
+# dont l'application accepte les en-têtes X-Forwarded-* transmis, et
+# PUBLIC_ORIGIN fixe l'origine publique de référence (mutations admin et
+# liens de récupération).
+#
+#   IMAGE_DIGEST=sha256:<64 hex> \
+#     TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8 \
+#     docker compose -f compose.proxy.yml config
+#
+# Sans TRUSTED_PROXY_CIDRS la pile refuse de se résoudre : la confiance
+# proxy ne se déduit jamais d'une valeur par défaut silencieuse.
 services:
   vysion:
-    # Only a content-addressed OCI digest can be rendered: a tag (latest,
-    # sha-latest, short or non-hex SHA) is structurally inexpressible here and
-    # Docker refuses every malformed reference while acquiring the image,
-    # before any container exists.
     image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
     restart: unless-stopped
     ports:
@@ -13,7 +23,7 @@ services:
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
       VYSION_MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
       VYSION_FORTIGUARD_STATUS_URL: ${FORTIGUARD_STATUS_URL:-https://www.fortiguard.com/}
-      VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
+      VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set TRUSTED_PROXY_CIDRS to the CIDR list of the external reverse proxy, e.g. 127.0.0.1/32,10.0.0.0/8}
       VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     volumes:
       - vysion-reports:/app/data/reports

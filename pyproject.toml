@@ -14,6 +14,9 @@ dependencies = [
   "uvicorn==0.35.0",
 ]
 
+[project.scripts]
+vysion-admin = "vysion.admin_cli:cli"
+
 [dependency-groups]
 dev = [
   "pytest==8.4.1",

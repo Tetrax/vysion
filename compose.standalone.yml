@@ -1,13 +1,16 @@
+# Standalone deployment: this container terminates TLS itself with the
+# certificate imported through the administrator UI (PEM/PKCS#12) and
+# serves HTTPS on 443. The loopback plaintext port stays only for the
+# container healthcheck. Render with the immutable image digest:
+#
+#   IMAGE_DIGEST=sha256:<64 hex> VYSION_TLS_HOSTNAME=vysion.example.com \
+#     docker compose -f compose.standalone.yml config
 services:
   vysion:
-    # Only a content-addressed OCI digest can be rendered: a tag (latest,
-    # sha-latest, short or non-hex SHA) is structurally inexpressible here and
-    # Docker refuses every malformed reference while acquiring the image,
-    # before any container exists.
     image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
     restart: unless-stopped
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
     environment:
       VYSION_REPORT_DIRECTORY: /app/data/reports
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
@@ -15,9 +18,12 @@ services:
       VYSION_FORTIGUARD_STATUS_URL: ${FORTIGUARD_STATUS_URL:-https://www.fortiguard.com/}
       VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
       VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      VYSION_TLS_BACKEND: local
+      VYSION_TLS_HOSTNAME: ${VYSION_TLS_HOSTNAME:?set VYSION_TLS_HOSTNAME to the DNS name this instance serves}
     volumes:
       - vysion-reports:/app/data/reports
       - vysion-state:/app/data/state
+      - vysion-certs:/app/certs
     tmpfs:
       - /tmp:size=32m,mode=1777
       - /var/run:size=1m,uid=10001,gid=10001,mode=755
@@ -43,3 +49,6 @@ volumes:
   vysion-state:
     external: true
     name: ${VYSION_VOLUME_PREFIX:-}vysion-state
+  vysion-certs:
+    external: true
+    name: ${VYSION_VOLUME_PREFIX:-}vysion-certs

@@ -11,9 +11,9 @@ Vysion v2 est le nouveau socle interne SNS Security d'audit de configurations Fo
 - stockage par UUID v4 avec timestamps UTC, TTL, purge au démarrage, avant écriture et à la lecture ;
 - adaptateur FortiGuard fail-closed pour la disponibilité et la corrélation PSIRT (`UNKNOWN` ou `ERROR`, jamais `PASS` implicite) ;
 - interface React minimale compilée au build, avec téléchargement des trois formats ;
-- un Dockerfile multi-stage, un conteneur, un service Compose et un volume externe `vysion-reports` ;
+- un Dockerfile multi-stage, un conteneur, des piles Compose et trois volumes externes : `vysion-reports` (rapports UUID/TTL), `vysion-state` (état d'administration durable, fail-closed) et `vysion-certs` (certificats du mode standalone) ;
 - Nginx interne en HTTP sur `8080` pour les limites HTTP, les headers, les statiques et le proxy `/api` ;
-- TLS terminé par le Nginx de l'hôte : aucun certificat, aucune clé et aucun montage TLS dans le conteneur ;
+- TLS terminé chez l'opérateur (modes proxy : Nginx de l'hôte ou reverse proxy externe) ou dans le conteneur (mode standalone, certificats importés depuis `/admin`) : aucun montage de certificat ni de clé dans le mode proxy ;
 - FastAPI accessible uniquement sur `127.0.0.1` dans le conteneur.
 
 Ce socle ne porte volontairement pas toutes les règles legacy. Le rapport JSON typé est la source
@@ -57,7 +57,8 @@ HTTPS :443                     Nginx de l'hôte (Let's Encrypt)
 │              └─ exports DOCX/XLSX   │
 └───────────────────┬──────────────────┘
                     ▼
-     volume externe vysion-reports
+     volumes externes vysion-reports / vysion-state
+     (+ vysion-certs en mode standalone)
 ```
 
 Le conteneur n'écoute qu'à travers le bind `${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}` :
@@ -67,6 +68,46 @@ temporaire).
 
 Décision d'edge : `docs/decisions/0001-single-container-http-edge.json` et
 `docs/decisions/0006-host-terminated-tls-loopback-http.json`.
+
+## Modes de déploiement
+
+Trois piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans IP Docker statique :
+
+| Mode | Pile | TLS | `VYSION_TLS_HOSTNAME` | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
+| --- | --- | --- | --- | --- | --- |
+| VPS / Portainer (production) | `compose.yml` | terminé par le Nginx de l'hôte | — | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** (cf. `docs/OPERATIONS.md`) | **requis pour l'admin** (503 sinon) |
+| Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | dérivée de `VYSION_TLS_HOSTNAME` |
+| VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | **requis pour l'admin** (503 sinon) |
+
+- `TRUSTED_PROXY_CIDRS` décrit les seules sources dont l'application accepte
+  les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) : résolution unique
+  dans `vysion.security.TrustedProxy.resolve`, avec le Nginx interne qui
+  rejette et complète ces en-têtes avant l'application et uvicorn qui tourne
+  sans confiance forwarded. Sans cette variable, `compose.proxy.yml` refuse
+  de se résoudre. En mode VPS, une requête qui arrive par le port publié est
+  observée depuis la **passerelle du bridge Docker** (jamais depuis
+  `127.0.0.1`) : renseignez-la avec ce hop réellement observé — la pile
+  n'impose aucun subnet — sinon le `https` déclaré par le Nginx hôte est
+  ignoré et le cookie de session n'est pas `Secure`.
+- `PUBLIC_ORIGIN` est l'autorité de toute mutation `/api/admin/*` : `Origin`
+  et `Host` exacts sont exigés (sinon 403, l'origine n'étant jamais dérivée
+  d'un `Host` attaquant) et, sans origine configurée, **aucune mutation
+  n'a lieu** — setup, connexion, récupération et certificats renvoient 503,
+  aucun lien n'étant fabriqué depuis un en-tête contrôlable. En standalone,
+  l'origine est dérivée de `VYSION_TLS_HOSTNAME` (port 443 implicite) ;
+  changez le port public, définissez `PUBLIC_ORIGIN` avec son port.
+- `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms des volumes externes
+  pour que validations et smokes n'utilisent jamais les volumes de
+  production ; avec le défaut vide les noms restent `vysion-reports`,
+  `vysion-state`, `vysion-certs`.
+
+Les trois piles déclarent les mêmes volumes externes (créés une fois par
+`docker volume create`, voir `docs/OPERATIONS.md`) et la sauvegarde manuelle
+coupe de façon cohérente les conteneurs qui les montent
+(`scripts/backup.sh`), avec restauration testée sur volumes jetables :
+`scripts/restore.sh` lit ses archives avec `VYSION_BACKUP_PREFIX` (le préfixe
+de la sauvegarde, vide pour la production) et écrit ses volumes avec
+`VYSION_VOLUME_PREFIX`, et échoue si aucune archive attendue n'est trouvée.
 
 ## Développement local
 
@@ -95,14 +136,19 @@ journal de la CI de publication ou avec
 
 ```bash
 IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+HOST_PORT=8080  IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
 HOST_PORT=18080 IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
+TRUSTED_PROXY_CIDRS="127.0.0.1/32,10.0.0.0/8" IMAGE_DIGEST="sha256:<64 hex>" \
+  docker compose -f compose.proxy.yml config --quiet
 docker build --pull -t vysion:local .   # un build local ne peut jamais porter la
                                         # référence de déploiement (digest non taguable)
 ```
 
-Aucun certificat n'est nécessaire pour démarrer le conteneur : le TLS est terminé
-par le Nginx de l'hôte, et la configuration HTTP du conteneur est versionnée dans
-`deploy/nginx.conf` puis copiée dans l'image.
+En mode VPS aucun certificat n'est nécessaire pour démarrer le conteneur : le
+TLS est terminé par le Nginx de l'hôte. Le mode standalone génère au premier
+démarrage un certificat bootstrap de court terme puis importe le certificat
+réel via `/admin` (volume `vysion-certs`). La configuration HTTP du conteneur
+est versionnée dans `deploy/nginx.conf` puis copiée dans l'image.
 
 Aucun déploiement automatique n'est autorisé par la création de ce socle. Le chemin
 unique est la Git Stack Portainer, avec la checklist de bascule et de rollback de

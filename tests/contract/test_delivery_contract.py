@@ -46,7 +46,7 @@ def test_runtime_reports_ignore_is_anchored_without_hiding_source_modules() -> N
     assert (ROOT / "src/vysion/reports/json_report.py").is_file()
 
 
-def test_compose_targets_one_loopback_http_service_with_one_external_volume() -> None:
+def test_compose_targets_one_loopback_http_service_with_stable_external_volumes() -> None:
     raw = (ROOT / "compose.yml").read_text()
     compose = yaml.safe_load(raw)
 
@@ -77,15 +77,36 @@ def test_compose_targets_one_loopback_http_service_with_one_external_volume() ->
     assert service["cpus"] == "${CPU_LIMIT:-1.0}"
     assert service["tmpfs"]
     assert service["restart"] == "unless-stopped"
-    # Exactly one named volume, declared external so the reports data keeps its
-    # identity across stacks; no bind mount, no static IP, no external network.
-    assert list(compose["volumes"]) == ["vysion-reports"]
-    assert compose["volumes"]["vysion-reports"] == {"external": True, "name": "vysion-reports"}
-    assert service["volumes"] == ["vysion-reports:/app/data/reports"]
+    # Two named volumes, declared external so the reports data and the durable
+    # administration state keep their identity across stacks; no bind mount,
+    # no static IP, no external network. The certificate volume only exists in
+    # the standalone stack (compose.standalone.yml). The optional
+    # VYSION_VOLUME_PREFIX (default empty) exists so validation stacks and
+    # smokes can run on disjoint volumes without touching the live ones.
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state"]
+    assert compose["volumes"]["vysion-reports"] == {
+        "external": True,
+        "name": "${VYSION_VOLUME_PREFIX:-}vysion-reports",
+    }
+    assert compose["volumes"]["vysion-state"] == {
+        "external": True,
+        "name": "${VYSION_VOLUME_PREFIX:-}vysion-state",
+    }
+    assert service["volumes"] == [
+        "vysion-reports:/app/data/reports",
+        "vysion-state:/app/data/state",
+    ]
     assert "networks" not in service
     assert "networks" not in compose
     # No internal TLS: the host Nginx already terminates TLS for the vhost.
     assert "VYSION_TLS_SERVER_NAME" not in service["environment"]
+    # Forwarded-trust and public-origin wiring: the host hop is trusted by
+    # default, an external proxy CIDR list and the authoritative origin are
+    # operator-settable, and the origin defaults to unset (never invented).
+    assert service["environment"]["VYSION_TRUSTED_PROXY_CIDRS"] == (
+        "${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}"
+    )
+    assert service["environment"]["VYSION_PUBLIC_ORIGIN"] == "${PUBLIC_ORIGIN:-}"
     for forbidden in ("Subnet-Docker", "ipv4_address", "/run/vysion/tls", "ssl", "TLS"):
         assert forbidden not in raw, forbidden
     # The healthcheck crosses Nginx and FastAPI over plain loopback HTTP.
@@ -101,6 +122,29 @@ def _require_docker_compose() -> None:
     probe = subprocess.run(["docker", "compose", "version"], capture_output=True, check=False)
     if probe.returncode != 0:
         pytest.skip("the docker compose plugin is required to render compose.yml")
+
+
+def _render(
+    compose_file: str, empty_env: Path, *args: str, **env: str
+) -> subprocess.CompletedProcess:
+    """Render one compose file with a caller-chosen synthetic environment."""
+    return subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            compose_file,
+            "--env-file",
+            str(empty_env),
+            "config",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=_clean_env(**env),
+        check=False,
+    )
 
 
 def _require_docker_daemon() -> None:
@@ -296,8 +340,9 @@ def test_field_backup_module_collects_without_permission_errors() -> None:
     assert "PermissionError" not in output, output
 
 
-def test_nginx_serves_plain_http_on_8080_and_forwards_the_host_proxy_headers() -> None:
+def test_nginx_serves_plain_http_on_8080_and_forwards_the_observed_hop() -> None:
     nginx = (ROOT / "deploy/nginx.conf").read_text()
+    standalone = (ROOT / "deploy/nginx-standalone.conf").read_text()
 
     for directive in (
         "listen 8080;",
@@ -315,12 +360,32 @@ def test_nginx_serves_plain_http_on_8080_and_forwards_the_host_proxy_headers() -
         "location = /healthz",
         "location /api/",
         "proxy_pass http://127.0.0.1:8000",
-        "proxy_set_header X-Real-IP $http_x_real_ip;",
-        "proxy_set_header X-Forwarded-For $http_x_forwarded_for;",
-        "proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;",
+        # $http_host keeps the client port: the origin check compares against
+        # the exact Host the browser used (18080/18443 staging included).
+        "proxy_set_header Host $http_host;",
+        # Forwarded-trust contract (review finding): the app may only ever see
+        # hops THIS nginx observed. Client input is never forwarded as a hop
+        # or as a scheme; an upstream proxy's scheme claim passes through a
+        # separate header the app gates on the trusted CIDRs.
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+        "proxy_set_header X-Forwarded-Client-Proto $http_x_forwarded_proto;",
         "try_files $uri $uri/ /index.html",
     ):
         assert directive in nginx, directive
+    # The client-controlled variants must be gone from both configs.
+    for config in (nginx, standalone):
+        assert "$http_x_real_ip" not in config
+        assert "X-Forwarded-For $http_x_forwarded_for" not in config
+        assert "$vysion_forwarded_proto" not in config
+        for directive in (
+            "proxy_set_header X-Real-IP $remote_addr;",
+            "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+            "proxy_set_header X-Forwarded-Proto $scheme;",
+            "proxy_set_header X-Forwarded-Client-Proto $http_x_forwarded_proto;",
+        ):
+            assert directive in config, directive
     # TLS lives on the host Nginx; nothing inside the container speaks it.
     assert "ssl" not in nginx
     assert "8443" not in nginx
@@ -346,7 +411,20 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
     assert "USER vysion:vysion" in runtime
     assert "--host 127.0.0.1" in entrypoint
     assert "--factory" in entrypoint
-    assert "nginx -g 'daemon off;'" in entrypoint
+    # uvicorn must not trust forwarded headers on its own: the peer and the
+    # scheme come from the application's own TrustedProxy.resolve, so no
+    # client-controlled X-Forwarded-* value can rewrite either. uvicorn's
+    # proxy_headers default is ON (the round-2 smoke caught the scope client
+    # being rewritten from X-Forwarded-For, which defeated the loopback-gated
+    # trust), so the disable flag is mandatory, not implied by absence.
+    assert "--no-proxy-headers" in entrypoint
+    assert "--proxy-headers" not in entrypoint.replace("--no-proxy-headers", "")
+    assert "--forwarded-allow-ips" not in entrypoint
+    # The default runtime stays plain HTTP: the standalone TLS terminator is
+    # an explicit opt-in (VYSION_TLS_BACKEND=local selects the separate
+    # nginx-standalone.conf), never the default config.
+    assert "nginx -c \"$nginx_config\" -g 'daemon off;'" in entrypoint
+    assert "nginx_config=/etc/nginx/nginx.conf" in entrypoint
     assert "trap 'shutdown 0' INT TERM" in entrypoint
     assert "shutdown 1" in entrypoint
     for path in (
@@ -359,8 +437,226 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
         assert path in entrypoint
 
 
+def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -> None:
+    """Decision 0007: the standalone stack terminates TLS itself and must
+    resolve only with an immutable digest plus an explicit hostname, while
+    mounting the three stable external volumes (certificates live apart from
+    state and reports)."""
+    raw = (ROOT / "compose.standalone.yml").read_text()
+    compose = yaml.safe_load(raw)
+
+    service = compose["services"]["vysion"]
+    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST:")
+    assert ":?" in service["image"]
+    environment = service["environment"]
+    assert environment["VYSION_TLS_BACKEND"] == "local"
+    assert environment["VYSION_TLS_HOSTNAME"].startswith("${VYSION_TLS_HOSTNAME:?")
+    # The authoritative origin can be pinned (non-443 ports); otherwise it is
+    # derived from VYSION_TLS_HOSTNAME inside the application.
+    assert environment["VYSION_PUBLIC_ORIGIN"] == "${PUBLIC_ORIGIN:-}"
+    assert environment["VYSION_TRUSTED_PROXY_CIDRS"] == (
+        "${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}"
+    )
+    assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"]
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["tmpfs"]
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state", "vysion-certs"]
+    for volume, mount in (
+        ("vysion-reports", "vysion-reports:/app/data/reports"),
+        ("vysion-state", "vysion-state:/app/data/state"),
+        ("vysion-certs", "vysion-certs:/app/certs"),
+    ):
+        assert compose["volumes"][volume] == {
+            "external": True,
+            "name": "${VYSION_VOLUME_PREFIX:-}" + volume,
+        }
+        assert mount in service["volumes"]
+    assert service["healthcheck"]["test"][-1] == (
+        "curl --fail --silent --show-error http://127.0.0.1:8080/healthz"
+    )
+    # Certificates are only referenced by the dedicated standalone config and
+    # entrypoint bootstrap, never by the proxy runtime config.
+    assert "ssl" not in (ROOT / "deploy/nginx.conf").read_text()
+    standalone = (ROOT / "deploy/nginx-standalone.conf").read_text()
+    assert "listen 443 ssl;" in standalone
+    assert "ssl_certificate /app/certs/active/fullchain.pem;" in standalone
+    assert "ssl_certificate_key /app/certs/active/key.pem;" in standalone
+
+
 def test_runtime_presentation_map_is_readable_by_non_root_runtime_user() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
 
     assert "COPY docs/V1_V2_CAPABILITY_MAP.json ./docs/V1_V2_CAPABILITY_MAP.json" in dockerfile
     assert "/app/docs" in dockerfile.split("FROM python:", maxsplit=1)[1]
+
+
+def test_proxy_stack_requires_an_explicit_trusted_proxy_and_stays_plain_http() -> None:
+    """Deployment mode 2 (VM behind an external reverse proxy): generic, no
+    host path/IP/subnet imposed, no bundled certificate, and the trusted
+    proxy CIDR list is a required operator decision — never a silent
+    default."""
+    raw = (ROOT / "compose.proxy.yml").read_text()
+    compose = yaml.safe_load(raw)
+
+    assert list(compose["services"]) == ["vysion"]
+    service = compose["services"]["vysion"]
+    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST:")
+    assert ":?" in service["image"]
+    environment = service["environment"]
+    assert environment["VYSION_TRUSTED_PROXY_CIDRS"].startswith(
+        "${TRUSTED_PROXY_CIDRS:?"
+    )
+    assert environment["VYSION_PUBLIC_ORIGIN"] == "${PUBLIC_ORIGIN:-}"
+    # The container never terminates the connection itself in this mode.
+    assert "VYSION_TLS_BACKEND" not in environment
+    assert "VYSION_TLS_HOSTNAME" not in environment
+    assert service["ports"] == ["${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"]
+    # Same durable state contract as the VPS mode, no certificate volume.
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state"]
+    for volume in ("vysion-reports", "vysion-state"):
+        assert compose["volumes"][volume] == {
+            "external": True,
+            "name": "${VYSION_VOLUME_PREFIX:-}" + volume,
+        }
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["pids_limit"] == 128
+    assert service["tmpfs"]
+    assert "networks" not in service
+    assert "networks" not in compose
+    for forbidden in ("Subnet-Docker", "ipv4_address", "ssl", "TLS"):
+        assert forbidden not in raw, forbidden
+
+
+def test_proxy_stack_renders_with_synthetic_variables_and_refuses_without_them(
+    tmp_path: Path,
+) -> None:
+    _require_docker_compose()
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("")
+
+    missing_cidr = _render("compose.proxy.yml", empty_env, IMAGE_DIGEST=VALID_DIGEST)
+    assert missing_cidr.returncode != 0, missing_cidr.stdout + missing_cidr.stderr
+    assert "TRUSTED_PROXY_CIDRS" in missing_cidr.stderr
+
+    rendered = _render(
+        "compose.proxy.yml",
+        empty_env,
+        IMAGE_DIGEST=VALID_DIGEST,
+        TRUSTED_PROXY_CIDRS="127.0.0.1/32,10.0.0.0/8",
+        PUBLIC_ORIGIN="https://vysion.example.com",
+        HOST_PORT="18080",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    service = yaml.safe_load(rendered.stdout)["services"]["vysion"]
+    assert service["image"] == f"ghcr.io/tetrax/vysion@{VALID_DIGEST}"
+    assert service["environment"]["VYSION_TRUSTED_PROXY_CIDRS"] == (
+        "127.0.0.1/32,10.0.0.0/8"
+    )
+    assert service["environment"]["VYSION_PUBLIC_ORIGIN"] == (
+        "https://vysion.example.com"
+    )
+    volumes = yaml.safe_load(rendered.stdout)["volumes"]
+    # Defaults are unchanged: without a prefix the stable production names win.
+    assert volumes["vysion-reports"]["name"] == "vysion-reports"
+    assert volumes["vysion-state"]["name"] == "vysion-state"
+
+
+def test_volume_prefix_isolates_validation_stacks_from_the_live_volumes(
+    tmp_path: Path,
+) -> None:
+    """VYSION_VOLUME_PREFIX (empty by default) lets a smoke or a validation
+    stack bind disjoint external volumes while the production names stay
+    byte-for-byte the default."""
+    _require_docker_compose()
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("")
+
+    default = _render("compose.yml", empty_env, IMAGE_DIGEST=VALID_DIGEST)
+    assert default.returncode == 0, default.stderr
+    default_volumes = yaml.safe_load(default.stdout)["volumes"]
+    assert default_volumes["vysion-reports"]["name"] == "vysion-reports"
+    assert default_volumes["vysion-state"]["name"] == "vysion-state"
+
+    prefixed = _render(
+        "compose.standalone.yml",
+        empty_env,
+        IMAGE_DIGEST=VALID_DIGEST,
+        VYSION_TLS_HOSTNAME="vysion.example.com",
+        VYSION_VOLUME_PREFIX="smoke-20260922-",
+    )
+    assert prefixed.returncode == 0, prefixed.stderr
+    volumes = yaml.safe_load(prefixed.stdout)["volumes"]
+    assert volumes["vysion-reports"]["name"] == "smoke-20260922-vysion-reports"
+    assert volumes["vysion-state"]["name"] == "smoke-20260922-vysion-state"
+    assert volumes["vysion-certs"]["name"] == "smoke-20260922-vysion-certs"
+
+
+def test_readme_documents_the_three_modes_and_the_durable_volumes() -> None:
+    """Review finding: the README still claimed a single reports volume and
+    no certificate in the container. It must describe every deployment mode,
+    every durable volume and the knobs the modes need."""
+    readme = (ROOT / "README.md").read_text()
+    for marker in (
+        "compose.standalone.yml",
+        "compose.proxy.yml",
+        "vysion-state",
+        "vysion-certs",
+        "vysion-reports",
+        "TRUSTED_PROXY_CIDRS",
+        "PUBLIC_ORIGIN",
+        "VYSION_VOLUME_PREFIX",
+    ):
+        assert marker in readme, marker
+    # The old single-volume / no-certificate claims must be gone as such.
+    assert "aucun certificat, aucune clé et aucun montage TLS dans le conteneur" not in (
+        readme
+    )
+    # Review round-2 finding 2: 127.0.0.1/32 is not "the host hop" in the
+    # VPS path — the rollout must name the Docker hop it actually observes.
+    assert "défaut `127.0.0.1/32` (hôte)" not in readme
+    # Review round-2 finding 1: PUBLIC_ORIGIN gates every admin mutation.
+    assert "503" in readme
+
+
+def test_restore_script_separates_source_archives_from_target_volumes() -> None:
+    """Review round-2 finding 3: restore.sh must read its archives with
+    VYSION_BACKUP_PREFIX (the prefix the backup was taken with) and write
+    its volumes with VYSION_VOLUME_PREFIX, so a production backup restores
+    onto prefixed disposable volumes — and an empty restore must fail."""
+    restore = (ROOT / "scripts/restore.sh").read_text()
+    assert "VYSION_BACKUP_PREFIX" in restore
+    assert "VYSION_VOLUME_PREFIX" in restore
+    assert "no expected archive" in restore
+    assert "exit 1" in restore
+    backup = (ROOT / "scripts/backup.sh").read_text()
+    assert "VYSION_BACKUP_PREFIX" in backup
+
+
+def test_operations_doc_covers_volume_prerequisites_modes_and_coherent_backup() -> None:
+    operations = (ROOT / "docs/OPERATIONS.md").read_text().casefold()
+    for marker in (
+        # Fresh/current instance must create the external volumes before the
+        # Portainer stack references them.
+        "docker volume create vysion-state",
+        "docker volume create vysion-certs",
+        # Explicit third mode + its required trust decision.
+        "compose.proxy.yml",
+        "trusted_proxy_cidrs",
+        "public_origin",
+        # The backup boundary must be coherent (quiesced stack), and restore
+        # proven on disposable volumes.
+        "quies",
+        "volume jetable",
+        "empreinte",
+        "docker volume create vysion-smoke-",
+        # Review round-2 finding 3: the source archive names
+        # (VYSION_BACKUP_PREFIX) are independent from the target volume
+        # prefix (VYSION_VOLUME_PREFIX), and an empty restore must fail.
+        "vysion_backup_prefix",
+        "exit 1",
+    ):
+        assert marker in operations, marker
