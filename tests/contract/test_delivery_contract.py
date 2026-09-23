@@ -714,6 +714,30 @@ def test_helper_scripts_and_unit_are_shipped_and_idempotent_by_construction() ->
     assert "install" in bootstrap
     assert "/etc/letsencrypt/live/" in bootstrap
 
+    # Review round-1 finding 3: the host nginx must actually be repointed to
+    # the helper's active generation, with `nginx -t` before any reload, a
+    # read-back of the served fingerprint, automatic restore on failure and
+    # an explicit `restore` subcommand for manual rollback.
+    migrate = ROOT / "deploy/vysion-cert-migrate-nginx.sh"
+    migration = migrate.read_text()
+    assert os.access(migrate, os.X_OK), "the migration script must ship executable"
+    assert "#!/bin/sh" in migration
+    assert '"$nginx_bin" -t' in migration
+    assert "openssl s_client" in migration
+    assert "sha256sum" in migration
+    assert "restore_backup" in migration
+    assert '"restore"' in migration
+    assert "vysion-cert-bootstrap.sh" in migration  # ordering gate before touching /etc
+    # The runbook documents the order, the read-back and the manual rollback.
+    operations = (ROOT / "docs/OPERATIONS.md").read_text().casefold()
+    for marker in (
+        "vysion-cert-migrate-nginx.sh",
+        "nginx -t",
+        "empreinte sha-256 réellement servie",
+        "restore <sauvegarde>",
+    ):
+        assert marker in operations, marker
+
     env_example = (ROOT / "deploy/vysion-cert-helper.env.example").read_text()
     # Ids and paths only: the example must not carry anything credential-like.
     assert "PASSWORD" not in env_example.upper()

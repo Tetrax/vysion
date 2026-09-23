@@ -359,20 +359,24 @@ def _import_lineage(
         private_key = (lineage / "privkey.pem").read_bytes()
     except OSError as exc:
         raise CertificateError(f"lineage illisible : {exc}") from exc
-    metadata = store.validate(
-        certificate=certificate,
-        private_key=private_key,
-        hostname=hostname,
-        passphrase=None,
-    )
-    active = store.active()
-    if active is not None and active.metadata.sha256 == metadata.sha256:
-        store.discard_staged()
-        print("deja servie : aucune generation creee")
-        return 0
-    generation, served = activate_staged(
-        store, reloader=reloader, smoker=smoker
-    )
+    # One critical section for the whole import: validate, compare and
+    # activate cannot interleave with a manual activation running in the
+    # helper process (generation numbering, pointer, reload, rollback).
+    with store.exclusive():
+        metadata = store.validate(
+            certificate=certificate,
+            private_key=private_key,
+            hostname=hostname,
+            passphrase=None,
+        )
+        active = store.active()
+        if active is not None and active.metadata.sha256 == metadata.sha256:
+            store.discard_staged()
+            print("deja servie : aucune generation creee")
+            return 0
+        generation, served = activate_staged(
+            store, reloader=reloader, smoker=smoker
+        )
     print(f"generation={generation.number} served_sha256={served}")
     return 0
 

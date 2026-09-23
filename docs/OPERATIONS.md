@@ -303,10 +303,24 @@ sudo -u root PYTHONPATH=/opt/vysion/src python3 -m vysion.certhelper ping \
 # 3. Import idempotent du certificat déjà servi (génération 1)
 sudo /opt/vysion/deploy/vysion-cert-bootstrap.sh
 
-# 4. Renouvellement automatique : Certbot délègue au même mécanisme
+# 4. Bascule du Nginx hôte vers l'autorité helper (idempotente, avec rollback)
+sudo /opt/vysion/deploy/vysion-cert-migrate-nginx.sh
+
+# 5. Renouvellement automatique : Certbot délègue au même mécanisme
 sudo ln -s /opt/vysion/deploy/certbot-vysion-deploy.sh \
            /etc/letsencrypt/renewal-hooks/deploy/vysion-helper.sh
 ```
+
+### Bascule du Nginx hôte (migration vers l'autorité servie)
+
+Tant que le Nginx hôte lit `/etc/letsencrypt/live/<host>/{fullchain,privkey}.pem`, un import manuel depuis `/admin` ne peut **pas** devenir le certificat servi : l'empreinte relue sur `:443` ne correspond pas, l'activation est donc rétrogradée par rollback. La migration repointe `ssl_certificate` / `ssl_certificate_key` sur `$HELPER_CERTS_DIR/active/{fullchain,key}.pem` — la génération immuable promue par le helper — pour que renouvellement Certbot et import manuel convergent vers **une seule autorité servie**.
+
+- **Ordre obligatoire** : helper démarré → `vysion-cert-bootstrap.sh` (génération 1 = certificat déjà servi, donc l'empreinte ne change pas au moment de la bascule) → migration → hook Certbot. Sans génération active, la migration refuse (exit 1) sans rien toucher à `/etc/nginx`.
+- **Séquence, à chaque étape** : sauvegarde de chaque fichier touché → `nginx -t` **avant** tout rechargement → rechargement → contrôle de l'empreinte SHA-256 réellement servie (`127.0.0.1:443`, SNI = `VYSION_TLS_HOSTNAME`, via `openssl s_client`, comparée à la génération active). Échec de `nginx -t`, du rechargement ou de l'empreinte → restauration de la configuration d'origine, `nginx -t` puis rechargement de retour — exit 1.
+- **Idempotent** : déjà repointé → « rien à faire », aucun rechargement.
+- **Rollback manuel** : le chemin de sauvegarde est imprimé en fin de migration (`backup=...`, sous `/var/backups/vysion-nginx-helper/`) ; `sudo /opt/vysion/deploy/vysion-cert-migrate-nginx.sh restore <sauvegarde>` restaure les fichiers d'origine, valide et recharge. Rollback complet : restaurez, puis désactivez le hook (`rm /etc/letsencrypt/renewal-hooks/deploy/vysion-helper.sh`) si l'on revient au mode `none`.
+- **Permissions** : le master nginx (root) lit la clé au `-t`/rechargement ; `generations` est `0700` root et les fichiers `0600`. Un master non-root ou un accès refusé fait échouer le contrôle d'empreinte → la configuration est restaurée automatiquement.
+- **Preuves** : `tests/contract/test_nginx_migration.py` rejoue la migration entière (succès, `nginx -t` en échec, empreinte divergente, idempotence, bootstrap absent, hostname absent, `restore`) dans une arborescence sandbox avec nginx en stub et un serveur TLS local — jamais contre `/etc`, conformément à la carte.
 
 ### Fonctionnement
 
