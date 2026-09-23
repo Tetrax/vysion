@@ -341,7 +341,7 @@ Tant que le Nginx hôte lit `/etc/letsencrypt/live/<host>/{fullchain,privkey}.pe
 
 ### Fonctionnement
 
-- **Socket** : `/run/vysion-cert-helper/helper.sock`, `0660 root:<VYSION_PGID>` dans un répertoire `0750` ; le pair est vérifié par `SO_PEERCRED` sur le uid **et** le gid — tout autre processus est refusé. Le conteneur la monte en `:ro` (`compose.helper.yml`).
+- **Socket** : `/run/vysion-cert-helper/helper.sock`, `0660 root:<VYSION_PGID>` dans un répertoire `0750` ; le pair est vérifié par `SO_PEERCRED` sur le uid **et** le gid — tout autre processus est refusé. Le conteneur la monte en `:ro` sous `/vysion-helper`, chemin rendu explicite par `VYSION_HELPER_SOCKET_PATH=/vysion-helper/helper.sock` (`compose.helper.yml`) : jamais sous `/run`, où le tmpfs `/var/run` (symlink vers `/run`) masquerait le bind — `docker inspect` l'annoncerait pourtant et le conteneur resterait healthy sans socket. `tests/contract/test_helper_socket_reachability.py` rejoue le stack rendu contre l'image réelle avec une vraie socket hôte.
 - **Protocole** : JSON préfixé longueur, versionné, avec bornes de taille, rejet des clés dupliquées et des clés inattendues. Quatre actions seulement : `ping`, `status`, `validate`, `activate`. `install` et `renew` **n'existent qu'en CLI root**, jamais sur la socket.
 - **Activation** : ticket d'administration (usage unique, lié à la session et au digest) → digest du staging re-vérifié par le helper → génération immuable promue → `nginx -t` **puis** rechargement → empreinte SHA-256 réellement servie relue sur `127.0.0.1:443` → rollback automatique en cas d'écart.
 - **Staging** : privé (`0700`) et purgé par TTL (10 min) : un candidat jamais activé disparaît tout seul.

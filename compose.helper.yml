@@ -11,6 +11,14 @@
 #
 # Prérequis hôte (docs/OPERATIONS.md) : helper installé et démarré, socket
 # présente dans /run/vysion-cert-helper, puis bootstrap du lineage courant.
+#
+# La socket est montée dans le conteneur sous /vysion-helper — jamais sous
+# /run : /var/run est un symlink vers /run et son tmpfs (nécessaire à
+# Nginx) masquerait tout chemin monté en dessous. Un bind déclaré sous /run
+# reste visible dans `docker inspect` alors qu'il est absent du conteneur,
+# et le conteneur reste healthy sans pouvoir joindre l'helper. Le chemin
+# consommé par l'application est donc explicite ci-dessous
+# (VYSION_HELPER_SOCKET_PATH) et le contrat de déploiement le vérifie.
 services:
   vysion:
     image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
@@ -26,12 +34,17 @@ services:
       VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       VYSION_TLS_BACKEND: helper
       VYSION_TLS_HOSTNAME: ${VYSION_TLS_HOSTNAME:?set VYSION_TLS_HOSTNAME to the SAN the host certificate must match, e.g. vysion.example}
+      # Literal, and the exact target of the bind below: the application may
+      # never be left guessing a path a tmpfs could hide.
+      VYSION_HELPER_SOCKET_PATH: /vysion-helper/helper.sock
     volumes:
       - vysion-reports:/app/data/reports
       - vysion-state:/app/data/state
       # Read-only by construction: the container may ask the helper, never
-      # write a socket, a key or a generation of its own.
-      - /run/vysion-cert-helper:/run/vysion-cert-helper:ro
+      # write a socket, a key or a generation of its own. The host path is
+      # the one the systemd unit owns; the container path sits outside /run
+      # so the /var/run tmpfs cannot mount over it.
+      - /run/vysion-cert-helper:/vysion-helper:ro
     tmpfs:
       - /tmp:size=32m,mode=1777
       - /var/run:size=1m,uid=10001,gid=10001,mode=755
