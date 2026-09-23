@@ -71,11 +71,12 @@ Décision d'edge : `docs/decisions/0001-single-container-http-edge.json` et
 
 ## Modes de déploiement
 
-Trois piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans IP Docker statique :
+Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans IP Docker statique :
 
 | Mode | Pile | TLS | `VYSION_TLS_HOSTNAME` | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
 | --- | --- | --- | --- | --- | --- |
 | VPS / Portainer (production) | `compose.yml` | terminé par le Nginx de l'hôte | — | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** (cf. `docs/OPERATIONS.md`) | **requis pour l'admin** (503 sinon) |
+| VPS administrable (helper) | `compose.helper.yml` | terminé par le Nginx de l'hôte, certificat géré par le service root `vysion-cert-helper` | **requis** (SAN attendu) | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** | **requis pour l'admin** (503 sinon) |
 | Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | dérivée de `VYSION_TLS_HOSTNAME` |
 | VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | **requis pour l'admin** (503 sinon) |
 
@@ -100,8 +101,25 @@ Trois piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans 
   pour que validations et smokes n'utilisent jamais les volumes de
   production ; avec le défaut vide les noms restent `vysion-reports`,
   `vysion-state`, `vysion-certs`.
+- **Mode helper** : le certificat reste signé et renouvelé par Certbot, qui
+  demeure l'autorité ACME ; c'est un service systemd root,
+  `vysion-cert-helper`, qui détient les générations et recharge le Nginx
+  hôte. L'application non-root ne parle qu'à sa socket Unix privée
+  (`0660 root:<gid>`, répertoire `0750`, pair vérifié par `SO_PEERCRED`),
+  montée **lecture seule** dans le conteneur : aucun accès à
+  `/etc/letsencrypt`, aucun privilège Docker, aucun secret de plus. Quatre
+  actions seulement y circulent (`ping`, `status`, `validate`, `activate`),
+  `nginx -t` précède toujours le rechargement, l'empreinte servie est
+  relue et l'ancienne génération est restaurée en cas d'échec. Le bootstrap
+  (`deploy/vysion-cert-bootstrap.sh`) et le hook Certbot
+  (`deploy/certbot-vysion-deploy.sh`) passent par ce même mécanisme et sont
+  idempotents : aucune seconde autorité de certificat n'est créée. L'installation
+  fraîche sur l'hôte passe par `deploy/vysion-cert-install.sh`, séquence
+  idempotente qui installe les sources, les scripts exécutables, l'unité
+  systemd et les répertoires que cette unité exige avant démarrage. Voir
+  `docs/OPERATIONS.md` et `docs/SECURITY.md`.
 
-Les trois piles déclarent les mêmes volumes externes (créés une fois par
+Les piles déclarent les mêmes volumes externes (créés une fois par
 `docker volume create`, voir `docs/OPERATIONS.md`) et la sauvegarde manuelle
 coupe de façon cohérente les conteneurs qui les montent
 (`scripts/backup.sh`), avec restauration testée sur volumes jetables :

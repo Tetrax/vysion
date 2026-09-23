@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "decision_id": "0009-administerable-certificates-oauth-mail-and-root-helper",
+  "status": "accepted",
+  "scope": "Vysion v2 - rendre reellement administrables depuis /admin le certificat TLS du mode VPS, la configuration email SMTP ou Microsoft 365 / OAuth2 client credentials, l'envoi de test et la recuperation du compte",
+  "decision": "DECISION ACCEPTEE : le backend de certificats est une seule abstraction none|local|helper (vysion.certbackend) consommee par les routes sans aucune condition de mode, l'UI ne lisant que tls_backend et managed. En mode helper, l'application non-root parle a un service root (vysion.certhelper) par une socket Unix privee 0660 root:<gid> dans un repertoire 0750, montee lecture seule dans le conteneur ; le pair est verifie par SO_PEERCRED sur le uid ET le gid, le protocole (vysion.certprotocol) est versionne, a longueur prefixee et borne, et seules quatre actions y existent (ping, status, validate, activate) avec des ensembles de cles stricts - jamais de chemin, de lineage ni de commande. Le service root reutilise vysion.certificates (CertificateStore + activate_staged), donc exactement le meme moteur de generations immutables, de pointeur actif atomique, de stabilisation et de rollback que le mode local : une seule autorite servie. nginx -t precede toujours le rechargement du Nginx hote, l'empreinte SHA-256 reellement servie est relue sur 127.0.0.1:443 et l'ancienne generation est restauree en cas d'ecart. Certbot demeure l'autorite ACME : deploy/certbot-vysion-deploy.sh garde RENEWED_LINEAGE exact puis delegate a `certhelper renew`, et deploy/vysion-cert-bootstrap.sh importe le lineage courant en generation 1 ; les deux passent par le meme mecanisme autoritatif et sont idempotents (une lignee deja servie ne cree aucune generation). L'email devient une seule section /admin avec un transport selectionnable smtp|microsoft365 : table SQLite `email` unique (migration depuis `smtp` sans bump de SCHEMA_VERSION), secrets write-only en memorisation, champ vide = conserver l'existant (verifie par un gate de completude apres fusion, une ligne inutilisable n'est jamais persistee), projection publique = configured/transport/provenance/secret_configured sans aucune valeur, endpoints Microsoft OAuth2 fixes en client_credentials sans callback utilisateur, mailer reconstruit a chaque envoi depuis l'etat, test d'envoi authentifie + CSRF + Origin exact + rate-limit par portee client + timeout borne, et recuperation fail-closed tant que la configuration et PUBLIC_ORIGIN sont incompletes.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Monter /etc/letsencrypt en lecture seule dans le conteneur et laisser l'application importer les cles",
+      "assessment": {
+        "securite": "Rejete : la cle du conteneur deviendrait lisible par le processus applicatif non-root, et rien n'empecherait un rechargement de Nginx depuis l'application - aucun des mecanismes prouves (Hub, FortiUpgrade) ne le fait.",
+        "controle": "Le service root reste le seul detenteur : l'application ne peut que demander, jamais ecrire."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Creer un second stockage de certificat pour le mode helper, distinct du CertificateStore local",
+      "assessment": {
+        "coherence": "Rejete : deux autorites servies concurrentes, deux ensembles de validations a maintenir, et le contrat 'une seule autorite' viole.",
+        "remediation": "Le helper importe vysion.certificates : validations OpenSSL, staging, generations immutables et rollback sont littéralement les memes fonctions."
+      }
+    },
+    {
+      "id": "C",
+      "name": "Exiger le client secret Microsoft 365 a chaque enregistrement",
+      "assessment": {
+        "usabilite": "Rejete : un champ secret vide doit conserver l'existant, sinon toute modification des autres champs obligerait a ressaisir un secret que l'UI ne montre jamais.",
+        "securite": "Le gate de completude apres fusion refuse une ligne inutilisable : on ne persiste jamais une configuration sans secret utilisable."
+      }
+    }
+  ],
+  "criteria": [
+    "les routes /api/admin/certificates* ne contiennent aucune condition sur tls_backend, seulement l'abstraction de backend",
+    "aucune cle privee ne transite par la socket ni n'apparait dans une reponse, un log ou un argv",
+    "un pair dont le uid ou le gid ne correspond pas est refuse sans reponse exploitable",
+    "une action ou un champ inattendu est refuse avec un message fixe, sans echo du contenu recu",
+    "nginx -t n'a jamais lieu apres un rechargement et une panne de rechargement restaure la generation precedente",
+    "une lignee Certbot deja servie ne cree aucune generation (bootstrap et hook idempotents)",
+    "un champ secret vide conserve le secret enregistre, et une configuration inutilisable est refusee en 422 sans rien ecrire",
+    "modes local et none non regresses, parcours public et moteur inchanges",
+    "gates CI inchangees : pytest + Ruff, frontend tests/lint/build, contrat compose, git diff --check"
+  ],
+  "rationale": [
+    "Une abstraction unique par couche (routes, UI) supprime les branches de mode qui avaient rendu l'UI inutilisable en mode proxy.",
+    "Reutiliser le moteur de generations existant depuis la racine evite toute seconde autorite et herite des validations et du rollback deja eprouves en mode local.",
+    "SO_PEERCRED uid+gid est la seule verification de pair qui ne depende pas d'un jeton a gerer, et elle est testable sans privileges.",
+    "Le protocole borne par longueur versionne l'app et le service ensemble : l'application ne peut pas poser une question que le service ne sait pas mesurer.",
+    "Separer la validation de forme (pydantic) de la completude apres fusion permet a la fois 'champ vide = conserver' et 'jamais de ligne inutilisable'."
+  ],
+  "constraints": [
+    "Ne jamais merger vers main ni deployer, modifier /etc ou le runtime VPS depuis ce chantier : livrer la PR et demander la review independante.",
+    "Aucun secret en Git, en argv, en log, en reponse, en fixture, en capture ou dans un commentaire ; aucune valeur factice en production.",
+    "L'image applicative reste non-root et read-only, sans privilege Docker ni socket Docker ; la socket du helper est montee lecture seule.",
+    "Certbot conserve le renouvellement ACME ; aucun deploiement concurrent ne doit creer une seconde autorite servie.",
+    "Ne toucher a aucun element du moteur : src/vysion/audit/**, parser, controles, projections, JSON/DOCX/XLSX et parcours public.",
+    "Gates CI : pytest + Ruff, frontend tests/lint/build/audit, contrat compose pour chaque pile, git diff --check."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Audit read-only Phase 0 de la carte t_f07ddcfa : comparaison integrale des mecanismes Hub (certbackend, hub_cert_protocol, hub_cert_helper, graphmail, views_security) et FortiUpgrade (cert_helper, cert_helper_protocol, unites systemd), publiee en commentaire sur la carte",
+      "retrieved_at": "2026-09-23",
+      "retrieval_note": "Sources Hub lues via l'objet Git (working tree en 600 hermes:dev), lecture seule."
+    },
+    {
+      "url": null,
+      "purpose": "Etat VPS observe : Nginx hote servant vysion.valdev.me depuis /etc/letsencrypt/live, certbot.timer actif, conteneur sur 127.0.0.1:8080",
+      "retrieved_at": "2026-09-23",
+      "retrieval_note": "Constat de la carte, aucun fichier /etc modifie pendant le developpement."
+    },
+    {
+      "url": null,
+      "purpose": "Decisions 0007 (surface d'administration, TLS standalone, etat durable) et 0008 (confiance transferee, sauvegarde coherente, trois modes) qui encadrent celle-ci",
+      "retrieved_at": "2026-09-23",
+      "retrieval_note": "docs/decisions/0007-*.json et 0008-*.json."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Suite directe de 0007 et 0008 : passage de la presentation a la parite operateur (certificats VPS, SMTP/OAuth, test et recuperation), sans elargir le perimetre /admin.",
+    "remote_publication": "PR uniquement, review independante obligatoire (L3), pas de merge",
+    "portainer_deployment": "not executed - runtime VPS, Nginx hote, /etc et certificat actif inchanges pendant le developpement"
+  },
+  "rollback_boundary": "Ce changement ne touche ni l'instance en service, ni /etc, ni Certbot, ni les volumes : la PR se revert sans effet sur le runtime. Aucun mode existant n'est supprime (none et local gardent leurs piles et leurs tests) ; en mode helper, le retrait se fait par la deactivation du service systemd et le retour a compose.yml, le service etant le seul a ecrire dans HELPER_CERTS_DIR. La migration SQLite de la table `email` recopie la table `smtp` sans bump de SCHEMA_VERSION : un revert applicatif retrouve la table `smtp` intacte."
+}

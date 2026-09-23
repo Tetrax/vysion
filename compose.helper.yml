@@ -1,0 +1,59 @@
+# Mode VPS : Nginx hôte termine HTTPS pour vysion.example et proxifie le
+# conteneur en HTTP clair sur 127.0.0.1:8080. Le certificat est géré par le
+# service root « vysion-cert-helper » (deploy/vysion-cert-helper.service) via
+# une socket Unix privée montée LECTURE SEULE : l'application non-root ne
+# détient aucun droit sur /etc/letsencrypt ni sur le rechargement de Nginx.
+#
+#   IMAGE_DIGEST=sha256:<64 hex> \
+#     TRUSTED_PROXY_CIDRS=127.0.0.1/32 \
+#     VYSION_TLS_HOSTNAME=vysion.example \
+#     docker compose -f compose.helper.yml config
+#
+# Prérequis hôte (docs/OPERATIONS.md) : helper installé et démarré, socket
+# présente dans /run/vysion-cert-helper, puis bootstrap du lineage courant.
+services:
+  vysion:
+    image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"
+    environment:
+      VYSION_REPORT_DIRECTORY: /app/data/reports
+      VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
+      VYSION_MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
+      VYSION_FORTIGUARD_STATUS_URL: ${FORTIGUARD_STATUS_URL:-https://www.fortiguard.com/}
+      VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set TRUSTED_PROXY_CIDRS to the CIDR list of the external reverse proxy, e.g. 127.0.0.1/32,10.0.0.0/8}
+      VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      VYSION_TLS_BACKEND: helper
+      VYSION_TLS_HOSTNAME: ${VYSION_TLS_HOSTNAME:?set VYSION_TLS_HOSTNAME to the SAN the host certificate must match, e.g. vysion.example}
+    volumes:
+      - vysion-reports:/app/data/reports
+      - vysion-state:/app/data/state
+      # Read-only by construction: the container may ask the helper, never
+      # write a socket, a key or a generation of its own.
+      - /run/vysion-cert-helper:/run/vysion-cert-helper:ro
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/run:size=1m,uid=10001,gid=10001,mode=755
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: ${MEM_LIMIT:-512m}
+    cpus: ${CPU_LIMIT:-1.0}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  vysion-reports:
+    external: true
+    name: ${VYSION_VOLUME_PREFIX:-}vysion-reports
+  vysion-state:
+    external: true
+    name: ${VYSION_VOLUME_PREFIX:-}vysion-state

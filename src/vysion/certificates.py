@@ -8,6 +8,7 @@ and no secret ever reaches a process argument.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -17,14 +18,16 @@ import shutil
 import socket
 import ssl
 import subprocess
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from vysion.storage.reports import Clock, utc_now
+from vysion.clocks import Clock, utc_now
 
 OPENSSL_TIMEOUT_SECONDS = 20
 # nginx keeps its previous workers alive for a moment after a reload: they
@@ -150,6 +153,39 @@ class CertificateStore:
         self._private_init(self.certs_directory)
         self._generations_directory = self.certs_directory / "generations"
         self._private_init(self._generations_directory)
+        # One critical section for every process that shares this directory:
+        # the app (local mode), the root helper and Certbot's deploy hook.
+        self._lock_path = self.certs_directory / ".lock"
+        self._lock_local = threading.local()
+
+    @contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Cross-process critical section around generation/pointer/reload.
+
+        ``flock`` binds to the open file description, so two opens block each
+        other even inside one process — threads are serialized too. The
+        per-thread depth exists only so that a nested acquisition by the
+        *same* thread (``_import_lineage`` wrapping ``activate_staged``) does
+        not deadlock against its own descriptor.
+        """
+        depth = getattr(self._lock_local, "depth", 0)
+        if depth:
+            self._lock_local.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._lock_local.depth = depth
+            return
+        descriptor = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            self._lock_local.depth = 1
+            try:
+                yield
+            finally:
+                self._lock_local.depth = 0
+        finally:
+            os.close(descriptor)
 
     @staticmethod
     def _private_init(directory: Path) -> None:
@@ -203,6 +239,10 @@ class CertificateStore:
         digest.update(b"\0")
         digest.update(key.read_bytes())
         return digest.hexdigest()
+
+    def discard_staged(self) -> None:
+        """Drop the staged candidate without touching any generation."""
+        shutil.rmtree(self._staging, ignore_errors=True)
 
     def staged_metadata(self) -> CertificateMetadata | None:
         """Public metadata of the staged candidate, None when absent."""
@@ -578,61 +618,67 @@ def activate_staged(
 ) -> tuple[Generation, str]:
     """Promote, reload, verify what is actually served, roll back on failure.
 
+    The whole sequence runs inside the store's cross-process critical
+    section: a Certbot renewal in another process can never interleave
+    between the pointer flip, the reload, the fingerprint read-back and a
+    rollback.
+
     The served certificate is polled across a bounded settle window: right
     after the reload the previous workers can still answer, so a single
     immediate probe would race the propagation and declare a false mismatch.
     """
-    if store.staged_digest() is None:
-        raise CertificateError("aucun candidat en staging : validez d'abord un certificat")
-    previous = store.active()
-    generation = store.promote()
-    rollback_notes: list[str] = []
+    with store.exclusive():
+        if store.staged_digest() is None:
+            raise CertificateError("aucun candidat en staging : validez d'abord un certificat")
+        previous = store.active()
+        generation = store.promote()
+        rollback_notes: list[str] = []
 
-    def rollback() -> None:
-        store.restore(previous)
+        def rollback() -> None:
+            store.restore(previous)
+            try:
+                reloader()
+            except Exception as exc:  # noqa: BLE001 - reported, never hidden
+                rollback_notes.append(f"rechargement de restauration : {exc}")
+
         try:
             reloader()
-        except Exception as exc:  # noqa: BLE001 - reported, never hidden
-            rollback_notes.append(f"rechargement de restauration : {exc}")
-
-    try:
-        reloader()
-    except Exception as exc:
-        rollback()
-        raise CertificateError(
-            f"activation annulée : rechargement impossible ({exc}) ; rollback effectué"
-            + (f" ; {' ; '.join(rollback_notes)}" if rollback_notes else "")
-        ) from exc
-
-    served: str | None = None
-    saw_answer = False
-    probe_error: Exception | None = None
-    for attempt in range(RELOAD_SETTLE_ATTEMPTS):
-        if attempt:
-            sleeper(RELOAD_SETTLE_DELAY_SECONDS)
-        try:
-            candidate = _normalize_fingerprint(smoker())
-        except Exception as exc:  # noqa: BLE001 - transient during the reload
-            probe_error = exc
-            continue
-        saw_answer = True
-        if candidate == generation.metadata.sha256:
-            served = candidate
-            break
-
-    if served is None:
-        rollback()
-        note = f" ; {' ; '.join(rollback_notes)}" if rollback_notes else ""
-        if saw_answer:
+        except Exception as exc:
+            rollback()
             raise CertificateError(
-                "activation annulée : le certificat servi ne correspond pas au certificat"
-                " activé ; rollback effectué" + note
-            )
-        raise CertificateError(
-            "activation annulée : vérification du certificat servi impossible"
-            f" ({probe_error}) ; rollback effectué" + note
-        ) from probe_error
-    return generation, served
+                f"activation annulée : rechargement impossible ({exc}) ; rollback effectué"
+                + (f" ; {' ; '.join(rollback_notes)}" if rollback_notes else "")
+            ) from exc
+
+        served: str | None = None
+        saw_answer = False
+        probe_error: Exception | None = None
+        for attempt in range(RELOAD_SETTLE_ATTEMPTS):
+            if attempt:
+                sleeper(RELOAD_SETTLE_DELAY_SECONDS)
+            try:
+                candidate = _normalize_fingerprint(smoker())
+            except Exception as exc:  # noqa: BLE001 - transient during the reload
+                probe_error = exc
+                continue
+            saw_answer = True
+            if candidate == generation.metadata.sha256:
+                served = candidate
+                break
+
+        if served is None:
+            rollback()
+            note = f" ; {' ; '.join(rollback_notes)}" if rollback_notes else ""
+            if saw_answer:
+                raise CertificateError(
+                    "activation annulée : le certificat servi ne correspond pas au certificat"
+                    " activé ; rollback effectué" + note
+                )
+            raise CertificateError(
+                "activation annulée : vérification du certificat servi impossible"
+                f" ({probe_error}) ; rollback effectué" + note
+            ) from probe_error
+        return generation, served
 
 
 def nginx_reloader() -> None:
@@ -684,3 +730,28 @@ def tls_fingerprint_smoker(
         return hashlib.sha256(der).hexdigest()
 
     return smoke
+
+
+def certificate_status_payload(store: CertificateStore) -> dict[str, Any]:
+    """The public certificate listing, built in exactly one place.
+
+    The ``local`` route and the root ``helper`` both answer from this single
+    projection, so the two modes can never drift apart in what an
+    administrator is shown.
+    """
+    active = store.active()
+    staged = store.staged_metadata()
+    return {
+        "active": (
+            {"number": active.number, **active.metadata.as_dict()} if active else None
+        ),
+        "staging": staged.as_dict() if staged else None,
+        "generations": [
+            {
+                "number": item.number,
+                "is_active": active is not None and item.number == active.number,
+                **item.metadata.as_dict(),
+            }
+            for item in store.generations()
+        ],
+    }

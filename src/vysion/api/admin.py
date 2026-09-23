@@ -10,15 +10,19 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vysion.build_info import VYSION_VERSION
-from vysion.certificates import CertificateError, CertificateStore, activate_staged
-from vysion.config import Settings
+from vysion.certbackend import CertificateBackend, CertificateBackendUnavailable
+from vysion.certclient import CertificateHelperUnavailable
+from vysion.certificates import CertificateError
+from vysion.config import HOSTNAME_PATTERN, Settings
 from vysion.mail import RecoveryUnavailable
 from vysion.security import (
     CSRF_HEADER_NAME,
@@ -32,12 +36,17 @@ from vysion.security import (
     TrustedProxy,
     session_cookie,
 )
-from vysion.state import SessionRecord, StateStore
+from vysion.state import (
+    EMAIL_TRANSPORTS,
+    SMTP_SECURITIES,
+    EmailConfig,
+    SessionRecord,
+    StateStore,
+)
 
 MAX_ADMIN_BODY_BYTES = 1 * 1024 * 1024
 MAX_CERTIFICATE_BYTES = 512 * 1024
 CERT_TICKET_TTL_SECONDS = 300
-NO_STANDALONE = "réservé au mode standalone (VYSION_TLS_BACKEND=local)"
 NO_STAGING = "aucun certificat en staging : validez d'abord un certificat"
 BAD_TICKET = (
     "ticket d'activation invalide, expiré, déjà utilisé ou lié à une autre session"
@@ -61,6 +70,19 @@ RECOVERY_CONFIRM_THRESHOLD = 5
 RECOVERY_RATE_SECONDS = 600
 RECOVERY_TTL_SECONDS = 900
 RECOVERY_PURPOSE = "reset"
+# The test send costs a real outbound connection: it is bounded per client,
+# counted whether it succeeds or fails, so it cannot become a relay.
+EMAIL_TEST_PREFIX = "email:test"
+EMAIL_TEST_THRESHOLD = 5
+EMAIL_TEST_RATE_SECONDS = 600
+MIN_TIMEOUT_SECONDS = 1
+MAX_TIMEOUT_SECONDS = 60
+# Address, GUID and tenant syntax. Deliberately conservative: this is an
+# operator form, not a full RFC 5322 parser.
+EMAIL_ADDRESS_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+GUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
 
 PASSWORD_CONTRACT = "mot de passe refus\u00e9 : 12 \u00e0 1024 octets UTF-8"
 LOCKED = "trop de tentatives, r\u00e9essayez plus tard"
@@ -79,6 +101,9 @@ RECOVERY_NO_ORIGIN = "récupération indisponible : origine publique non configu
 BODY_TOO_LARGE = "corps de requ\u00eate trop volumineux"
 LENGTH_REQUIRED = "longueur du corps requise"
 BAD_LENGTH = "longueur du corps invalide"
+EMAIL_NOT_CONFIGURED = "transport d'email non configuré ou incomplet"
+EMAIL_INCOMPLETE = "configuration d'email incomplète : secret du transport manquant"
+EMAIL_NO_DESTINATION = "adresse de récupération absente : envoi de test impossible"
 
 
 class SetupRequest(BaseModel):
@@ -113,6 +138,79 @@ class RecoveryConfirmRequest(BaseModel):
     password: str
 
 
+class EmailConfigRequest(BaseModel):
+    """The single Email form: one transport, write-only secrets.
+
+    A secret field left empty keeps the stored one — that is what makes the
+    browser able to round-trip a form it can never read back. Only the fields
+    of the selected transport are validated: the other transport's material is
+    discarded on save and can never be validated against the wrong shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    transport: str
+    from_address: str = ""
+    recovery_email: str = ""
+    timeout_seconds: int = Field(default=10, ge=MIN_TIMEOUT_SECONDS, le=MAX_TIMEOUT_SECONDS)
+    smtp_host: str = ""
+    smtp_port: int | None = None
+    smtp_security: str | None = None
+    smtp_username: str = ""
+    # Write-only: empty means "keep what is stored", never "erase".
+    smtp_password: str = ""
+    smtp_allow_plaintext: bool = False
+    m365_tenant_id: str = ""
+    m365_client_id: str = ""
+    # Write-only: empty means "keep what is stored", never "erase".
+    m365_client_secret: str = ""
+    m365_mailbox: str = ""
+
+    @model_validator(mode="after")
+    def _validate_selection(self) -> EmailConfigRequest:
+        if self.transport not in EMAIL_TRANSPORTS:
+            raise ValueError(f"transport must be one of: {', '.join(EMAIL_TRANSPORTS)}")
+        if not EMAIL_ADDRESS_PATTERN.fullmatch(self.from_address.strip()):
+            raise ValueError("from_address must be a valid email address")
+        recovery = self.recovery_email.strip()
+        if recovery and not EMAIL_ADDRESS_PATTERN.fullmatch(recovery):
+            raise ValueError("recovery_email must be a valid email address")
+        if self.transport == "smtp":
+            self._validate_smtp()
+        else:
+            self._validate_microsoft365()
+        return self
+
+    def _validate_smtp(self) -> None:
+        if not HOSTNAME_PATTERN.fullmatch(self.smtp_host.strip().lower()):
+            raise ValueError("smtp_host must be a valid DNS name")
+        if self.smtp_port is None or not 1 <= self.smtp_port <= 65535:
+            raise ValueError("smtp_port must be between 1 and 65535")
+        security = self.smtp_security or "starttls"
+        if security not in SMTP_SECURITIES:
+            raise ValueError(f"smtp_security must be one of: {', '.join(SMTP_SECURITIES)}")
+        # Cleartext credentials are possible but never by omission: an
+        # operator has to ask for them explicitly.
+        if security == "none" and not self.smtp_allow_plaintext:
+            raise ValueError("smtp_security=none requires smtp_allow_plaintext=true")
+
+    def _validate_microsoft365(self) -> None:
+        tenant = self.m365_tenant_id.strip()
+        if not (
+            GUID_PATTERN.fullmatch(tenant)
+            or HOSTNAME_PATTERN.fullmatch(tenant.lower())
+        ):
+            raise ValueError("m365_tenant_id must be a tenant GUID or a tenant DNS name")
+        if not GUID_PATTERN.fullmatch(self.m365_client_id.strip()):
+            raise ValueError("m365_client_id must be a GUID")
+        # An empty secret is not a shape error: it is how the admin surface
+        # says "keep the stored one". Whether a usable secret ends up being
+        # saved is checked against the resulting row, after the merge.
+        mailbox = self.m365_mailbox.strip()
+        if mailbox and not EMAIL_ADDRESS_PATTERN.fullmatch(mailbox):
+            raise ValueError("m365_mailbox must be a valid email address")
+
+
 # ---------------------------------------------------------------------------
 # request context: peer, client, scheme, host
 # ---------------------------------------------------------------------------
@@ -128,8 +226,8 @@ def _proxy(request: Request) -> TrustedProxy:
     return request.app.state.trusted_proxy
 
 
-def _certificate_store(request: Request) -> CertificateStore | None:
-    return getattr(request.app.state, "certificate_store", None)
+def _certificate_backend(request: Request) -> CertificateBackend:
+    return request.app.state.certificate_backend
 
 
 def _peer(request: Request) -> str | None:
@@ -321,8 +419,31 @@ class AdminBodyLimit:
         return None
 
 
+# Pydantic attaches the raw input to every validation error; for a
+# model-level refusal that input is the whole body — write-only secrets
+# included. Only loc/msg/type/url may ever leave the process.
+VALIDATION_ERROR_HIDDEN_KEYS = frozenset({"input", "value", "ctx"})
+
+
 def install_admin_hardening(app: Any) -> None:
     app.add_middleware(AdminBodyLimit, max_bytes=MAX_ADMIN_BODY_BYTES)
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_without_echo(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        detail = [
+            {
+                key: value
+                for key, value in error.items()
+                if key not in VALIDATION_ERROR_HIDDEN_KEYS
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            {"detail": detail},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +457,7 @@ def build_admin_router() -> APIRouter:
         settings = _settings(request)
         state = _state(request)
         session = _resolve_session(request)
-        smtp = state.smtp_config()
+        email = state.email_config()
         return {
             "setup_required": not state.has_admin(),
             "authenticated": session is not None,
@@ -347,7 +468,7 @@ def build_admin_router() -> APIRouter:
             # Recovery needs both a transport and an authoritative origin to
             # build the reset link from; without either it stays hidden.
             "recovery_enabled": bool(
-                smtp is not None and smtp.recovery_email and settings.public_origin
+                email is not None and email.recovery_email and settings.public_origin
             ),
             "version": VYSION_VERSION,
         }
@@ -503,7 +624,7 @@ def build_admin_router() -> APIRouter:
             )
             if locked:
                 raise _rate_limited(request, locked)
-        config = state.smtp_config()
+        config = state.email_config()
         if config is None or not config.recovery_email:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=RECOVERY_DOWN
@@ -586,32 +707,19 @@ def build_admin_router() -> APIRouter:
         _session: Annotated[SessionRecord, Depends(require_session)],
     ) -> dict[str, Any]:
         settings = _settings(request)
-        store = _certificate_store(request)
-        payload: dict[str, Any] = {
-            "managed": store is not None,
+        backend = _certificate_backend(request)
+        try:
+            listing = backend.status()
+        except CertificateHelperUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
+        return {
+            **listing,
+            "managed": backend.managed,
             "tls_backend": settings.tls_backend,
             "tls_hostname": settings.tls_hostname or None,
-            "active": None,
-            "staging": None,
-            "generations": [],
         }
-        if store is None:
-            return payload
-        active = store.active()
-        staged = store.staged_metadata()
-        payload["active"] = (
-            {"number": active.number, **active.metadata.as_dict()} if active else None
-        )
-        payload["staging"] = staged.as_dict() if staged else None
-        payload["generations"] = [
-            {
-                "number": item.number,
-                "is_active": active is not None and item.number == active.number,
-                **item.metadata.as_dict(),
-            }
-            for item in store.generations()
-        ]
-        return payload
 
     @router.post("/certificates/validate")
     async def certificates_validate(
@@ -622,42 +730,48 @@ def build_admin_router() -> APIRouter:
         passphrase: Annotated[str | None, Form()] = None,
     ) -> dict[str, Any]:
         settings = _settings(request)
-        store = _certificate_store(request)
-        if store is None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_STANDALONE)
-        hostname = settings.tls_hostname.strip()
-        if not hostname:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="tls_hostname requis"
-            )
-        certificate_bytes = await certificate.read(MAX_CERTIFICATE_BYTES + 1)
-        if len(certificate_bytes) > MAX_CERTIFICATE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
-            )
-        key_bytes: bytes | None = None
-        if private_key is not None:
-            key_bytes = await private_key.read(MAX_CERTIFICATE_BYTES + 1)
-            if len(key_bytes) > MAX_CERTIFICATE_BYTES:
+        backend = _certificate_backend(request)
+        # One refusal block: the mode itself is answered before any hostname
+        # or file question, exactly as it was before the backends existed.
+        try:
+            backend.ensure_available()
+            hostname = settings.tls_hostname.strip()
+            if not hostname:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="tls_hostname requis"
+                )
+            certificate_bytes = await certificate.read(MAX_CERTIFICATE_BYTES + 1)
+            if len(certificate_bytes) > MAX_CERTIFICATE_BYTES:
                 raise HTTPException(
                     status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
                 )
-            # An empty part means "not provided" (PKCS#12 needs no key file).
-            if not key_bytes:
-                key_bytes = None
-        try:
-            metadata = store.validate(
+            key_bytes: bytes | None = None
+            if private_key is not None:
+                key_bytes = await private_key.read(MAX_CERTIFICATE_BYTES + 1)
+                if len(key_bytes) > MAX_CERTIFICATE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
+                    )
+                # An empty part means "not provided" (PKCS#12 needs no key file).
+                if not key_bytes:
+                    key_bytes = None
+            metadata, digest = backend.validate(
                 certificate=certificate_bytes,
                 private_key=key_bytes,
                 hostname=hostname,
                 passphrase=passphrase or None,
             )
+        except CertificateBackendUnavailable as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except CertificateHelperUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
         except CertificateError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
             ) from exc
-        digest = store.staged_digest()
-        if digest is None:  # pragma: no cover - validate guarantees staging
+        if not digest:  # pragma: no cover - validate guarantees staging
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=STATE_UNAVAILABLE
             )
@@ -678,40 +792,145 @@ def build_admin_router() -> APIRouter:
         _session: Annotated[SessionRecord, Depends(require_mutation)],
         payload: CertificateActivateRequest,
     ) -> dict[str, Any]:
-        settings = _settings(request)
-        store = _certificate_store(request)
-        if store is None or settings.tls_backend != "local":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NO_STANDALONE)
-        digest = store.staged_digest()
-        if digest is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=NO_STAGING)
-        state = _state(request)
-        if not state.consume_certificate_ticket(
-            payload.token,
-            session_hash=_session.token_hash,
-            content_digest=digest,
-        ):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_TICKET)
-        reloader = getattr(request.app.state, "certificate_reloader", None)
-        smoker = getattr(request.app.state, "certificate_smoker", None)
-        if reloader is None or smoker is None:  # pragma: no cover - wired in local mode
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="activation indisponible : hooks TLS non configurés",
-            )
+        backend = _certificate_backend(request)
         try:
-            generation, served = activate_staged(
-                store, reloader=reloader, smoker=smoker
-            )
+            backend.ensure_available()
+            digest = backend.staged_digest()
+            if digest is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=NO_STAGING
+                )
+            state = _state(request)
+            if not state.consume_certificate_ticket(
+                payload.token,
+                session_hash=_session.token_hash,
+                content_digest=digest,
+            ):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_TICKET)
+            generation, certificate, served = backend.activate(digest)
+        except CertificateBackendUnavailable as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except CertificateHelperUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
         except CertificateError as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
             ) from exc
         return {
             "status": "active",
-            "generation": generation.number,
-            "certificate": generation.metadata.as_dict(),
+            "generation": generation,
+            "certificate": certificate,
             "served_sha256": served,
         }
+
+    # -------------------------------------------------------------------------
+    # Email: one section, one selected transport, write-only secrets.
+    # -------------------------------------------------------------------------
+    def _email_payload(request: Request) -> dict[str, Any]:
+        """Public projection only: configured or not, never a configured value."""
+        settings = _settings(request)
+        state = _state(request)
+        config = state.email_config()
+        payload = state.email_public_status()
+        payload["recovery_enabled"] = bool(
+            config is not None and config.recovery_email and settings.public_origin
+        )
+        return payload
+
+    @router.get("/email")
+    async def email_status(
+        request: Request,
+        _session: Annotated[SessionRecord, Depends(require_session)],
+    ) -> dict[str, Any]:
+        return _email_payload(request)
+
+    @router.put("/email")
+    async def email_update(
+        request: Request,
+        payload: EmailConfigRequest,
+        _session: Annotated[SessionRecord, Depends(require_mutation)],
+    ) -> dict[str, Any]:
+        state = _state(request)
+        current = state.email_config()
+        smtp_password = payload.smtp_password.strip()
+        client_secret = payload.m365_client_secret.strip()
+        # An empty secret keeps the stored one — but only for the transport it
+        # belongs to, so a switch can never drag a credential along.
+        if current is not None and current.transport == payload.transport:
+            if not smtp_password:
+                smtp_password = current.smtp_password or ""
+            if not client_secret:
+                client_secret = current.m365_client_secret or ""
+        fields = {
+            "transport": payload.transport,
+            "from_address": payload.from_address.strip(),
+            "recovery_email": payload.recovery_email.strip() or None,
+            "timeout_seconds": payload.timeout_seconds,
+            "smtp_host": payload.smtp_host.strip().lower() or None,
+            "smtp_port": payload.smtp_port,
+            "smtp_security": (payload.smtp_security or "starttls"),
+            "smtp_username": payload.smtp_username.strip() or None,
+            "smtp_password": smtp_password or None,
+            "m365_tenant_id": payload.m365_tenant_id.strip() or None,
+            "m365_client_id": payload.m365_client_id.strip() or None,
+            "m365_client_secret": client_secret or None,
+            "m365_mailbox": payload.m365_mailbox.strip() or None,
+        }
+        # An empty secret field keeps the stored one; the row that comes out
+        # of that merge still has to be usable. An unusable row is refused
+        # here rather than persisted half-configured, so keeping and saving
+        # stay two clearly separated outcomes.
+        if not EmailConfig(**fields).complete:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=EMAIL_INCOMPLETE,
+            )
+        state.set_email_config(**fields)
+        return _email_payload(request)
+
+    @router.post("/email/test")
+    async def email_test_send(
+        request: Request,
+        _session: Annotated[SessionRecord, Depends(require_mutation)],
+    ) -> dict[str, Any]:
+        """Send through the LAST saved configuration, bounded per client."""
+        state = _state(request)
+        scope = f"{EMAIL_TEST_PREFIX}:{_client_id(request)}"
+        locked = state.register_failure(
+            scope, threshold=EMAIL_TEST_THRESHOLD, lock_seconds=EMAIL_TEST_RATE_SECONDS
+        )
+        if locked:
+            raise _rate_limited(request, locked)
+        config = state.email_config()
+        if config is None or not config.complete:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=EMAIL_NOT_CONFIGURED,
+            )
+        if not config.recovery_email:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=EMAIL_NO_DESTINATION,
+            )
+        mailer = request.app.state.recovery_mailer
+        try:
+            await asyncio.to_thread(
+                mailer.send,
+                to=config.recovery_email,
+                subject="Vysion - test du transport d'email",
+                body=(
+                    "Ce message vérifie que le transport sélectionné dans "
+                    "l'administration Vysion fonctionne.\n"
+                ),
+            )
+        except RecoveryUnavailable as exc:
+            # The mailer layers only ever raise a fixed or whitelisted
+            # message: no credential, no provider body, no address.
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            ) from exc
+        return {"status": "sent", "transport": config.transport}
 
     return router

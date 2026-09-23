@@ -49,6 +49,7 @@ def _read_secret(stream: TextIO) -> str:
 def cmd_status(args: argparse.Namespace, stdin: TextIO) -> tuple[int, str]:
     store = StateStore(_state_directory(args.state_dir))
     smtp = store.smtp_config()
+    email = store.email_config()
     has_admin = store.has_admin()
     lines = [
         f"setup_required={'false' if has_admin else 'true'}",
@@ -56,7 +57,8 @@ def cmd_status(args: argparse.Namespace, stdin: TextIO) -> tuple[int, str]:
         f"sessions={len(store.list_sessions())}",
         f"schema_version={store.schema_version()}",
         f"smtp={'configured' if smtp else 'unconfigured'}",
-        f"recovery={'enabled' if smtp and smtp.recovery_email else 'disabled'}",
+        f"email={email.transport if email else 'unconfigured'}",
+        f"recovery={'enabled' if email and email.recovery_email else 'disabled'}",
     ]
     return EXIT_OK, "\n".join(lines) + "\n"
 

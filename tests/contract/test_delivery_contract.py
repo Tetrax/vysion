@@ -660,3 +660,142 @@ def test_operations_doc_covers_volume_prerequisites_modes_and_coherent_backup() 
         "exit 1",
     ):
         assert marker in operations, marker
+
+
+def test_compose_helper_mounts_a_read_only_socket_and_never_a_certificate() -> None:
+    """The fourth stack: host nginx terminates TLS, a root helper owns the
+    material, and the container receives a socket it may only read. Nothing
+    writable and nothing secret is ever mounted into the application."""
+    raw = (ROOT / "compose.helper.yml").read_text()
+    compose = yaml.safe_load(raw)
+
+    assert list(compose["services"]) == ["vysion"]
+    service = compose["services"]["vysion"]
+    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST")
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+
+    environment = service["environment"]
+    assert environment["VYSION_TLS_BACKEND"] == "helper"
+    # No silent fallback: the SAN the certificate must match is imposed.
+    assert "${VYSION_TLS_HOSTNAME:?" in environment["VYSION_TLS_HOSTNAME"]
+    # Still behind an external proxy: forwarded trust stays explicit.
+    assert "${TRUSTED_PROXY_CIDRS:?" in environment["VYSION_TRUSTED_PROXY_CIDRS"]
+
+    mounts = service["volumes"]
+    helper_mounts = [entry for entry in mounts if "/run/vysion-cert-helper" in entry]
+    assert helper_mounts == ["/run/vysion-cert-helper:/run/vysion-cert-helper:ro"]
+    # The application must never receive a writable certificate path, and the
+    # helper's generations are not a Docker volume: they live on the host.
+    assert not any("certs" in entry for entry in mounts)
+    assert "vysion-certs" not in compose.get("volumes", {})
+    assert list(compose["volumes"]) == ["vysion-reports", "vysion-state"]
+
+
+def test_helper_scripts_and_unit_are_shipped_and_idempotent_by_construction() -> None:
+    """The deployment surface the helper mode ships with."""
+    unit = (ROOT / "deploy/vysion-cert-helper.service").read_text()
+    assert "vysion.certhelper serve" in unit
+    assert "ProtectSystem=strict" in unit
+    assert "NoNewPrivileges=true" in unit
+    assert "CapabilityBoundingSet" in unit
+    # The unit must not be able to write anywhere the material lives except
+    # the generations directory itself.
+    readwrite = next(line for line in unit.splitlines() if line.startswith("ReadWritePaths"))
+    assert "/etc" not in readwrite
+
+    renew_hook = (ROOT / "deploy/certbot-vysion-deploy.sh").read_text()
+    assert "RENEWED_LINEAGE" in renew_hook
+    # The hook still matches Certbot's own live tree by default; the
+    # VYSION_LETSENCRYPT_LIVE_DIR override exists only so the documented
+    # sequence can be replayed against a sandbox (never /etc).
+    assert "/etc/letsencrypt/live" in renew_hook
+    assert "VYSION_LETSENCRYPT_LIVE_DIR" in renew_hook
+    assert "renew" in renew_hook
+
+    bootstrap = (ROOT / "deploy/vysion-cert-bootstrap.sh").read_text()
+    assert "install" in bootstrap
+    assert "/etc/letsencrypt/live" in bootstrap
+    assert "VYSION_LETSENCRYPT_LIVE_DIR" in bootstrap
+
+    # Review round-1 finding 3: the host nginx must actually be repointed to
+    # the helper's active generation, with `nginx -t` before any reload, a
+    # read-back of the served fingerprint, automatic restore on failure and
+    # an explicit `restore` subcommand for manual rollback.
+    migrate = ROOT / "deploy/vysion-cert-migrate-nginx.sh"
+    migration = migrate.read_text()
+    assert os.access(migrate, os.X_OK), "the migration script must ship executable"
+    assert "#!/bin/sh" in migration
+    assert '"$nginx_bin" -t' in migration
+    assert "openssl s_client" in migration
+    assert "sha256sum" in migration
+    assert "restore_backup" in migration
+    assert '"restore"' in migration
+    assert "vysion-cert-bootstrap.sh" in migration  # ordering gate before touching /etc
+    # The runbook documents the order, the read-back and the manual rollback.
+    operations = (ROOT / "docs/OPERATIONS.md").read_text().casefold()
+    for marker in (
+        "vysion-cert-migrate-nginx.sh",
+        "nginx -t",
+        "empreinte sha-256 réellement servie",
+        "restore <sauvegarde>",
+    ):
+        assert marker in operations, marker
+
+    env_example = (ROOT / "deploy/vysion-cert-helper.env.example").read_text()
+    # Ids and paths only: the example must not carry anything credential-like.
+    assert "PASSWORD" not in env_example.upper()
+    assert "SECRET=" not in env_example.upper()
+
+
+def test_the_runbook_installs_every_helper_path_the_unit_requires() -> None:
+    """Review round-2: on a fresh host, the documented commands alone must
+    reach helper start, bootstrap, nginx migration and hook installation.
+
+    The previous runbook copied only ``src`` into ``/opt/vysion`` while steps
+    3-5 invoked ``/opt/vysion/deploy/*`` scripts that were never installed
+    there, and nothing created ``/var/lib/vysion`` although the hardened unit
+    whitelists it in ``ReadWritePaths`` (a non-``-`` entry systemd requires to
+    exist before ExecStart).
+    """
+    operations = (ROOT / "docs/OPERATIONS.md").read_text().casefold()
+    # One idempotent install sequence replaces the partial copy step.
+    assert "vysion-cert-install.sh" in operations
+    assert "cp -r src /opt/vysion/" not in operations
+    install = ROOT / "deploy/vysion-cert-install.sh"
+    assert install.is_file(), "the install sequence must ship"
+    assert os.access(install, os.X_OK), "the install sequence must ship executable"
+    install_text = install.read_text()
+    assert "#!/bin/sh" in install_text
+    # Every path the unit and the runbook depend on is managed there.
+    for path in (
+        "/opt/vysion",
+        "/etc/vysion",
+        "/var/lib/vysion",
+        "/run/vysion-cert-helper",
+        "/var/log/nginx",
+        "/etc/systemd/system",
+    ):
+        assert path in install_text, path
+    # The documented order stays: install, then service, then bootstrap,
+    # then migration, then the Certbot hook.
+    order = [
+        operations.index(marker)
+        for marker in (
+            "vysion-cert-install.sh",
+            "vysion-cert-bootstrap.sh",
+            "vysion-cert-migrate-nginx.sh",
+            "certbot-vysion-deploy.sh",
+        )
+    ]
+    assert order == sorted(order), order
+
+    unit = (ROOT / "deploy/vysion-cert-helper.service").read_text()
+    # systemd creates the state and runtime directories itself before
+    # ExecStart, so a reboot cannot leave ReadWritePaths dangling.
+    assert "StateDirectory=vysion" in unit
+    assert "RuntimeDirectory=vysion-cert-helper" in unit
+    readwrite = next(line for line in unit.splitlines() if line.startswith("ReadWritePaths"))
+    for path in readwrite.partition("=")[2].split():
+        assert path.lstrip("-") in install_text, path

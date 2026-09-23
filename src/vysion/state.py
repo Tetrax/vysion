@@ -54,6 +54,7 @@ class SmtpConfig:
     username: str | None = None
     password: str | None = None
     recovery_email: str | None = None
+    timeout_seconds: int = 10
 
     def public_status(self) -> dict[str, Any]:
         """Projection returned over HTTP: never contains the secret."""
@@ -65,6 +66,61 @@ class SmtpConfig:
             "starttls": self.starttls,
             "username": self.username,
             "password_configured": self.password is not None,
+        }
+
+
+EMAIL_TRANSPORTS = ("smtp", "microsoft365")
+SMTP_SECURITIES = ("starttls", "tls", "none")
+
+
+@dataclass(frozen=True)
+class EmailConfig:
+    """The single durable email row: one selected transport and its material.
+
+    Only one transport is ever populated at a time, so a saved configuration
+    can never carry the previous transport's secret along. The secrets stay
+    write-only: :meth:`public_status` is the only projection that leaves this
+    module over HTTP, and it reports presence, never a value.
+    """
+
+    transport: str
+    from_address: str
+    recovery_email: str | None = None
+    timeout_seconds: int = 10
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_security: str | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    m365_tenant_id: str | None = None
+    m365_client_id: str | None = None
+    m365_client_secret: str | None = None
+    m365_mailbox: str | None = None
+
+    @property
+    def secret(self) -> str | None:
+        """The write-only credential of the selected transport, if any."""
+        if self.transport == "microsoft365":
+            return self.m365_client_secret
+        return self.smtp_password
+
+    @property
+    def complete(self) -> bool:
+        """Everything a real send through this transport requires."""
+        if not self.from_address:
+            return False
+        if self.transport == "microsoft365":
+            return bool(self.m365_tenant_id and self.m365_client_id and self.m365_client_secret)
+        return bool(self.smtp_host and self.smtp_port)
+
+    def public_status(self) -> dict[str, Any]:
+        """Projection returned over HTTP: no secret and no configured value."""
+        return {
+            "configured": True,
+            "transport": self.transport,
+            "provenance": "state",
+            "secret_configured": bool(self.secret),
+            "recovery_email_configured": bool(self.recovery_email),
         }
 
 
@@ -316,6 +372,47 @@ class StateStore:
                 )
                 """
             )
+            # Addendum table: the single transport-agnostic email row. The
+            # CREATE is unconditional so pre-existing schema-1 databases get
+            # it on their next open as well — the schema version deliberately
+            # stays at 1 so an older binary keeps reading the same file.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS email (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    transport TEXT NOT NULL,
+                    from_address TEXT NOT NULL,
+                    recovery_email TEXT,
+                    timeout_seconds INTEGER NOT NULL DEFAULT 10,
+                    smtp_host TEXT,
+                    smtp_port INTEGER,
+                    smtp_security TEXT,
+                    smtp_username TEXT,
+                    smtp_password TEXT,
+                    m365_tenant_id TEXT,
+                    m365_client_id TEXT,
+                    m365_client_secret TEXT,
+                    m365_mailbox TEXT
+                )
+                """
+            )
+            # One-shot adoption of a pre-email database: only while the email
+            # table is still empty, so a stale smtp row can never overwrite a
+            # configuration saved later through the admin surface.
+            connection.execute(
+                """
+                INSERT INTO email (
+                    id, transport, from_address, recovery_email,
+                    timeout_seconds, smtp_host, smtp_port, smtp_security,
+                    smtp_username, smtp_password
+                )
+                SELECT 1, 'smtp', from_address, recovery_email, 10, host, port,
+                       CASE WHEN starttls = 1 THEN 'starttls' ELSE 'none' END,
+                       username, password
+                FROM smtp
+                WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM email)
+                """
+            )
             self._commit(connection)
         except BaseException:
             self._rollback(connection)
@@ -371,6 +468,22 @@ class StateStore:
                 username TEXT,
                 password TEXT,
                 recovery_email TEXT
+            );
+            CREATE TABLE IF NOT EXISTS email (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                transport TEXT NOT NULL,
+                from_address TEXT NOT NULL,
+                recovery_email TEXT,
+                timeout_seconds INTEGER NOT NULL DEFAULT 10,
+                smtp_host TEXT,
+                smtp_port INTEGER,
+                smtp_security TEXT,
+                smtp_username TEXT,
+                smtp_password TEXT,
+                m365_tenant_id TEXT,
+                m365_client_id TEXT,
+                m365_client_secret TEXT,
+                m365_mailbox TEXT
             );
             """
         for statement in (part for part in statements.split(";") if part.strip()):
@@ -680,21 +793,130 @@ class StateStore:
             return cursor.rowcount == 1
 
     # ------------------------------------------------------------------
-    # optional SMTP transport (secret stays write-only in this private state)
+    # optional email transport (secrets stay write-only in this private state)
     # ------------------------------------------------------------------
-    def smtp_config(self) -> SmtpConfig | None:
+    def email_config(self) -> EmailConfig | None:
         with self._connection() as connection:
-            row = connection.execute("SELECT * FROM smtp WHERE id = 1").fetchone()
+            row = connection.execute("SELECT * FROM email WHERE id = 1").fetchone()
         if row is None:
             return None
+        try:
+            return EmailConfig(
+                transport=str(row["transport"]),
+                from_address=str(row["from_address"]),
+                recovery_email=row["recovery_email"],
+                timeout_seconds=int(row["timeout_seconds"]),
+                smtp_host=row["smtp_host"],
+                smtp_port=int(row["smtp_port"]) if row["smtp_port"] is not None else None,
+                smtp_security=row["smtp_security"],
+                smtp_username=row["smtp_username"],
+                smtp_password=row["smtp_password"],
+                m365_tenant_id=row["m365_tenant_id"],
+                m365_client_id=row["m365_client_id"],
+                m365_client_secret=row["m365_client_secret"],
+                m365_mailbox=row["m365_mailbox"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise StateError("state database is unreadable") from exc
+
+    def email_public_status(self) -> dict[str, Any]:
+        """What the admin surface may show: configured or not, never a value."""
+        config = self.email_config()
+        if config is None:
+            return {
+                "configured": False,
+                "transport": None,
+                "provenance": None,
+                "secret_configured": False,
+                "recovery_email_configured": False,
+            }
+        return config.public_status()
+
+    def set_email_config(
+        self,
+        *,
+        transport: str,
+        from_address: str,
+        recovery_email: str | None = None,
+        timeout_seconds: int = 10,
+        smtp_host: str | None = None,
+        smtp_port: int | None = None,
+        smtp_security: str | None = None,
+        smtp_username: str | None = None,
+        smtp_password: str | None = None,
+        m365_tenant_id: str | None = None,
+        m365_client_id: str | None = None,
+        m365_client_secret: str | None = None,
+        m365_mailbox: str | None = None,
+    ) -> None:
+        """Persist exactly one transport; the other one is cleared."""
+        if transport not in EMAIL_TRANSPORTS:
+            raise ValueError(f"unsupported email transport: {transport!r}")
+        if transport == "smtp":
+            m365_tenant_id = m365_client_id = m365_client_secret = m365_mailbox = None
+        else:
+            smtp_host = smtp_port = smtp_security = None
+            smtp_username = smtp_password = None
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO email (
+                    id, transport, from_address, recovery_email, timeout_seconds,
+                    smtp_host, smtp_port, smtp_security, smtp_username,
+                    smtp_password, m365_tenant_id, m365_client_id,
+                    m365_client_secret, m365_mailbox
+                )
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                    transport = excluded.transport,
+                    from_address = excluded.from_address,
+                    recovery_email = excluded.recovery_email,
+                    timeout_seconds = excluded.timeout_seconds,
+                    smtp_host = excluded.smtp_host,
+                    smtp_port = excluded.smtp_port,
+                    smtp_security = excluded.smtp_security,
+                    smtp_username = excluded.smtp_username,
+                    smtp_password = excluded.smtp_password,
+                    m365_tenant_id = excluded.m365_tenant_id,
+                    m365_client_id = excluded.m365_client_id,
+                    m365_client_secret = excluded.m365_client_secret,
+                    m365_mailbox = excluded.m365_mailbox
+                """,
+                (
+                    transport,
+                    from_address,
+                    recovery_email,
+                    int(timeout_seconds),
+                    smtp_host,
+                    int(smtp_port) if smtp_port is not None else None,
+                    smtp_security,
+                    smtp_username,
+                    smtp_password,
+                    m365_tenant_id,
+                    m365_client_id,
+                    m365_client_secret,
+                    m365_mailbox,
+                ),
+            )
+
+    def clear_email_config(self) -> None:
+        with self._connection() as connection:
+            connection.execute("DELETE FROM email WHERE id = 1")
+
+    def smtp_config(self) -> SmtpConfig | None:
+        """Legacy SMTP view; None while another transport is selected."""
+        config = self.email_config()
+        if config is None or config.transport != "smtp" or not config.smtp_host:
+            return None
         return SmtpConfig(
-            host=str(row["host"]),
-            port=int(row["port"]),
-            from_address=str(row["from_address"]),
-            starttls=bool(row["starttls"]),
-            username=row["username"],
-            password=row["password"],
-            recovery_email=row["recovery_email"],
+            host=config.smtp_host,
+            port=config.smtp_port if config.smtp_port is not None else 587,
+            from_address=config.from_address,
+            starttls=(config.smtp_security or "none") == "starttls",
+            username=config.smtp_username,
+            password=config.smtp_password,
+            recovery_email=config.recovery_email,
+            timeout_seconds=config.timeout_seconds,
         )
 
     def set_smtp_config(
@@ -708,34 +930,16 @@ class StateStore:
         password: str | None = None,
         recovery_email: str | None = None,
     ) -> None:
-        with self._connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO smtp (
-                    id, host, port, from_address, starttls, username, password,
-                    recovery_email
-                )
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (id) DO UPDATE SET
-                    host = excluded.host,
-                    port = excluded.port,
-                    from_address = excluded.from_address,
-                    starttls = excluded.starttls,
-                    username = excluded.username,
-                    password = excluded.password,
-                    recovery_email = excluded.recovery_email
-                """,
-                (
-                    host,
-                    int(port),
-                    from_address,
-                    1 if starttls else 0,
-                    username,
-                    password,
-                    recovery_email,
-                ),
-            )
+        self.set_email_config(
+            transport="smtp",
+            from_address=from_address,
+            recovery_email=recovery_email,
+            smtp_host=host,
+            smtp_port=port,
+            smtp_security="starttls" if starttls else "none",
+            smtp_username=username,
+            smtp_password=password,
+        )
 
     def clear_smtp_config(self) -> None:
-        with self._connection() as connection:
-            connection.execute("DELETE FROM smtp WHERE id = 1")
+        self.clear_email_config()
