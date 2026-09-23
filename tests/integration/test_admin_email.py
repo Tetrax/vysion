@@ -286,6 +286,44 @@ async def test_unencrypted_smtp_needs_an_explicit_confirmation(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base,overrides",
+    [
+        # Model-level refusals: the whole assembled body (secrets included)
+        # is what pydantic carries into the validation error.
+        (SMTP_PAYLOAD, {"transport": "sendmail"}),
+        (SMTP_PAYLOAD, {"from_address": "not-an-address"}),
+        (SMTP_PAYLOAD, {"smtp_security": "none"}),
+        (SMTP_PAYLOAD, {"smtp_host": "not a host!"}),
+        (M365_PAYLOAD, {"m365_tenant_id": "not a tenant!"}),
+        (M365_PAYLOAD, {"m365_client_id": "not-a-guid"}),
+        (M365_PAYLOAD, {"m365_mailbox": "nope"}),
+        # Field-level refusals next to a secret that must never echo either.
+        (SMTP_PAYLOAD, {"smtp_port": 70000}),
+        (M365_PAYLOAD, {"timeout_seconds": 0}),
+    ],
+)
+async def test_a_validation_error_never_echoes_a_secret(
+    tmp_path: Path, base: dict, overrides: dict
+) -> None:
+    """A refused save answers with loc/msg/type only — never the input body."""
+    marker = base.get("smtp_password") or base.get("m365_client_secret")
+    assert marker  # the payload under test really carries a secret
+    app = build_app(tmp_path)
+    async with api_client(app) as client:
+        token = await _signed_in(client)
+        response = await client.put(
+            "/api/admin/email", json=_patched(base, **overrides), headers={CSRF: token}
+        )
+
+    assert response.status_code == 422, response.text
+    assert marker not in response.text, "a 422 echoed a write-only secret"
+    for error in response.json()["detail"]:
+        assert set(error) <= {"loc", "msg", "type", "url"}
+    assert app.state.state_store.email_config() is None
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_field_is_refused(tmp_path: Path) -> None:
     app = build_app(tmp_path)
 

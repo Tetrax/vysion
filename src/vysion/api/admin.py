@@ -14,6 +14,7 @@ import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -418,8 +419,31 @@ class AdminBodyLimit:
         return None
 
 
+# Pydantic attaches the raw input to every validation error; for a
+# model-level refusal that input is the whole body — write-only secrets
+# included. Only loc/msg/type/url may ever leave the process.
+VALIDATION_ERROR_HIDDEN_KEYS = frozenset({"input", "value", "ctx"})
+
+
 def install_admin_hardening(app: Any) -> None:
     app.add_middleware(AdminBodyLimit, max_bytes=MAX_ADMIN_BODY_BYTES)
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_without_echo(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        detail = [
+            {
+                key: value
+                for key, value in error.items()
+                if key not in VALIDATION_ERROR_HIDDEN_KEYS
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            {"detail": detail},
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
 
 
 # ---------------------------------------------------------------------------

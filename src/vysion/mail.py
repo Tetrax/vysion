@@ -9,12 +9,13 @@ and nothing secret is ever logged or returned.
 from __future__ import annotations
 
 import smtplib
+import ssl
 from collections.abc import Callable
 from email.message import EmailMessage
 from typing import Protocol
 
 from vysion.graphmail import GraphMailClient, GraphMailError, Message
-from vysion.state import EmailConfig, StateStore
+from vysion.state import SMTP_SECURITIES, EmailConfig, StateStore
 
 MAX_TIMEOUT_SECONDS = 60
 
@@ -35,15 +36,34 @@ class SmtpMailer:
     The settings (and the password they may carry) are read at send time from
     the state volume: nothing secret is taken from the environment and nothing
     secret is ever logged.
+
+    The three stored security modes are honoured for real: ``tls`` opens an
+    implicit-TLS session (``SMTP_SSL``), ``starttls`` upgrades in-band, and
+    ``none`` speaks cleartext — only reachable because the save-time form
+    demanded an explicit confirmation for it. An unknown or absent mode never
+    downgrades to cleartext: STARTTLS is the fallback.
     """
 
-    def __init__(self, store: StateStore) -> None:
+    def __init__(
+        self, store: StateStore, *, ssl_context: ssl.SSLContext | None = None
+    ) -> None:
         self._store = store
+        self._ssl_context = ssl_context
 
     def send(self, *, to: str, subject: str, body: str) -> None:
-        config = self._store.smtp_config()
-        if config is None or not config.host:
+        config = self._store.email_config()
+        if (
+            config is None
+            or config.transport != "smtp"
+            or not config.smtp_host
+        ):
             raise RecoveryUnavailable("SMTP transport is not configured")
+        security = (
+            config.smtp_security
+            if config.smtp_security in SMTP_SECURITIES
+            else "starttls"
+        )
+        port = config.smtp_port if config.smtp_port is not None else 587
         message = EmailMessage()
         message["Subject"] = subject
         message["From"] = config.from_address
@@ -52,12 +72,23 @@ class SmtpMailer:
         # Bounded regardless of what the stored row claims: a hand-edited
         # value can never park a recovery send on an unbounded socket.
         timeout = float(min(max(int(config.timeout_seconds), 1), MAX_TIMEOUT_SECONDS))
+        context = (
+            self._ssl_context
+            if self._ssl_context is not None
+            else ssl.create_default_context()
+        )
         try:
-            with smtplib.SMTP(config.host, config.port, timeout=timeout) as client:
-                if config.starttls:
-                    client.starttls()
-                if config.username:
-                    client.login(config.username, config.password or "")
+            if security == "tls":
+                connection = smtplib.SMTP_SSL(
+                    config.smtp_host, port, timeout=timeout, context=context
+                )
+            else:
+                connection = smtplib.SMTP(config.smtp_host, port, timeout=timeout)
+            with connection as client:
+                if security == "starttls":
+                    client.starttls(context=context)
+                if config.smtp_username:
+                    client.login(config.smtp_username, config.smtp_password or "")
                 client.send_message(message)
         except (OSError, smtplib.SMTPException) as exc:
             raise RecoveryUnavailable("SMTP transport refused the message") from exc
