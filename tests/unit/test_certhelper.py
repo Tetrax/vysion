@@ -462,6 +462,42 @@ def test_the_lineage_import_is_idempotent(tmp_path: Path) -> None:
     assert recorder.calls == ["reload"]  # only the first run reloaded
 
 
+def test_the_cli_reads_back_the_fingerprint_on_the_configured_endpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without an injected smoker the CLI builds one from SMOKE_HOST /
+    SMOKE_PORT — the same names the nginx migration script already uses, so
+    a sandboxed runbook replay reads back its own TLS endpoint while
+    production keeps ``127.0.0.1:443``.
+    """
+    from vysion import certificates
+
+    helper, recorder = build_helper(tmp_path)
+    helper.close()
+    lineage = _lineage(tmp_path)
+    monkeypatch.setenv("SMOKE_PORT", "1")  # nothing ever answers there
+    monkeypatch.setattr(certificates, "RELOAD_SETTLE_ATTEMPTS", 1)
+
+    result = main(
+        [
+            "install",
+            "--lineage",
+            str(lineage),
+            "--certs-dir",
+            str(helper.certs_directory),
+            "--hostname",
+            HOSTNAME,
+        ],
+        reloader=recorder.reloader,
+    )
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "127.0.0.1:1" in captured.err, captured.err
+
+
 def test_the_lineage_import_refuses_a_path_outside_the_certbot_tree(
     tmp_path: Path,
 ) -> None:
