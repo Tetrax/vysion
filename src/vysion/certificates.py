@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from vysion.storage.reports import Clock, utc_now
+from vysion.clocks import Clock, utc_now
 
 OPENSSL_TIMEOUT_SECONDS = 20
 # nginx keeps its previous workers alive for a moment after a reload: they
@@ -203,6 +203,10 @@ class CertificateStore:
         digest.update(b"\0")
         digest.update(key.read_bytes())
         return digest.hexdigest()
+
+    def discard_staged(self) -> None:
+        """Drop the staged candidate without touching any generation."""
+        shutil.rmtree(self._staging, ignore_errors=True)
 
     def staged_metadata(self) -> CertificateMetadata | None:
         """Public metadata of the staged candidate, None when absent."""
@@ -684,3 +688,28 @@ def tls_fingerprint_smoker(
         return hashlib.sha256(der).hexdigest()
 
     return smoke
+
+
+def certificate_status_payload(store: CertificateStore) -> dict[str, Any]:
+    """The public certificate listing, built in exactly one place.
+
+    The ``local`` route and the root ``helper`` both answer from this single
+    projection, so the two modes can never drift apart in what an
+    administrator is shown.
+    """
+    active = store.active()
+    staged = store.staged_metadata()
+    return {
+        "active": (
+            {"number": active.number, **active.metadata.as_dict()} if active else None
+        ),
+        "staging": staged.as_dict() if staged else None,
+        "generations": [
+            {
+                "number": item.number,
+                "is_active": active is not None and item.number == active.number,
+                **item.metadata.as_dict(),
+            }
+            for item in store.generations()
+        ],
+    }

@@ -1,17 +1,12 @@
 import os
-from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from uuid import UUID
 
+from vysion.clocks import Clock, utc_now
 from vysion.reports.json_report import JsonAuditReport
 
-Clock = Callable[[], datetime]
-
-
-def utc_now() -> datetime:
-    return datetime.now(UTC)
+__all__ = ["Clock", "JsonReportStore", "utc_now"]
 
 
 class JsonReportStore:

@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import './app.css'
 
 type AdminStatus = {
@@ -35,8 +35,19 @@ type CertificatesStatus = {
 
 type Validation = { certificate: CertificateInfo; ticket: { token: string; expires_in: number } }
 
+type EmailStatus = {
+  configured: boolean
+  transport: string | null
+  provenance: string | null
+  secret_configured: boolean
+  recovery_email_configured: boolean
+  recovery_enabled: boolean
+}
+
+type EmailTransport = 'smtp' | 'microsoft365'
+
 type ThemeChoice = 'system' | 'light' | 'dark'
-type SectionId = 'overview' | 'certificates' | 'system' | 'account'
+type SectionId = 'overview' | 'certificates' | 'email' | 'system' | 'account'
 
 const THEME_STORAGE_KEY = 'vysion-theme'
 const THEME_ORDER: ThemeChoice[] = ['system', 'light', 'dark']
@@ -49,6 +60,7 @@ const PASSWORD_HELP = '12 à 1 024 octets UTF-8.'
 const SECTIONS: { id: SectionId; label: string; target: string }[] = [
   { id: 'overview', label: 'Vue d’ensemble', target: 'admin-overview' },
   { id: 'certificates', label: 'Certificats', target: 'admin-certificates' },
+  { id: 'email', label: 'Email', target: 'admin-email' },
   { id: 'system', label: 'Système', target: 'admin-system' },
   { id: 'account', label: 'Compte', target: 'admin-account' },
 ]
@@ -99,6 +111,9 @@ function AdminApp() {
   const [message, setMessage] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionRow[]>([])
   const [certificates, setCertificates] = useState<CertificatesStatus | null>(null)
+  const [email, setEmail] = useState<EmailStatus | null>(null)
+  const [emailTransport, setEmailTransport] = useState<EmailTransport>('smtp')
+  const transportSeeded = useRef(false)
   const [validation, setValidation] = useState<Validation | null>(null)
   const [theme, setTheme] = useState<ThemeChoice>(() => readStoredTheme())
   const [activeSection, setActiveSection] = useState<SectionId>('overview')
@@ -116,9 +131,10 @@ function AdminApp() {
       if (next.authenticated && next.csrf_token) {
         setCsrf(next.csrf_token)
         setError(null)
-        const [listResponse, certificatesResponse] = await Promise.all([
+        const [listResponse, certificatesResponse, emailResponse] = await Promise.all([
           fetch('/api/admin/sessions'),
           fetch('/api/admin/certificates'),
+          fetch('/api/admin/email'),
         ])
         if (listResponse.ok) {
           const payload = (await listResponse.json()) as { sessions: SessionRow[] }
@@ -127,10 +143,21 @@ function AdminApp() {
         if (certificatesResponse.ok) {
           setCertificates((await certificatesResponse.json()) as CertificatesStatus)
         }
+        if (emailResponse.ok) {
+          const payload = (await emailResponse.json()) as EmailStatus
+          setEmail(payload)
+          if (!transportSeeded.current && payload.transport) {
+            transportSeeded.current = true
+            setEmailTransport(payload.transport === 'microsoft365' ? 'microsoft365' : 'smtp')
+          }
+        }
       } else {
         setCsrf('')
         setSessions([])
         setCertificates(null)
+        setEmail(null)
+        transportSeeded.current = false
+        setEmailTransport('smtp')
       }
     } catch {
       setError('API administrateur injoignable')
@@ -338,6 +365,69 @@ function AdminApp() {
     }
   }
 
+  async function submitEmail(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const value = (name: string) => String(data.get(name) ?? '').trim()
+    const rawPort = value('smtp_port')
+    const body = {
+      transport: emailTransport,
+      from_address: value('from_address'),
+      recovery_email: value('recovery_email'),
+      timeout_seconds: Number(value('timeout_seconds') || '10'),
+      smtp_host: value('smtp_host'),
+      smtp_port: rawPort === '' ? null : Number(rawPort),
+      smtp_security: value('smtp_security') || null,
+      smtp_username: value('smtp_username'),
+      smtp_password: String(data.get('smtp_password') ?? ''),
+      smtp_allow_plaintext: data.get('smtp_allow_plaintext') === 'on',
+      m365_tenant_id: value('m365_tenant_id'),
+      m365_client_id: value('m365_client_id'),
+      m365_client_secret: String(data.get('m365_client_secret') ?? ''),
+      m365_mailbox: value('m365_mailbox'),
+    }
+    setError(null)
+    setMessage(null)
+    try {
+      const response = await mutate('/api/admin/email', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        setError(await readDetail(response, 'Enregistrement impossible'))
+        return
+      }
+      setEmail((await response.json()) as EmailStatus)
+      setMessage('Configuration email enregistrée')
+      // The secret was consumed by this save: never leave it sitting in the
+      // form. An empty field then means "keep what was just stored".
+      for (const name of ['smtp_password', 'm365_client_secret']) {
+        const field = form.elements.namedItem(name)
+        if (field instanceof HTMLInputElement) field.value = ''
+      }
+    } catch {
+      setError('API administrateur injoignable')
+    }
+  }
+
+  async function submitEmailTest() {
+    setError(null)
+    setMessage(null)
+    try {
+      const response = await mutate('/api/admin/email/test', { method: 'POST' })
+      if (!response.ok) {
+        setError(await readDetail(response, 'Test impossible'))
+        return
+      }
+      const payload = (await response.json()) as { transport: string }
+      setMessage(`Email de test envoyé via ${payload.transport}`)
+    } catch {
+      setError('API administrateur injoignable')
+    }
+  }
+
   function cycleTheme() {
     setTheme((current) => {
       const index = THEME_ORDER.indexOf(current)
@@ -345,7 +435,16 @@ function AdminApp() {
     })
   }
 
-  const standalone = status?.tls_backend === 'local'
+  // One abstraction in the UI too: `local` and `helper` both terminate TLS
+  // under Vysion's control, `none` leaves it to the host proxy.
+  const helperMode = status?.tls_backend === 'helper'
+  const managed = status?.tls_backend === 'local' || helperMode
+  const tlsBadge = helperMode ? 'Helper' : status?.tls_backend === 'local' ? 'Standalone' : 'Proxy'
+  const deploymentMode = helperMode
+    ? 'Helper — Vysion pilote le Nginx hôte via un service root'
+    : status?.tls_backend === 'local'
+      ? 'Standalone — Vysion gère le certificat TLS'
+      : 'Proxy — TLS géré par le proxy hôte'
 
   const topbar = (
     <header className="admin-topbar">
@@ -494,12 +593,12 @@ function AdminApp() {
   }
 
   if (status && status.authenticated) {
-    const certificateSummary = !standalone
+    const certificateSummary = !managed
       ? 'Géré par le proxy hôte'
       : certificates?.active
         ? `Génération ${certificates.active.number}`
         : 'Non activé'
-    const certificateDetail = !standalone
+    const certificateDetail = !managed
       ? 'Aucune gestion de certificat dans Vysion'
       : certificates?.active
         ? `Expire le ${certificates.active.not_after}`
@@ -536,7 +635,7 @@ function AdminApp() {
             </article>
             <article className="admin-context-card">
               <span className="admin-context-label">TLS</span>
-              <strong className="admin-context-value">{standalone ? 'Standalone' : 'Proxy'}</strong>
+              <strong className="admin-context-value">{tlsBadge}</strong>
               <span className="admin-context-detail">{status.tls_hostname ?? 'Nom TLS non configuré'}</span>
             </article>
             <article className="admin-context-card">
@@ -560,7 +659,7 @@ function AdminApp() {
             <h2 id="admin-certificates-title">Certificats TLS</h2>
           </div>
 
-          {!standalone ? (
+          {!managed ? (
             <div className="admin-note">
               <strong>Le TLS est géré par le proxy hôte</strong>
               <p>
@@ -691,6 +790,188 @@ function AdminApp() {
           )}
         </section>
 
+        <section id="admin-email" className="admin-section" aria-labelledby="admin-email-title">
+          <div className="admin-section-heading">
+            <p className="admin-eyebrow">Messages</p>
+            <h2 id="admin-email-title">Email</h2>
+          </div>
+
+          {!email ? (
+            <p className="admin-loading" role="status">Chargement de la configuration email…</p>
+          ) : (
+            <div className="admin-grid admin-grid--2">
+              <div className="admin-panel">
+                <div className="admin-panel-header">
+                  <p className="admin-eyebrow">État</p>
+                  <h3 className="admin-panel-title">Transport sélectionné</h3>
+                  <p className="admin-panel-copy">
+                    Seuls l’état et la provenance sont affichés : aucun secret ne quitte le serveur.
+                  </p>
+                </div>
+                <div className="admin-panel-body">
+                  <dl className="admin-deflist">
+                    <div>
+                      <dt>Configuration</dt>
+                      <dd>
+                        {email.configured
+                          ? `Configurée — ${email.transport === 'microsoft365' ? 'Microsoft 365' : 'SMTP'}`
+                          : 'Non configurée'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Secret du transport</dt>
+                      <dd>{email.secret_configured ? 'Enregistré (jamais affiché)' : 'Absent'}</dd>
+                    </div>
+                    <div>
+                      <dt>Adresse de récupération</dt>
+                      <dd>{email.recovery_email_configured ? 'Enregistrée' : 'Absente'}</dd>
+                    </div>
+                    <div>
+                      <dt>Récupération du compte</dt>
+                      <dd>
+                        {email.recovery_enabled
+                          ? 'Disponible avec ce transport'
+                          : 'Indisponible — configuration ou origine publique incomplètes'}
+                      </dd>
+                    </div>
+                  </dl>
+                  <button type="button" className="button secondary" onClick={() => void submitEmailTest()}>
+                    Tester l’envoi
+                  </button>
+                </div>
+              </div>
+
+              <div className="admin-panel">
+                <div className="admin-panel-header">
+                  <p className="admin-eyebrow">Configuration</p>
+                  <h3 className="admin-panel-title">Configurer le transport</h3>
+                  <p className="admin-panel-copy">
+                    Champs secrets en écriture seule : les laisser vide conserve la valeur enregistrée.
+                  </p>
+                </div>
+                <div className="admin-panel-body">
+                  <form onSubmit={(event) => void submitEmail(event)}>
+                    <div className="admin-field">
+                      <label htmlFor="email-transport">Transport</label>
+                      <select
+                        id="email-transport"
+                        name="transport"
+                        value={emailTransport}
+                        onChange={(event) =>
+                          setEmailTransport(event.target.value === 'microsoft365' ? 'microsoft365' : 'smtp')
+                        }
+                      >
+                        <option value="smtp">SMTP</option>
+                        <option value="microsoft365">Microsoft 365 (OAuth2, client credentials)</option>
+                      </select>
+                    </div>
+
+                    <div className="admin-field">
+                      <label htmlFor="email-from">Adresse d’expédition</label>
+                      <input id="email-from" name="from_address" type="email" required autoComplete="email" />
+                    </div>
+
+                    <div className="admin-field">
+                      <label htmlFor="email-recovery">Adresse de récupération</label>
+                      <input id="email-recovery" name="recovery_email" type="email" autoComplete="email" />
+                      <span className="admin-help" id="email-recovery-help">
+                        Destinataire du mot de passe oublié et du test d’envoi.
+                      </span>
+                    </div>
+
+                    <div className="admin-field">
+                      <label htmlFor="email-timeout">Délai d’envoi maximal (secondes)</label>
+                      <input id="email-timeout" name="timeout_seconds" type="number" min={1} max={60} defaultValue={10} />
+                    </div>
+
+                    {emailTransport === 'smtp' ? (
+                      <>
+                        <div className="admin-field">
+                          <label htmlFor="smtp-host">Serveur SMTP</label>
+                          <input id="smtp-host" name="smtp_host" type="text" required autoComplete="off" />
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="smtp-port">Port</label>
+                          <input id="smtp-port" name="smtp_port" type="number" min={1} max={65535} defaultValue={587} required />
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="smtp-security">Chiffrement</label>
+                          <select id="smtp-security" name="smtp_security" defaultValue="starttls">
+                            <option value="starttls">STARTTLS</option>
+                            <option value="tls">TLS implicite</option>
+                            <option value="none">Aucun chiffrement</option>
+                          </select>
+                        </div>
+                        <div className="admin-field">
+                          <label>
+                            <input name="smtp_allow_plaintext" type="checkbox" />
+                            {' '}Autoriser explicitement un envoi non chiffré
+                          </label>
+                          <span className="admin-help">
+                            Requis quand « Aucun chiffrement » est sélectionné : sans cette confirmation,
+                            le mot de passe ne serait jamais protégé.
+                          </span>
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="smtp-username">Utilisateur</label>
+                          <input id="smtp-username" name="smtp_username" type="text" autoComplete="username" />
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="smtp-password">Mot de passe</label>
+                          <input
+                            id="smtp-password"
+                            name="smtp_password"
+                            type="password"
+                            autoComplete="new-password"
+                            aria-describedby="smtp-password-help"
+                          />
+                          <span className="admin-help" id="smtp-password-help">
+                            Laisser vide pour conserver le mot de passe enregistré.
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="admin-field">
+                          <label htmlFor="m365-tenant">Identifiant de locataire (tenant)</label>
+                          <input id="m365-tenant" name="m365_tenant_id" type="text" required autoComplete="off" />
+                          <span className="admin-help">GUID du locataire ou nom de domaine du locataire.</span>
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="m365-client">Identifiant d’application (client ID)</label>
+                          <input id="m365-client" name="m365_client_id" type="text" required autoComplete="off" />
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="m365-secret">Secret de l’application</label>
+                          <input
+                            id="m365-secret"
+                            name="m365_client_secret"
+                            type="password"
+                            autoComplete="new-password"
+                            aria-describedby="m365-secret-help"
+                          />
+                          <span className="admin-help" id="m365-secret-help">
+                            Laisser vide pour conserver le secret enregistré. Flux application uniquement :
+                            aucun compte utilisateur ne se connecte.
+                          </span>
+                        </div>
+                        <div className="admin-field">
+                          <label htmlFor="m365-mailbox">Identité de boîte (facultatif)</label>
+                          <input id="m365-mailbox" name="m365_mailbox" type="email" autoComplete="off" />
+                        </div>
+                      </>
+                    )}
+
+                    <button type="submit" className="button primary admin-submit">
+                      Enregistrer l’email
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
         <section id="admin-system" className="admin-section" aria-labelledby="admin-system-title">
           <div className="admin-section-heading">
             <p className="admin-eyebrow">Exploitation</p>
@@ -708,11 +989,7 @@ function AdminApp() {
               <dl className="admin-deflist">
                 <div>
                   <dt>Mode de déploiement</dt>
-                  <dd>
-                    {standalone
-                      ? 'Standalone — Vysion gère le certificat TLS'
-                      : 'Proxy — TLS géré par le proxy hôte'}
-                  </dd>
+                  <dd>{deploymentMode}</dd>
                 </div>
                 <div>
                   <dt>Backend TLS</dt>

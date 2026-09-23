@@ -75,6 +75,23 @@ const emptyCertificates = {
   generations: [],
 }
 
+const emptyEmail = {
+  configured: false,
+  transport: null,
+  provenance: null,
+  secret_configured: false,
+  recovery_email_configured: false,
+  recovery_enabled: false,
+}
+
+const configuredEmail = {
+  ...emptyEmail,
+  configured: true,
+  transport: 'microsoft365',
+  secret_configured: true,
+  recovery_email_configured: true,
+}
+
 describe('administration Vysion', () => {
   it('shows the login form for an anonymous visitor', async () => {
     mockFetch({ '/api/admin/status': () => jsonResponse(anonymousStatus) })
@@ -95,6 +112,7 @@ describe('administration Vysion', () => {
       },
       '/api/admin/sessions': () => jsonResponse({ sessions: [{ created_at: 'a', expires_at: 'b', current: true }] }),
       '/api/admin/certificates': () => jsonResponse({ ...emptyCertificates, managed: false, tls_backend: 'none' }),
+      '/api/admin/email': () => jsonResponse(emptyEmail),
     })
     const user = userEvent.setup()
     render(<AdminApp />)
@@ -123,6 +141,7 @@ describe('administration Vysion', () => {
       '/api/admin/sessions': () => jsonResponse(emptySessions),
       '/api/admin/certificates': () =>
         jsonResponse(validationDone ? { ...emptyCertificates, staging: certificateInfo } : emptyCertificates),
+      '/api/admin/email': () => jsonResponse(emptyEmail),
       '/api/admin/certificates/validate': () =>
         jsonResponse({ certificate: certificateInfo, ticket: { token: 'ticket-value', expires_in: 300 } }),
       '/api/admin/certificates/activate': () =>
@@ -168,20 +187,22 @@ describe('interface d’administration Vysion', () => {
     '/api/admin/status': () => jsonResponse(authenticatedStatus),
     '/api/admin/sessions': () => jsonResponse(emptySessions),
     '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+    '/api/admin/email': () => jsonResponse(emptyEmail),
   }
 
-  it('organise l’administration authentifiée en quatre sections', async () => {
+  it('organise l’administration authentifiée en cinq sections', async () => {
     mockFetch(authenticatedRoutes)
     const user = userEvent.setup()
     render(<AdminApp />)
 
     expect(await screen.findByRole('heading', { name: 'Vue d’ensemble' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Email' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Système' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Compte' })).toBeInTheDocument()
 
     const nav = screen.getByRole('navigation', { name: 'Sections d’administration' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(4)
+    expect(within(nav).getAllByRole('link')).toHaveLength(5)
     expect(within(nav).getByRole('link', { name: 'Vue d’ensemble' })).toHaveAttribute('aria-current', 'page')
 
     await user.click(within(nav).getByRole('link', { name: 'Compte' }))
@@ -206,6 +227,7 @@ describe('interface d’administration Vysion', () => {
       '/api/admin/status': () => jsonResponse(standaloneStatus),
       '/api/admin/sessions': () => jsonResponse(emptySessions),
       '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+      '/api/admin/email': () => jsonResponse(emptyEmail),
     })
     render(<AdminApp />)
 
@@ -301,6 +323,7 @@ describe('interface d’administration Vysion', () => {
           : { sessions: [{ created_at: 'a', expires_at: 'b', current: true }] },
       ),
       '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+      '/api/admin/email': () => jsonResponse(emptyEmail),
       '/api/admin/sessions/revoke': () => {
         revoked = true
         return jsonResponse({ revoked: 1 })
@@ -314,5 +337,47 @@ describe('interface d’administration Vysion', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Toutes les sessions ont été révoquées')
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === '/api/admin/sessions/revoke')
     expect((call?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value')
+  })
+
+  it('ouvre le panneau de certificats en mode helper comme en standalone', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/status': () =>
+        jsonResponse({ ...authenticatedStatus, tls_backend: 'helper', tls_hostname: 'vysion.example' }),
+    })
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Valider le certificat' })).toBeInTheDocument()
+    expect(screen.queryByText('Le TLS est géré par le proxy hôte')).not.toBeInTheDocument()
+    expect(screen.getByText('Helper')).toBeInTheDocument()
+    expect(screen.getByText(/Helper — Vysion pilote le Nginx hôte/)).toBeInTheDocument()
+  })
+
+  it('présente une section Email au transport commutable et aux secrets en écriture seule', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/email': () => jsonResponse(configuredEmail),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('heading', { name: 'Email' })).toBeInTheDocument()
+    expect(screen.getByText('Configurée — Microsoft 365')).toBeInTheDocument()
+    expect(screen.getByText('Enregistré (jamais affiché)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tester l’envoi' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Enregistrer l’email' })).toBeInTheDocument()
+
+    // The Microsoft 365 shape is shown for the transport the server reports.
+    expect(screen.getByLabelText(/Secret de l’application/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Serveur SMTP')).not.toBeInTheDocument()
+    // Whatever the server holds, no configured value ever reaches the DOM.
+    expect(document.body.textContent).not.toContain('graph-write')
+
+    await user.selectOptions(screen.getByLabelText('Transport'), 'smtp')
+    expect(screen.getByLabelText('Serveur SMTP')).toBeInTheDocument()
+    expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument()
+    expect(screen.getByText('Laisser vide pour conserver le mot de passe enregistré.')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Secret de l’application/)).not.toBeInTheDocument()
   })
 })

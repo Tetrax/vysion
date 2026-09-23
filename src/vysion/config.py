@@ -38,20 +38,24 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=43_200, ge=300, le=86_400)
     # Forwarded headers are believed only when they come from these networks.
     trusted_proxy_cidrs: str = "127.0.0.1/32"
-    tls_backend: str = Field(default="none", pattern="^(none|local)$")
+    tls_backend: str = Field(default="none", pattern="^(none|local|helper)$")
     tls_hostname: str = ""
+    # Private Unix socket of the root certificate helper (helper mode only).
+    helper_socket_path: Path = Path("/run/vysion-cert-helper/helper.sock")
     # The one authority an admin mutation, an exact-Origin check and an
     # emailed reset link are allowed to use (e.g. https://vysion.example.com).
-    # Empty in the proxy/VPS mode unless the operator configures it; derived
+    # Empty in the proxy/VPS modes unless the operator configures it; derived
     # from tls_hostname in the standalone mode where that name is mandatory.
     public_origin: str = ""
 
     @model_validator(mode="after")
-    def _require_hostname_with_local_backend(self) -> "Settings":
-        if self.tls_backend == "local":
+    def _require_hostname_when_managed(self) -> "Settings":
+        if self.tls_backend in {"local", "helper"}:
             hostname = self.tls_hostname.strip().lower()
             if not HOSTNAME_PATTERN.fullmatch(hostname):
-                raise ValueError("tls_hostname must be a valid DNS name when tls_backend is local")
+                raise ValueError(
+                    f"tls_hostname must be a valid DNS name when tls_backend is {self.tls_backend}"
+                )
             object.__setattr__(self, "tls_hostname", hostname)
         return self
 

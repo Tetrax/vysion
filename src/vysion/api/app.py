@@ -34,9 +34,10 @@ from vysion.audit.models import (
 from vysion.audit.parser import FortiGateParser
 from vysion.audit.registry import default_registry
 from vysion.build_info import VYSION_REVISION, VYSION_VERSION
+from vysion.certbackend import build_certificate_backend
 from vysion.certificates import CertificateStore, nginx_reloader, tls_fingerprint_smoker
 from vysion.config import Settings
-from vysion.mail import RecoveryMailer, SmtpMailer
+from vysion.mail import RecoveryMailer, TransportMailer
 from vysion.reports.docx_report import render_docx
 from vysion.reports.json_report import JsonAuditReport
 from vysion.reports.presentation import build_presentation, present_findings
@@ -607,11 +608,17 @@ def create_app(
     app.state.state_store = state_store
     app.state.trusted_proxy = trusted_proxy
     app.state.recovery_mailer = (
-        recovery_mailer if recovery_mailer is not None else SmtpMailer(state_store)
+        recovery_mailer if recovery_mailer is not None else TransportMailer(state_store)
     )
     app.state.certificate_store = certificate_store
     app.state.certificate_reloader = reloader_hook
     app.state.certificate_smoker = smoker_hook
+    # One abstraction over `none`, `local` and `helper`, built after the
+    # hooks are published so it always reads their current value: no route
+    # ever asks which mode was selected, it only talks to this backend.
+    app.state.certificate_backend = build_certificate_backend(
+        resolved_settings, store=certificate_store, state=app.state
+    )
     install_admin_hardening(app)
     app.include_router(build_admin_router())
 

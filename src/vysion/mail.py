@@ -1,12 +1,22 @@
-"""Optional SMTP transport for the administrator recovery messages."""
+"""Administrator recovery mail over one selected, durable transport.
+
+Two transports are available — SMTP and Microsoft 365 over OAuth2 application
+credentials — and exactly one is selected at a time. Settings are read at
+send time from the state volume: nothing secret comes from the environment
+and nothing secret is ever logged or returned.
+"""
 
 from __future__ import annotations
 
 import smtplib
+from collections.abc import Callable
 from email.message import EmailMessage
 from typing import Protocol
 
-from vysion.state import StateStore
+from vysion.graphmail import GraphMailClient, GraphMailError, Message
+from vysion.state import EmailConfig, StateStore
+
+MAX_TIMEOUT_SECONDS = 60
 
 
 class RecoveryUnavailable(RuntimeError):
@@ -39,8 +49,11 @@ class SmtpMailer:
         message["From"] = config.from_address
         message["To"] = to
         message.set_content(body)
+        # Bounded regardless of what the stored row claims: a hand-edited
+        # value can never park a recovery send on an unbounded socket.
+        timeout = float(min(max(int(config.timeout_seconds), 1), MAX_TIMEOUT_SECONDS))
         try:
-            with smtplib.SMTP(config.host, config.port, timeout=10.0) as client:
+            with smtplib.SMTP(config.host, config.port, timeout=timeout) as client:
                 if config.starttls:
                     client.starttls()
                 if config.username:
@@ -48,3 +61,69 @@ class SmtpMailer:
                 client.send_message(message)
         except (OSError, smtplib.SMTPException) as exc:
             raise RecoveryUnavailable("SMTP transport refused the message") from exc
+
+
+class Microsoft365Mailer:
+    """Sends through Microsoft Graph with the stored application credentials."""
+
+    def __init__(
+        self,
+        store: StateStore,
+        *,
+        urlopen: Callable[..., object] | None = None,
+    ) -> None:
+        self._store = store
+        self._urlopen = urlopen
+
+    def send(self, *, to: str, subject: str, body: str) -> None:
+        config = self._store.email_config()
+        if (
+            config is None
+            or config.transport != "microsoft365"
+            or not config.complete
+        ):
+            raise RecoveryUnavailable("Microsoft 365 transport is not configured")
+        keywords: dict[str, object] = {}
+        if self._urlopen is not None:
+            keywords["urlopen"] = self._urlopen
+        client = GraphMailClient(
+            tenant_id=config.m365_tenant_id or "",
+            client_id=config.m365_client_id or "",
+            client_secret=config.m365_client_secret or "",
+            mailbox=config.m365_mailbox or "",
+            from_address=config.from_address,
+            timeout=float(config.timeout_seconds),
+            **keywords,  # type: ignore[arg-type]
+        )
+        try:
+            client.send(Message(to=to, subject=subject, body=body))
+        except GraphMailError as exc:
+            raise RecoveryUnavailable(str(exc)) from exc
+
+
+# The one place that maps the selected transport onto its mailer. Both
+# implementations read the state at send time, so a rotated credential is
+# picked up without restarting the application.
+def _transport_mailer(config: EmailConfig, store: StateStore) -> RecoveryMailer:
+    if config.transport == "microsoft365":
+        return Microsoft365Mailer(store)
+    return SmtpMailer(store)
+
+
+MailerFactory = Callable[[EmailConfig, StateStore], RecoveryMailer]
+
+
+class TransportMailer:
+    """Resolves the selected transport at send time and refuses when unfinished."""
+
+    def __init__(self, store: StateStore, *, factory: MailerFactory | None = None) -> None:
+        self._store = store
+        self._factory = factory if factory is not None else _transport_mailer
+
+    def send(self, *, to: str, subject: str, body: str) -> None:
+        config = self._store.email_config()
+        if config is None:
+            raise RecoveryUnavailable("aucun transport d'email n'est configure")
+        if not config.complete:
+            raise RecoveryUnavailable("transport d'email incomplet")
+        self._factory(config, self._store).send(to=to, subject=subject, body=body)
