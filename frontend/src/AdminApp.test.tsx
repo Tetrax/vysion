@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,6 +8,10 @@ import App from './App'
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  // La préférence de thème vit dans localStorage : on la remet à zéro pour que
+  // chaque test démarre sur le même état (« système », sans attribut).
+  window.localStorage.removeItem('vysion-theme')
+  document.documentElement.removeAttribute('data-theme')
 })
 
 type Routes = Record<string, () => Response>
@@ -156,5 +160,159 @@ describe('administration Vysion', () => {
     )
     expect(adminCalls).toHaveLength(0)
     expect(screen.getByLabelText('Configuration FortiGate')).toBeInTheDocument()
+  })
+})
+
+describe('interface d’administration Vysion', () => {
+  const authenticatedRoutes: Routes = {
+    '/api/admin/status': () => jsonResponse(authenticatedStatus),
+    '/api/admin/sessions': () => jsonResponse(emptySessions),
+    '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+  }
+
+  it('organise l’administration authentifiée en quatre sections', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('heading', { name: 'Vue d’ensemble' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Système' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Compte' })).toBeInTheDocument()
+
+    const nav = screen.getByRole('navigation', { name: 'Sections d’administration' })
+    expect(within(nav).getAllByRole('link')).toHaveLength(4)
+    expect(within(nav).getByRole('link', { name: 'Vue d’ensemble' })).toHaveAttribute('aria-current', 'page')
+
+    await user.click(within(nav).getByRole('link', { name: 'Compte' }))
+    expect(within(nav).getByRole('link', { name: 'Compte' })).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: 'Vue d’ensemble' })).not.toHaveAttribute('aria-current')
+  })
+
+  it('affiche l’identité, le retour à l’audit, le thème et la déconnexion', async () => {
+    mockFetch(authenticatedRoutes)
+    render(<AdminApp />)
+
+    expect(await screen.findByText('Vysion')).toBeInTheDocument()
+    expect(screen.getByText('Administration')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Retour à l’audit' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('button', { name: 'Thème : système' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
+    expect(screen.getByText('Vysion — administration privée')).toBeInTheDocument()
+  })
+
+  it('tient chaque action essentielle à un seul endroit', async () => {
+    mockFetch({
+      '/api/admin/status': () => jsonResponse(standaloneStatus),
+      '/api/admin/sessions': () => jsonResponse(emptySessions),
+      '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+    })
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+    expect(screen.getAllByText('Retour à l’audit')).toHaveLength(1)
+    expect(screen.getAllByText('Se déconnecter')).toHaveLength(1)
+    expect(screen.getAllByText('Révoquer toutes les sessions')).toHaveLength(1)
+    expect(screen.getAllByText('Changer le mot de passe')).toHaveLength(1)
+    expect(screen.getAllByText('Valider le certificat')).toHaveLength(1)
+  })
+
+  it('explique que le proxy hôte termine le TLS en mode proxy', async () => {
+    mockFetch(authenticatedRoutes)
+    render(<AdminApp />)
+
+    expect(await screen.findByText('Le TLS est géré par le proxy hôte')).toBeInTheDocument()
+    expect(screen.getByText(/Vysion n’importe ni n’active aucun certificat dans ce mode/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Valider le certificat' })).not.toBeInTheDocument()
+    expect(screen.getByText('Géré par le proxy hôte')).toBeInTheDocument()
+  })
+
+  it('présente le contrat du mot de passe à la configuration initiale', async () => {
+    mockFetch({ '/api/admin/status': () => jsonResponse(setupStatus) })
+    render(<AdminApp />)
+
+    expect(await screen.findByText('Zone d’administration privée')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Configuration initiale' })).toBeInTheDocument()
+    expect(screen.getByText('12 à 1 024 octets UTF-8.')).toBeInTheDocument()
+    expect(screen.getByLabelText('Nouveau mot de passe administrateur')).toHaveAttribute(
+      'aria-describedby',
+      'setup-password-help',
+    )
+    expect(screen.queryByRole('navigation', { name: 'Sections d’administration' })).not.toBeInTheDocument()
+  })
+
+  it('applique et mémorise le thème clair, sombre puis système', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    const toggle = await screen.findByRole('button', { name: 'Thème : système' })
+    expect(document.documentElement).not.toHaveAttribute('data-theme')
+
+    await user.click(toggle)
+    expect(screen.getByRole('button', { name: 'Thème : clair' })).toBeInTheDocument()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light')
+    expect(window.localStorage.getItem('vysion-theme')).toBe('light')
+
+    await user.click(screen.getByRole('button', { name: 'Thème : clair' }))
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+    expect(window.localStorage.getItem('vysion-theme')).toBe('dark')
+
+    await user.click(screen.getByRole('button', { name: 'Thème : sombre' }))
+    expect(document.documentElement).not.toHaveAttribute('data-theme')
+    expect(window.localStorage.getItem('vysion-theme')).toBeNull()
+  })
+
+  it('recharge la préférence de thème enregistrée localement', async () => {
+    window.localStorage.setItem('vysion-theme', 'dark')
+    mockFetch(authenticatedRoutes)
+    render(<AdminApp />)
+
+    expect(await screen.findByRole('button', { name: 'Thème : sombre' })).toBeInTheDocument()
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+  })
+
+  it('change le mot de passe avec le jeton CSRF et annonce le résultat', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/password': () => jsonResponse({ status: 'password_updated' }),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('heading', { name: 'Compte' })
+    await user.type(screen.getByLabelText('Mot de passe actuel'), 'current-admin-password')
+    await user.type(screen.getByLabelText('Nouveau mot de passe'), 'a-new-admin-password')
+    await user.click(screen.getByRole('button', { name: 'Changer le mot de passe' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Mot de passe modifié')
+    const call = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === '/api/admin/password')
+    expect(call).toBeDefined()
+    expect((call?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value')
+  })
+
+  it('révoque les sessions depuis la section Compte', async () => {
+    let revoked = false
+    mockFetch({
+      '/api/admin/status': () => jsonResponse(authenticatedStatus),
+      '/api/admin/sessions': () => jsonResponse(
+        revoked
+          ? { sessions: [{ created_at: 'a', expires_at: 'b', current: false }] }
+          : { sessions: [{ created_at: 'a', expires_at: 'b', current: true }] },
+      ),
+      '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+      '/api/admin/sessions/revoke': () => {
+        revoked = true
+        return jsonResponse({ revoked: 1 })
+      },
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    expect(await screen.findByText('(courante)')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Révoquer toutes les sessions' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Toutes les sessions ont été révoquées')
+    const call = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === '/api/admin/sessions/revoke')
+    expect((call?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value')
   })
 })
