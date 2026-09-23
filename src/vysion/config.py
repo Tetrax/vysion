@@ -11,6 +11,15 @@ HOSTNAME_PATTERN = re.compile(
     r"(\.([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?))*$"
 )
 
+# The authoritative browser origin: scheme + authority, nothing else. No
+# path, no query, no fragment, no userinfo — exactly what an Origin header
+# and a reset link are built from.
+PUBLIC_ORIGIN_PATTERN = re.compile(
+    r"^(?P<scheme>https?)://"
+    r"(?P<host>\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)"
+    r"(?::(?P<port>\d{1,5}))?$"
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VYSION_", frozen=True)
@@ -31,6 +40,11 @@ class Settings(BaseSettings):
     trusted_proxy_cidrs: str = "127.0.0.1/32"
     tls_backend: str = Field(default="none", pattern="^(none|local)$")
     tls_hostname: str = ""
+    # The one authority an admin mutation, an exact-Origin check and an
+    # emailed reset link are allowed to use (e.g. https://vysion.example.com).
+    # Empty in the proxy/VPS mode unless the operator configures it; derived
+    # from tls_hostname in the standalone mode where that name is mandatory.
+    public_origin: str = ""
 
     @model_validator(mode="after")
     def _require_hostname_with_local_backend(self) -> "Settings":
@@ -39,4 +53,30 @@ class Settings(BaseSettings):
             if not HOSTNAME_PATTERN.fullmatch(hostname):
                 raise ValueError("tls_hostname must be a valid DNS name when tls_backend is local")
             object.__setattr__(self, "tls_hostname", hostname)
+        return self
+
+    @model_validator(mode="after")
+    def _normalize_public_origin(self) -> "Settings":
+        origin = (self.public_origin or "").strip().lower()
+        if not origin:
+            # Standalone always knows the name it serves: derive the
+            # authoritative origin instead of trusting any Host header.
+            if self.tls_backend == "local":
+                origin = f"https://{self.tls_hostname}"
+            object.__setattr__(self, "public_origin", origin)
+            return self
+        match = PUBLIC_ORIGIN_PATTERN.fullmatch(origin)
+        if match is None:
+            raise ValueError(
+                "public_origin must be a bare origin: http(s)://host[:port]"
+            )
+        port = match.group("port")
+        scheme = match.group("scheme")
+        if port is not None and not 1 <= int(port) <= 65535:
+            raise ValueError("public_origin port must be between 1 and 65535")
+        # Browsers never send a default port in Host/Origin: canonicalize so
+        # the exact comparison cannot be bypassed by writing :443/:80.
+        if (scheme == "https" and port == "443") or (scheme == "http" and port == "80"):
+            origin = f"{scheme}://{match.group('host')}"
+        object.__setattr__(self, "public_origin", origin)
         return self

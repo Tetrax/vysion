@@ -65,4 +65,29 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 - **mutations** : session + jeton `X-CSRF-Token` + `Origin` exact ; verrous par portée (compte, setup, récupération, client) avec TTL ; anti-énumération (réponses identiques puis 429) ; corps limités (1 Mo admin, 512 Ko certificat) ;
 - **état durable** : SQLite privé dans `vysion-state` (fichier 0600, répertoire 0700, échec fail-closed si corrompu ou schéma plus récent) ; mots de passe scrypt ; secrets SMTP write-only dans l'état, jamais dans l'environnement ni dans une réponse ; tickets de récupération et d'activation hachés (`token_digest`), usage unique, liés à la session (et, pour l'activation, au digest exact du candidat) ; `vysion-admin` n'accepte les secrets que sur stdin, jamais en argument, et ne les ré-échoue jamais ;
 - **certificats** : validation stricte (format PEM/PKCS#12, dates sur horloge injectée, SAN/hostname avec wildcard RFC 6125, vérification de chaîne OpenSSL, chargement TLS réel), staging privé 0700/0600, générations immutables, pointeur `active` basculé atomiquement, relecture de l'empreinte SHA-256 servie après activation avec rollback automatique ; la passphrase PKCS#12 transite par stdin (`fd:0`), jamais dans `argv` ; le bootstrap standalone auto-signé (2 jours) est remplacé dès le premier import admin ;
-- **volumes** : externes et stables `vysion-state`, `vysion-certs`, `vysion-reports`, séparés, jamais supprimés par la pile ; backup/restauration manuels runbookisés (`scripts/backup.sh`, `scripts/restore.sh`).
+- **volumes** : externes et stables `vysion-state`, `vysion-certs`, `vysion-reports`, séparés, jamais supprimés par la pile ; `VYSION_VOLUME_PREFIX` (défaut vide) isole validations et smokes sur des volumes dédiés ; sauvegarde manuelle sous une frontière cohérente (les conteneurs porteurs sont d'abord arrêtés — quiescence — puis redémarrés) et restauration testée uniquement sur volumes jetables, avec vérification des empreintes (`scripts/backup.sh`, `scripts/restore.sh`, rejoué par `tests/contract/test_backup_restore_roundtrip.py`).
+
+## En-têtes transférés et origine publique (V2)
+
+- **Confiance forwarded (règle unique)** : l'application ne croit `X-Forwarded-For`,
+  `X-Forwarded-Proto`, `X-Forwarded-Client-Proto` et `X-Real-IP` que selon la
+  résolution `vysion.security.TrustedProxy.resolve`, bornée par
+  `VYSION_TRUSTED_PROXY_CIDRS` (défaut `127.0.0.1/32`, **aucun défaut
+  silencieux** dans `compose.proxy.yml`). La couche interne est épinglée par
+  contrat : le Nginx du conteneur rejette les en-têtes transférés des clients
+  au niveau `server`, réécrit `X-Real-IP` sur l'observation locale
+  (`$remote_addr`), complète `X-Forwarded-For` (`$proxy_add_x_forwarded_for`),
+  pose `X-Forwarded-Proto` sur son propre `$scheme` et transmet la vérité du
+  proxy externe via `X-Forwarded-Client-Proto` ; uvicorn tourne **sans**
+  confiance forwarded (aucune réécriture de pair ou de schéma en aval).
+  Conséquences vérifiées par tests : une tentative de contournement des
+  verrous par `X-Forwarded-For` forgé est comptée sur le client réellement
+  observé, un client non digne de confiance ne peut pas déclarer `https`, et
+  un proxy externe explicite transmet correctement chaîne et schéma.
+- **Origine publique** : `VYSION_PUBLIC_ORIGIN` est l'autorité de l'origine
+  (sinon, en standalone, elle est dérivée de `VYSION_TLS_HOSTNAME` et du port
+  d'écoute). Toute mutation `/api/admin/*` doit présenter `Origin` et `Host`
+  exacts — l'origine n'est jamais dérivée du `Host` attaquant — sinon 403
+  `origin_mismatch`. Sans origine configurée, la demande de récupération
+  SMTP renvoie 503 « récupération indisponible » et le lien n'est jamais
+  fabriqué depuis un en-tête contrôlable.

@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/opt/vysion-venv/bin:$PATH
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ca-certificates curl nginx openssl \
+    && apt-get install --no-install-recommends -y ca-certificates curl nginx openssl procps \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid ${VYSION_GID} vysion \
     && useradd --uid ${VYSION_UID} --gid ${VYSION_GID} --no-create-home --shell /usr/sbin/nologin vysion

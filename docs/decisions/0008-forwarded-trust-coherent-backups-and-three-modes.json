@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "decision_id": "0008-forwarded-trust-coherent-backups-and-three-modes",
+  "status": "accepted",
+  "scope": "Vysion v2 - revue de la surface d'administration : confiance des en-tetes transfereurs, origine publique, chaines de certificats, trois modes de deploiement, isolation des volumes de validation et sauvegarde coherente",
+  "decision": "DECISION ACCEPTEE : la confiance des en-tetes transfereurs est resolue en un seul point (TrustedProxy.resolve) selon VYSION_TRUSTED_PROXY_CIDRS et une couche interne epinglee par contrat (Nginx du conteneur qui rejette les en-tetes clients, reecrit X-Real-IP sur l'observation locale, complete X-Forwarded-For, pose X-Forwarded-Proto sur son propre scheme et transmet la verite du proxy externe via X-Forwarded-Client-Proto ; uvicorn sans confiance forwarded). L'origine publique VYSION_PUBLIC_ORIGIN est l'autorite : mutations Origin/Host exacts, liens de recuperation refusees en 503 sans elle. Les chaînes de certificats acceptent le fullchain de production (feuille + intermediaires, sans racine, via partial_chain) tout en refusant une feuille sans emetteur ou une chaine incoherente. Trois modes de deploiement coexistent : compose.yml (VPS/Portainer, defaut), compose.standalone.yml (TLS conteneur) et compose.proxy.yml (VM derriere un reverse proxy externe, TRUSTED_PROXY_CIDRS obligatoire sans defaut silencieux). VYSION_VOLUME_PREFIX (defaut vide, noms stables inchanges) isole validations et smokes sur des volumes externes dedies. La sauvegarde manuelle agit sous une seule frontiere coherente : backup.sh arrete d'abord les conteneurs porteurs des volumes (quiescence, trap de redemarrage), archive, puis redemarre ; la restauration de controle se fait uniquement sur volumes jetables avec verification des empreintes, round-trip rejoue par tests/contract/test_backup_restore_roundtrip.py.",
+  "alternatives": [
+    {
+      "id": "A",
+      "name": "Croire X-Forwarded-* au niveau uvicorn (--proxy-headers) ou au niveau applicatif depuis le peer loopback",
+      "assessment": {
+        "securite": "Rejete : --proxy-headers reecrit le client depuis la chaine cotee par le client, et croire X-Real-IP/X-Forwarded-Proto transmis sans regle revient a laisser un client final contourner les verrous par portee client (reproduction : 8 essais faibles en 422 au lieu du verrou 429).",
+        "controle": "La couche nginx (config versionnee, contrat de test) est la seule a fixer ce que l'application croit, et la liste TRUSTED_PROXY_CIDRS est la seule autorite pour le proxy externe."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Exiger la racine dans le bundle de certificats (self-signed obligatoire)",
+      "assessment": {
+        "compatibilite": "Rejete : un fullchain de production (feuille + intermediaires) est refuse par erreur 2 sans partial_chain, ce qui rendait l'import admin inutilisable avec n'importe quelle vraie CA.",
+        "securite": "partial_chain accepte tout certificat fourni comme ancre, mais toutes les signatures jusqu'a elle doivent verifier : feuille orpheline ou chaine incoherente reste refusee (tests)."
+      }
+    },
+    {
+      "id": "C",
+      "name": "Trois piles sans changement de noms de volumes ni de sauvegarde",
+      "assessment": {
+        "risque": "Rejete : le smoke sur vysion-reports/vysion-state ecrirait dans les volumes de production et la sauvegarde live pendant ecriture n'est pas une frontiere coherente.",
+        "remediation": "VYSION_VOLUME_PREFIX (defaut vide) et backup.sh avec quiescence, sans rupture de compatibilite : noms de production identiques octet pour octet avec le defaut."
+      }
+    }
+  ],
+  "criteria": [
+    "un essai faible d'un client observe compte dans sa propre portee meme si X-Forwarded-For change a chaque requete (reproduction de l'evasion 8x422 en vert)",
+    "un client non digne de confiance ne peut pas declarer https ; un proxy externe explicite transmet chaîne et schéma",
+    "mutations /api/admin/* en 403 sur Origin/Host forge ; recuperation SMTP en 503 sans PUBLIC_ORIGIN",
+    "fullchain feuille+intermediaires (sans racine) accepte, feuille seule refusee, chaine incoherente refusee",
+    "compose.proxy.yml refuse de se resoudre sans TRUSTED_PROXY_CIDRS et ne porte aucun materiel TLS",
+    "noms de volumes de production inchanges avec VYSION_VOLUME_PREFIX vide",
+    "round-trip de sauvegarde (quiescence, archives, mutation, restauration, empreintes) rejoue sur volumes jetables dans la suite de tests",
+    "gates CI inchangees : pytest, Ruff, frontend, docker build + asserts d'image, contrat compose rendu"
+  ],
+  "rationale": [
+    "Une resolution unique des en-tetes transfereurs supprime les croyances divergentes entre uvicorn, nginx et l'application, et rend la regle de confiance testable au niveau unitaire puis integration (peer loopback + en-tetes reels).",
+    "L'origine publique configurée est la seule autorite : derivar l'origine du Host revient a laisser l'attaquant choisir la regle qu'on verifiera.",
+    "partial_chain reflete le fonctionnement reel des clients (la racine est deja dans leur magasin de confiance) sans relacher la coherence de la chaine.",
+    "Trois modes explicites (proxy VPS, standalone, proxy externe) couvrent le parc sans montage TLS fourni par le projet ni IP/sous-reseau impose.",
+    "La quiescence avant archivage est la seule maniere simple de garantir une frontiere unique pour SQLite et le pointeur de certificat actif, et le test automatique du round-trip empeche la runbook de devenir de la fiction."
+  ],
+  "constraints": [
+    "Ne jamais merger vers main ni deployer/modifier le runtime VPS/Portainer/Nginx/certificat actif depuis ce chantier : livrer une PR prete et revue.",
+    "Aucun secret, token, API key ou signature d'URL ; sessions/cookies uniquement, SameSite=Strict, Secure en HTTPS.",
+    "TRUSTED_PROXY_CIDRS ne doit jamais acquiescer silencieusement dans compose.proxy.yml ; PUBLIC_ORIGIN ne doit jamais etre devine d'un en-tete.",
+    "VYSION_VOLUME_PREFIX vide doit conserver exactement vysion-reports, vysion-state, vysion-certs ; aucune suppression de volume par la pile ni par un rollback.",
+    "TLS : pas de certificat ni de cle monte dans les modes proxy ; le bootstrap standalone auto-signe reste remplace des le premier import admin.",
+    "Gates CI : pytest + Ruff, frontend tests/lint/build/audit, contrat compose rendu pour les trois piles, docker build puis grep d'assertion sur l'image construite (jamais execution du runtime)."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Rapport de review independante de la surface d'administration : 6 constats bloquants (etat present-invalid, origine publique, confiance proxy, chaine de certificats, isolation des volumes, coherence de la sauvegarde) avec reproduction 8x422 et fullchain err 2",
+      "retrieved_at": "2026-09-23",
+      "retrieval_note": "Contenu transmis dans le contexte de la tache t_d8d702ff (review round 1)."
+    },
+    {
+      "url": null,
+      "purpose": "Decision 0007-cadrage et 10 decisions d'orchestration de l'operateur (perimetre /admin seulement, livraison PR + CI exact-head + review independante, sans merge ni modification du runtime)",
+      "retrieved_at": "2026-09-22",
+      "retrieval_note": "docs/decisions/0007-admin-surface-standalone-tls-and-durable-state.json et messages hors-band."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Suite directe de 0007 : correction des constats de review avant review round 2, sans changement de perimetre (toujours /admin seulement, parcours principal anonyme).",
+    "remote_publication": "PR uniquement, revue independante demandee, pas de merge",
+    "portainer_deployment": "not executed - runtime VPS, Nginx hote et certificat actif inchanges"
+  },
+  "rollback_boundary": "Ce changement ne touche ni l'instance en service ni ses volumes : la PR se revert sans effet sur le runtime. Les piles existantes gardent leurs noms de volumes par defaut ; compose.proxy.yml n'est consomme que par un déploiement VM explicite ; le comportement de confiance transferee redevient celui de l'ancien code en revertant le seul module security/admin plus la config nginx versionnee."
+}

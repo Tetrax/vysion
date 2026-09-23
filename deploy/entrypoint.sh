@@ -58,12 +58,14 @@ PY
   nginx_config=/etc/nginx/nginx-standalone.conf
 fi
 
+# Uvicorn runs without forwarded-header trust: it must never rewrite the
+# peer or the scheme from client-controlled headers. The bundled nginx
+# appends what it observed and the application resolves trust itself (see
+# vysion.security.TrustedProxy.resolve).
 uvicorn vysion.api.app:create_app \
   --factory \
   --host 127.0.0.1 \
   --port 8000 \
-  --proxy-headers \
-  --forwarded-allow-ips 127.0.0.1 \
   --no-access-log &
 api_pid=$!
 

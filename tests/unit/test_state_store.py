@@ -84,6 +84,57 @@ def test_corrupt_state_fails_closed_and_never_reopens_first_run(tmp_path: Path) 
         StateStore.probe_has_admin(state)
 
 
+def test_existing_zero_byte_database_fails_closed_and_never_reopens_first_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review finding: a database file that already exists but carries no
+    Vysion schema is NOT a fresh install. Only a genuinely absent file may
+    initialize; a zero-byte file must never reopen anonymous enrollment."""
+    from vysion import state as state_module
+
+    monkeypatch.setattr(state_module, "EXISTING_STATE_WAIT_SECONDS", 0.1)
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "vysion-state.db").write_bytes(b"")
+
+    with pytest.raises(StateError):
+        StateStore(state)
+
+    with pytest.raises(StateError):
+        StateStore.probe_has_admin(state)
+
+
+def test_existing_foreign_database_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid SQLite file that belongs to someone else (no Vysion meta
+    table) must refuse instead of being initialized as first-run state."""
+    from vysion import state as state_module
+
+    monkeypatch.setattr(state_module, "EXISTING_STATE_WAIT_SECONDS", 0.1)
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(state / "vysion-state.db")
+    connection.execute("CREATE TABLE unrelated (id INTEGER PRIMARY KEY)")
+    connection.execute("INSERT INTO unrelated (id) VALUES (1)")
+    connection.commit()
+    connection.close()
+
+    with pytest.raises(StateError):
+        StateStore(state)
+
+    with pytest.raises(StateError):
+        StateStore.probe_has_admin(state)
+
+
+def test_absent_database_still_initializes_normally(tmp_path: Path) -> None:
+    """The fail-closed rule must not break the genuine first run."""
+    state = tmp_path / "state"
+    store = StateStore(state)
+    assert store.has_admin() is False
+    assert store.create_admin("correct horse battery staple") is True
+
+
 def test_future_schema_version_is_refused(tmp_path: Path) -> None:
     state = tmp_path / "state"
     StateStore(state)

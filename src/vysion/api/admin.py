@@ -22,8 +22,12 @@ from vysion.config import Settings
 from vysion.mail import RecoveryUnavailable
 from vysion.security import (
     CSRF_HEADER_NAME,
+    FORWARDED_CLIENT_PROTO_HEADER,
+    FORWARDED_FOR_HEADER,
+    FORWARDED_PROTO_HEADER,
     MAX_PASSWORD_BYTES,
     MIN_PASSWORD_BYTES,
+    REAL_IP_HEADER,
     SESSION_COOKIE_NAME,
     TrustedProxy,
     origin_header_value,
@@ -68,7 +72,8 @@ AUTH_REQUIRED = "authentification requise"
 STATE_UNAVAILABLE = "\u00e9tat administrateur indisponible"
 SETUP_DONE = "la configuration initiale est d\u00e9j\u00e0 effectu\u00e9e"
 BAD_RECOVERY_TOKEN = "jeton de r\u00e9cup\u00e9ration invalide"
-RECOVERY_DOWN = "r\u00e9cup\u00e9ration indisponible"
+RECOVERY_DOWN = "récupération indisponible"
+RECOVERY_NO_ORIGIN = "récupération indisponible : origine publique non configurée"
 BODY_TOO_LARGE = "corps de requ\u00eate trop volumineux"
 LENGTH_REQUIRED = "longueur du corps requise"
 BAD_LENGTH = "longueur du corps invalide"
@@ -144,16 +149,26 @@ def _validated_password(value: str) -> str:
     return value
 
 
+def _forwarded(request: Request) -> tuple[str | None, str]:
+    """One resolution pass: which client, over which scheme, and why."""
+    return _proxy(request).resolve(
+        peer=_peer(request),
+        real_ip=request.headers.get(REAL_IP_HEADER),
+        forwarded_for=request.headers.get(FORWARDED_FOR_HEADER),
+        local_proto=request.headers.get(FORWARDED_PROTO_HEADER),
+        client_proto=request.headers.get(FORWARDED_CLIENT_PROTO_HEADER),
+        fallback=request.url.scheme,
+    )
+
+
 def _client_id(request: Request) -> str:
-    peer = _peer(request)
-    forwarded = request.headers.get("x-forwarded-for")
-    return _proxy(request).client_ip(peer, forwarded) or peer or "unknown"
+    client, _scheme_value = _forwarded(request)
+    return client or _peer(request) or "unknown"
 
 
 def _scheme(request: Request) -> str:
-    peer = _peer(request)
-    forwarded = request.headers.get("x-forwarded-proto")
-    return _proxy(request).scheme(peer, forwarded, fallback=request.url.scheme)
+    _client, scheme = _forwarded(request)
+    return scheme
 
 
 def _host(request: Request) -> str:
@@ -161,7 +176,23 @@ def _host(request: Request) -> str:
 
 
 def require_origin(request: Request) -> None:
+    """Exact-Origin check against the authoritative origin when one exists.
+
+    The configured (or standalone-derived) public origin is the only
+    authority: neither the Origin nor the Host header may pick it. Without a
+    configured origin — the default VPS/proxy mode, which cannot know its own
+    public name — the exact same-origin comparison against the authority this
+    request claims is kept, and callers that need an address to link to
+    (recovery) fail closed instead of falling back to Host.
+    """
     origin = request.headers.get("origin")
+    configured = _settings(request).public_origin
+    if configured:
+        authority = configured.split("://", 1)[1]
+        host = (request.headers.get("host") or "").strip().lower()
+        if origin is None or origin.strip().lower() != configured or host != authority:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_ORIGIN)
+        return
     expected = origin_header_value(_scheme(request), _host(request))
     if origin is None or origin.lower() != expected:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_ORIGIN)
@@ -315,7 +346,11 @@ def build_admin_router() -> APIRouter:
             "session_expires_at": _iso(session.expires_at) if session else None,
             "tls_backend": settings.tls_backend,
             "tls_hostname": settings.tls_hostname or None,
-            "recovery_enabled": bool(smtp is not None and smtp.recovery_email),
+            # Recovery needs both a transport and an authoritative origin to
+            # build the reset link from; without either it stays hidden.
+            "recovery_enabled": bool(
+                smtp is not None and smtp.recovery_email and settings.public_origin
+            ),
             "version": VYSION_VERSION,
         }
 
@@ -458,6 +493,7 @@ def build_admin_router() -> APIRouter:
     @router.post("/recovery/request")
     async def recovery_request(request: Request) -> JSONResponse:
         require_origin(request)
+        settings = _settings(request)
         state = _state(request)
         scopes = (
             (f"{RECOVERY_CLIENT_PREFIX}:{_client_id(request)}", RECOVERY_CLIENT_THRESHOLD),
@@ -474,6 +510,14 @@ def build_admin_router() -> APIRouter:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=RECOVERY_DOWN
             )
+        origin = settings.public_origin
+        if not origin:
+            # No authoritative address exists to build a reset link from:
+            # fail closed rather than borrowing the caller-controlled Host.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=RECOVERY_NO_ORIGIN,
+            )
         revision = state.admin_revision()
         if revision is None:
             return JSONResponse({"status": "pending"})
@@ -482,7 +526,7 @@ def build_admin_router() -> APIRouter:
             ttl_seconds=RECOVERY_TTL_SECONDS,
             revision=revision,
         )
-        link = f"{_scheme(request)}://{_host(request)}/admin/reset?token={raw_token}"
+        link = f"{origin}/admin/reset?token={raw_token}"
         body = (
             "Une demande de r\u00e9cup\u00e9ration de l'acc\u00e8s administrateur "
             "Vysion a \u00e9t\u00e9 \u00e9mise.\n\n"

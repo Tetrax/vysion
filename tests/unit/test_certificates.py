@@ -136,6 +136,56 @@ def make_signed_leaf(
     return cert_path.read_bytes(), key_path.read_bytes()
 
 
+def make_intermediate(
+    tmp_path: Path, ca_cert: bytes, ca_key: bytes, *, name: str = "intermediate"
+) -> tuple[bytes, bytes]:
+    """Intermediate CA signed by ``ca_cert`` (root -> intermediate -> leaf)."""
+    issuer_cert_path = tmp_path / "issuer.pem"
+    issuer_key_path = tmp_path / "issuer.key"
+    issuer_cert_path.write_bytes(ca_cert)
+    issuer_key_path.write_bytes(ca_key)
+    key_path = tmp_path / f"{name}.key"
+    csr_path = tmp_path / f"{name}.csr"
+    cert_path = tmp_path / f"{name}.pem"
+    ext_path = tmp_path / f"{name}.ext"
+    ext_path.write_text(
+        "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n"
+    )
+    openssl(
+        "req",
+        "-new",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        str(key_path),
+        "-out",
+        str(csr_path),
+        "-subj",
+        f"/CN=Intermediate {name}",
+        cwd=tmp_path,
+    )
+    openssl(
+        "x509",
+        "-req",
+        "-in",
+        str(csr_path),
+        "-CA",
+        str(issuer_cert_path),
+        "-CAkey",
+        str(issuer_key_path),
+        "-CAcreateserial",
+        "-days",
+        "1825",
+        "-extfile",
+        str(ext_path),
+        "-out",
+        str(cert_path),
+        cwd=tmp_path,
+    )
+    return cert_path.read_bytes(), key_path.read_bytes()
+
+
 def make_pkcs12(
     tmp_path: Path, cert: bytes, key: bytes, ca: bytes | None, password: str
 ) -> bytes:
@@ -316,6 +366,68 @@ def test_incoherent_chain_is_refused(tmp_path: Path) -> None:
         )
 
     assert "chaîne" in str(excinfo.value)
+
+
+def test_ca_issued_fullchain_without_the_root_is_accepted(tmp_path: Path) -> None:
+    """Review finding: the served fullchain of a real CA deployment is
+    leaf + intermediate(s); clients hold the root themselves. Requiring the
+    uploaded bundle to reach a self-signed root rejected every normal
+    certificate. The bundle must terminate coherently at any supplied
+    issuer while unrelated chains stay refused."""
+    root_cert, root_key = make_ca(tmp_path, name="root")
+    intermediate_cert, intermediate_key = make_intermediate(tmp_path, root_cert, root_key)
+    leaf_cert, leaf_key = make_signed_leaf(tmp_path, intermediate_cert, intermediate_key)
+    store = store_for(tmp_path)
+
+    metadata = store.validate(
+        certificate=leaf_cert + intermediate_cert,
+        private_key=leaf_key,
+        hostname=HOSTNAME,
+    )
+    assert metadata.chain_length == 2
+
+    # The full three-level bundle keeps validating as well.
+    metadata = store.validate(
+        certificate=leaf_cert + intermediate_cert + root_cert,
+        private_key=leaf_key,
+        hostname=HOSTNAME,
+    )
+    assert metadata.chain_length == 3
+
+    # And a leaf signed by yet another CA stays refused.
+    other_cert, other_key = make_ca(tmp_path, name="stranger")
+    stranger_cert, stranger_key = make_signed_leaf(tmp_path, other_cert, other_key)
+    with pytest.raises(CertificateError):
+        store.validate(
+            certificate=stranger_cert + intermediate_cert,
+            private_key=stranger_key,
+            hostname=HOSTNAME,
+        )
+
+    # A lone CA-issued leaf (no issuer supplied at all) is not servable.
+    with pytest.raises(CertificateError):
+        store.validate(
+            certificate=leaf_cert, private_key=leaf_key, hostname=HOSTNAME
+        )
+
+
+def test_pkcs12_fullchain_without_the_root_is_accepted(tmp_path: Path) -> None:
+    """Same rule through the PKCS#12 path: leaf + intermediate inside the
+    archive, root omitted, must validate."""
+    root_cert, root_key = make_ca(tmp_path, name="root")
+    intermediate_cert, intermediate_key = make_intermediate(tmp_path, root_cert, root_key)
+    leaf_cert, leaf_key = make_signed_leaf(tmp_path, intermediate_cert, intermediate_key)
+    archive = make_pkcs12(
+        tmp_path, leaf_cert, leaf_key, intermediate_cert, "store-secret"
+    )
+    store = store_for(tmp_path)
+
+    metadata = store.validate(
+        certificate=archive, private_key=None, passphrase="store-secret",
+        hostname=HOSTNAME,
+    )
+
+    assert metadata.chain_length == 2
 
 
 def test_pkcs12_archive_validates_with_its_passphrase(tmp_path: Path) -> None:

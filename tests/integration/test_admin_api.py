@@ -119,10 +119,18 @@ def build_app(
     clock=None,
     mailer=None,
     state_directory: Path | None = None,
+    public_origin: str | None = None,
+    trusted_proxy_cidrs: str | None = None,
 ):
+    overrides: dict[str, str] = {}
+    if public_origin is not None:
+        overrides["public_origin"] = public_origin
+    if trusted_proxy_cidrs is not None:
+        overrides["trusted_proxy_cidrs"] = trusted_proxy_cidrs
     settings = Settings(
         report_directory=tmp_path / "reports",
         state_directory=state_directory or (tmp_path / "state"),
+        **overrides,
     )
     return create_app(
         settings=settings,
@@ -583,6 +591,152 @@ async def test_blank_forwarded_proto_from_the_local_proxy_never_breaks_origin(
 
 
 # ---------------------------------------------------------------------------
+# The real nginx -> app forwarded-header contract (review finding 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_nginx_observed_hop_wins_over_a_forged_forwarded_chain(
+    tmp_path: Path,
+) -> None:
+    """The bundled nginx reports the hop it observed in X-Real-IP; a client
+    that varies only X-Forwarded-For must stay inside one rate-limit scope
+    instead of buying a fresh bucket per attempt."""
+    app = build_app(tmp_path)
+    forged = ["6.6.6.6", "192.0.2.77", "203.0.113.50", "198.51.100.200", "192.0.2.200"]
+
+    statuses = []
+    for value in forged:
+        async with api_client(
+            app,
+            peer=("127.0.0.1", 41000),
+            origin=ORIGIN,
+            headers={
+                "X-Real-IP": "198.51.100.7",
+                "X-Forwarded-For": value,
+                "X-Forwarded-Proto": "http",
+            },
+        ) as client:
+            response = await client.post(
+                "/api/admin/setup", json={"password": "short"}
+            )
+            statuses.append(response.status_code)
+
+    assert statuses == [422, 422, 422, 422, 429]
+
+    # Another observed client keeps an independent bucket.
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin=ORIGIN,
+        headers={
+            "X-Real-IP": "203.0.113.9",
+            "X-Forwarded-For": "6.6.6.6",
+            "X-Forwarded-Proto": "http",
+        },
+    ) as other:
+        fresh = await other.post("/api/admin/setup", json={"password": "short"})
+    assert fresh.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_trusted_external_proxy_hop_decides_client_and_scheme(
+    tmp_path: Path,
+) -> None:
+    """When the hop nginx observed is an explicitly trusted external proxy,
+    its forwarded chain picks the client (right-most untrusted hop) and its
+    upstream scheme claim decides https."""
+    app = build_app(tmp_path, trusted_proxy_cidrs="10.0.0.0/8, 127.0.0.1/32")
+
+    # Rate-limit probes first, while first-run is still open: each weak
+    # attempt must count against the client behind the trusted proxy.
+    forged = ["6.6.6.6", "192.0.2.77", "203.0.113.50", "198.51.100.200", "192.0.2.200"]
+    statuses = []
+    for value in forged:
+        async with api_client(
+            app,
+            peer=("127.0.0.1", 41000),
+            origin=ORIGIN,
+            headers={
+                "X-Real-IP": "10.0.0.5",
+                "X-Forwarded-For": f"{value}, 203.0.113.9, 10.0.0.5",
+                "X-Forwarded-Proto": "http",
+            },
+        ) as client:
+            response = await client.post(
+                "/api/admin/setup", json={"password": "short"}
+            )
+            statuses.append(response.status_code)
+    # Locked on the client behind the trusted proxy (203.0.113.9), never on
+    # the forged entries that sit to its left.
+    assert statuses == [422, 422, 422, 422, 429]
+
+    # Now create the administrator from a different (unlocked) scope and
+    # sign in through the trusted hop: its scheme claim decides https.
+    async with api_client(app) as client:
+        await setup_admin(client)
+
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin="https://vysion.test",
+        headers={
+            "X-Real-IP": "10.0.0.5",
+            "X-Forwarded-For": "203.0.113.9, 10.0.0.5",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Client-Proto": "https",
+        },
+    ) as proxied:
+        login = await proxied.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+    assert login.status_code == 200, login.text
+    assert cookie_flags(login.headers["set-cookie"])["secure"] is True
+
+
+@pytest.mark.asyncio
+async def test_untrusted_hop_cannot_claim_https_through_the_client_proto(
+    tmp_path: Path,
+) -> None:
+    """X-Forwarded-Client-Proto is the upstream claim: only a hop inside the
+    trusted CIDRs may make it count. A direct client stays plain http."""
+    app = build_app(tmp_path)
+    async with api_client(app) as client:
+        await setup_admin(client)
+
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin="https://vysion.test",
+        headers={
+            "X-Real-IP": "198.51.100.9",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Client-Proto": "https",
+        },
+    ) as direct:
+        refused = await direct.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+    assert refused.status_code == 403
+
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin=ORIGIN,
+        headers={
+            "X-Real-IP": "198.51.100.9",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Client-Proto": "https",
+        },
+    ) as direct:
+        plain = await direct.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+    assert plain.status_code == 200
+    assert "secure" not in cookie_flags(plain.headers["set-cookie"])
+
+
+# ---------------------------------------------------------------------------
 # Account management
 # ---------------------------------------------------------------------------
 
@@ -692,7 +846,7 @@ async def test_recovery_sends_a_single_use_token_and_resets_the_password(
     tmp_path: Path,
 ) -> None:
     mailer = RecordingMailer()
-    app = build_app(tmp_path, mailer=mailer)
+    app = build_app(tmp_path, mailer=mailer, public_origin=ORIGIN)
     async with api_client(app) as client:
         await setup_admin(client)
 
@@ -752,7 +906,7 @@ async def test_recovery_request_answers_uniformly_and_is_rate_limited(
     tmp_path: Path,
 ) -> None:
     mailer = RecordingMailer()
-    app = build_app(tmp_path, mailer=mailer)
+    app = build_app(tmp_path, mailer=mailer, public_origin=ORIGIN)
     async with api_client(app) as admin:
         await setup_admin(admin)
     app.state.state_store.set_smtp_config(
@@ -799,7 +953,7 @@ async def test_recovery_confirmation_is_rate_limited(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_recovery_never_leaks_state_over_public_endpoints(tmp_path: Path) -> None:
-    app = build_app(tmp_path)
+    app = build_app(tmp_path, public_origin=ORIGIN)
     async with api_client(app) as admin:
         await setup_admin(admin)
     app.state.state_store.set_smtp_config(
@@ -818,6 +972,88 @@ async def test_recovery_never_leaks_state_over_public_endpoints(tmp_path: Path) 
     assert status.json()["recovery_enabled"] is True
     assert "write-only-secret" not in status.text
     assert "operator@internal.example" not in status.text
+
+
+@pytest.mark.asyncio
+async def test_recovery_request_refuses_a_poisoned_host_header(
+    tmp_path: Path,
+) -> None:
+    """Review finding: neither the exact-Origin check nor the emailed reset
+    link may derive their authority from the caller-controlled Host header.
+    The configured public origin is the only authority."""
+    mailer = RecordingMailer()
+    app = build_app(tmp_path, mailer=mailer, public_origin="https://vysion.test")
+    async with api_client(app) as client:
+        created = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": "https://vysion.test"},
+        )
+    assert created.status_code == 201, created.text
+    app.state.state_store.set_smtp_config(
+        host="smtp.internal.example",
+        port=587,
+        from_address="vysion@internal.example",
+        starttls=True,
+        recovery_email="operator@internal.example",
+    )
+
+    async with api_client(app) as client:
+        poisoned = await client.post(
+            "/api/admin/recovery/request",
+            headers={"Host": "attacker.example", "Origin": "https://attacker.example"},
+        )
+        right_origin_wrong_host = await client.post(
+            "/api/admin/recovery/request",
+            headers={"Host": "attacker.example", "Origin": "https://vysion.test"},
+        )
+
+    # Every unapproved authority is refused before a token can exist.
+    assert poisoned.status_code == 403
+    assert right_origin_wrong_host.status_code == 403
+    assert len(mailer.messages) == 0
+
+    async with api_client(app) as client:
+        approved = await client.post(
+            "/api/admin/recovery/request",
+            headers={"Host": "vysion.test", "Origin": "https://vysion.test"},
+        )
+
+    assert approved.status_code == 200, approved.text
+    assert len(mailer.messages) == 1
+    body = mailer.messages[0]["body"]
+    assert "https://vysion.test/admin/reset?token=" in body
+    assert "attacker.example" not in body
+
+
+@pytest.mark.asyncio
+async def test_recovery_is_unavailable_without_a_configured_public_origin(
+    tmp_path: Path,
+) -> None:
+    """Without an authoritative origin there is no address a reset link could
+    safely be built from: recovery fails closed and sends nothing, while the
+    status endpoint stops advertising it."""
+    mailer = RecordingMailer()
+    app = build_app(tmp_path, mailer=mailer)
+    async with api_client(app) as client:
+        await setup_admin(client)
+    app.state.state_store.set_smtp_config(
+        host="smtp.internal.example",
+        port=587,
+        from_address="vysion@internal.example",
+        starttls=True,
+        recovery_email="operator@internal.example",
+    )
+
+    async with api_client(app) as client:
+        status = await client.get("/api/admin/status")
+        requested = await client.post(
+            "/api/admin/recovery/request", headers={"Origin": ORIGIN}
+        )
+
+    assert status.json()["recovery_enabled"] is False
+    assert requested.status_code == 503
+    assert mailer.messages == []
 
 
 # ---------------------------------------------------------------------------
@@ -855,6 +1091,19 @@ def test_corrupt_state_fails_closed_before_any_route_can_reopen_first_run(
     state = tmp_path / "state"
     state.mkdir(parents=True, exist_ok=True)
     (state / "vysion-state.db").write_bytes(b"definitely not a database\n")
+
+    with pytest.raises(StateError):
+        build_app(tmp_path, state_directory=state)
+
+
+def test_present_but_empty_state_never_reopens_anonymous_enrollment(
+    tmp_path: Path,
+) -> None:
+    """Review probe: a pre-existing zero-byte SQLite file must refuse the
+    whole application instead of reading as ``setup_required=True``."""
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "vysion-state.db").write_bytes(b"")
 
     with pytest.raises(StateError):
         build_app(tmp_path, state_directory=state)

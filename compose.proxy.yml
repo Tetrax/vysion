@@ -1,29 +1,33 @@
-# Standalone deployment: this container terminates TLS itself with the
-# certificate imported through the administrator UI (PEM/PKCS#12) and
-# serves HTTPS on 443. The loopback plaintext port stays only for the
-# container healthcheck. Render with the immutable image digest:
+# Mode VM : Docker derrière un reverse proxy externe qui termine HTTPS.
+# Aucun certificat n'est embarqué (le conteneur sert en HTTP clair sur
+# 8080), aucun chemin hôte, aucune IP, aucun domaine ni subnet ne sont
+# imposés : TRUSTED_PROXY_CIDRS décrit explicitement les seules sources
+# dont l'application accepte les en-têtes X-Forwarded-* transmis, et
+# PUBLIC_ORIGIN fixe l'origine publique de référence (mutations admin et
+# liens de récupération).
 #
-#   IMAGE_DIGEST=sha256:<64 hex> VYSION_TLS_HOSTNAME=vysion.example.com \
-#     docker compose -f compose.standalone.yml config
+#   IMAGE_DIGEST=sha256:<64 hex> \
+#     TRUSTED_PROXY_CIDRS=127.0.0.1/32,10.0.0.0/8 \
+#     docker compose -f compose.proxy.yml config
+#
+# Sans TRUSTED_PROXY_CIDRS la pile refuse de se résoudre : la confiance
+# proxy ne se déduit jamais d'une valeur par défaut silencieuse.
 services:
   vysion:
     image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
     restart: unless-stopped
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}:8080"
     environment:
       VYSION_REPORT_DIRECTORY: /app/data/reports
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
       VYSION_MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-5242880}
       VYSION_FORTIGUARD_STATUS_URL: ${FORTIGUARD_STATUS_URL:-https://www.fortiguard.com/}
-      VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
+      VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?set TRUSTED_PROXY_CIDRS to the CIDR list of the external reverse proxy, e.g. 127.0.0.1/32,10.0.0.0/8}
       VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
-      VYSION_TLS_BACKEND: local
-      VYSION_TLS_HOSTNAME: ${VYSION_TLS_HOSTNAME:?set VYSION_TLS_HOSTNAME to the DNS name this instance serves}
     volumes:
       - vysion-reports:/app/data/reports
       - vysion-state:/app/data/state
-      - vysion-certs:/app/certs
     tmpfs:
       - /tmp:size=32m,mode=1777
       - /var/run:size=1m,uid=10001,gid=10001,mode=755
@@ -49,6 +53,3 @@ volumes:
   vysion-state:
     external: true
     name: ${VYSION_VOLUME_PREFIX:-}vysion-state
-  vysion-certs:
-    external: true
-    name: ${VYSION_VOLUME_PREFIX:-}vysion-certs

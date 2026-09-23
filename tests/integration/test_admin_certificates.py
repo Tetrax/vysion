@@ -54,6 +54,9 @@ def build_app(tmp_path: Path, *, reloader=None, smoker=None, settings=None):
             certs_directory=tmp_path / "certs",
             tls_backend="local",
             tls_hostname=HOSTNAME,
+            # Pin the authority to what this test client sends: the derived
+            # origin would be https://<tls_hostname> and refuse http://vysion.test.
+            public_origin=ORIGIN,
         )
     return create_app(
         settings=settings,

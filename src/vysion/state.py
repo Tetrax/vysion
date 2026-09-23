@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import secrets
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -25,6 +26,11 @@ from vysion.storage.reports import Clock, utc_now
 DATABASE_NAME = "vysion-state.db"
 DIRECTORY_MODE = 0o700
 DATABASE_MODE = 0o600
+# A database file that already exists must carry a Vysion schema. The only
+# tolerated "not yet" state is the instant another process is initializing
+# the file it just created: wait for its commit, bounded, then fail closed.
+EXISTING_STATE_WAIT_SECONDS = 3.0
+EXISTING_STATE_POLL_SECONDS = 0.02
 
 
 class StateError(RuntimeError):
@@ -79,8 +85,10 @@ class StateStore:
         except OSError as exc:
             raise StateError("state directory is unavailable") from exc
         self._path = self._directory / DATABASE_NAME
-        self._create_database_file()
+        created_by_us = self._create_database_file()
         try:
+            if not created_by_us:
+                self._require_existing_vysion_schema()
             with self._connection() as connection:
                 self._migrate(connection)
             self.purge_expired_sessions()
@@ -124,20 +132,65 @@ class StateStore:
             raise StateError("state database has no schema version")
         return int(row["value"])
 
-    def _create_database_file(self) -> None:
+    def _create_database_file(self) -> bool:
+        """Create the database exclusively; True only for the creating call."""
         if self._path.exists():
             try:
                 self._path.chmod(DATABASE_MODE)
             except OSError as exc:
                 raise StateError("state database permissions are unusable") from exc
-            return
+            return False
         try:
             descriptor = os.open(self._path, os.O_RDWR | os.O_CREAT | os.O_EXCL, DATABASE_MODE)
         except FileExistsError:
-            return
+            return False
         except OSError as exc:
             raise StateError("state database cannot be created") from exc
         os.close(descriptor)
+        return True
+
+    def _existing_schema_version(self) -> int | None:
+        """Read-only probe of the schema version of an already-present file."""
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                f"file:{self._path.resolve().as_posix()}?mode=ro", uri=True, timeout=5.0
+            )
+            row = connection.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        finally:
+            if connection is not None:
+                connection.close()
+        if row is None:
+            return None
+        try:
+            return int(row[0])
+        except (TypeError, ValueError):
+            return None
+
+    def _require_existing_vysion_schema(self) -> None:
+        """A present database must be a Vysion state database, full stop.
+
+        Only a genuinely absent file may initialize the schema. A zero-byte
+        file, a foreign SQLite database or any present-but-uninitialized
+        state fails closed: it can never read as \"no administrator yet\" and
+        therefore never reopens anonymous first-run enrollment. The bounded
+        wait exists solely for the process that created the file microseconds
+        ago and has not committed its schema yet (first-run race).
+        """
+        deadline = time.monotonic() + EXISTING_STATE_WAIT_SECONDS
+        while True:
+            version = self._existing_schema_version()
+            if version is not None and version >= 1:
+                return
+            if time.monotonic() >= deadline:
+                raise StateError(
+                    "state database exists but is not a Vysion state database"
+                )
+            time.sleep(EXISTING_STATE_POLL_SECONDS)
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

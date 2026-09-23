@@ -94,6 +94,79 @@ def test_trusted_proxy_rejects_invalid_configuration() -> None:
         TrustedProxy.parse("not-an-address")
 
 
+def test_resolve_trusts_the_hop_our_nginx_observed_over_a_forged_chain() -> None:
+    trusted = TrustedProxy.parse("127.0.0.1/32, 10.0.0.0/8")
+
+    # Direct client of the bundled nginx: X-Real-IP is the hop nginx itself
+    # observed ($remote_addr), so a forged X-Forwarded-For never selects the
+    # client bucket and never buys a fresh rate-limit scope.
+    client, scheme = trusted.resolve(
+        "127.0.0.1",
+        real_ip="198.51.100.7",
+        forwarded_for="6.6.6.6",
+        local_proto="http",
+        client_proto="https",
+        fallback="http",
+    )
+    assert client == "198.51.100.7"
+    # The client is outside every trusted network: its scheme claim is dead.
+    assert scheme == "http"
+
+    # An explicitly trusted external proxy in front of the nginx: the chain
+    # it forwarded decides the client (right-most hop outside the trusted
+    # set), and its upstream scheme claim is honoured.
+    client, scheme = trusted.resolve(
+        "127.0.0.1",
+        real_ip="10.0.0.5",
+        forwarded_for="6.6.6.6, 203.0.113.9, 10.0.0.5",
+        local_proto="http",
+        client_proto="https",
+        fallback="http",
+    )
+    assert client == "203.0.113.9"
+    assert scheme == "https"
+
+    # A blank claim or a blank local truth never becomes a scheme.
+    _client, scheme = trusted.resolve(
+        "127.0.0.1",
+        real_ip="198.51.100.7",
+        local_proto="  ",
+        client_proto="",
+        fallback="",
+    )
+    assert scheme == "http"
+
+    # No forwarded header at all: the loopback peer itself is the hop.
+    client, scheme = trusted.resolve("127.0.0.1", fallback="http")
+    assert client is None  # falls back to the peer in the caller
+    assert scheme == "http"
+
+    # The local nginx truth (its own $scheme) still applies for a direct
+    # client: the standalone terminator says https on 443.
+    client, scheme = trusted.resolve(
+        "127.0.0.1", real_ip="198.51.100.7", local_proto="https", fallback="http"
+    )
+    assert client == "198.51.100.7"
+    assert scheme == "https"
+
+    # A non-loopback direct peer keeps the strict behaviour: nothing is
+    # believed unless that peer is itself an explicitly trusted proxy.
+    assert trusted.resolve("198.51.100.9", local_proto="https", fallback="http") == (
+        None,
+        "http",
+    )
+    assert trusted.resolve(
+        "10.0.0.5",
+        forwarded_for="6.6.6.6, 203.0.113.9",
+        local_proto="https",
+        fallback="http",
+    ) == ("203.0.113.9", "https")
+    # An unusable chain is never half-believed.
+    assert trusted.resolve(
+        "10.0.0.5", forwarded_for="6.6.6.6, not-an-ip", fallback="http"
+    ) == (None, "http")
+
+
 def test_origin_value_is_exact_scheme_authority() -> None:
     assert origin_header_value("https", "vysion.valdev.me") == "https://vysion.valdev.me"
     assert origin_header_value("http", "127.0.0.1:18080") == "http://127.0.0.1:18080"

@@ -24,7 +24,18 @@ SESSION_TTL_SECONDS = 43_200
 CSRF_HEADER_NAME = "x-csrf-token"
 FORWARDED_PROTO_HEADER = "x-forwarded-proto"
 FORWARDED_FOR_HEADER = "x-forwarded-for"
+# Set by the bundled nginx only: the hop it observed ($remote_addr) and the
+# scheme its upstream claimed ($http_x_forwarded_proto, honoured solely when
+# the observed hop is an explicitly trusted proxy).
+REAL_IP_HEADER = "x-real-ip"
+FORWARDED_CLIENT_PROTO_HEADER = "x-forwarded-client-proto"
 ALLOWED_FORWARDED_SCHEMES = frozenset({"http", "https"})
+# uvicorn binds loopback and only the bundled nginx (or a local process)
+# talks to it: a loopback peer means "these headers come from our nginx".
+LOOPBACK_NETWORKS = (
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
 
 
 def _encode(value: bytes) -> str:
@@ -126,7 +137,20 @@ def session_cookie(
 
 
 class TrustedProxy:
-    """Forwarded headers are only believed from explicitly trusted peers."""
+    """Forwarded headers are only believed from explicitly trusted peers.
+
+    Two frames exist:
+
+    * a **loopback peer** is the bundled nginx (uvicorn binds loopback, so
+      nobody else reaches it directly). Its ``X-Real-IP`` is the hop nginx
+      itself observed — authoritative over anything a client put in
+      ``X-Forwarded-For``. The client chain and the upstream scheme claim
+      (``X-Forwarded-Client-Proto``) are believed only when that observed
+      hop is itself inside the configured trusted CIDRs; otherwise the
+      observed hop *is* the client and nginx's own ``$scheme`` decides.
+    * any other peer must itself be an explicitly trusted proxy before a
+      single forwarded value is read; everything else keeps the local truth.
+    """
 
     def __init__(self, networks: tuple[Any, ...]) -> None:
         self._networks = networks
@@ -146,6 +170,25 @@ class TrustedProxy:
                 raise ValueError(f"invalid trusted proxy CIDR: {candidate}") from exc
         return cls(tuple(networks))
 
+    @staticmethod
+    def _address(value: str | None) -> str | None:
+        """Return the value when it parses as an IP address, else None."""
+        if not value:
+            return None
+        try:
+            ipaddress.ip_address(value.strip())
+        except ValueError:
+            return None
+        return value.strip()
+
+    @classmethod
+    def _is_loopback(cls, address: str | None) -> bool:
+        parsed = cls._address(address)
+        if parsed is None:
+            return False
+        candidate = ipaddress.ip_address(parsed)
+        return any(candidate in network for network in LOOPBACK_NETWORKS)
+
     def _is_trusted(self, address: str | None) -> bool:
         if not address:
             return False
@@ -154,6 +197,73 @@ class TrustedProxy:
         except ValueError:
             return False
         return any(parsed in network for network in self._networks)
+
+    def _chain(self, forwarded: str | None) -> list[str] | None:
+        """Parsed hops, or None when any entry is unusable (never half-believe)."""
+        if not forwarded:
+            return []
+        hops: list[str] = []
+        for part in forwarded.split(","):
+            candidate = self._address(part)
+            if candidate is None:
+                return None
+            hops.append(candidate)
+        return hops
+
+    @staticmethod
+    def _scheme_value(value: str | None) -> str | None:
+        if value is None:
+            return None
+        candidate = value.strip().lower()
+        return candidate if candidate in ALLOWED_FORWARDED_SCHEMES else None
+
+    def resolve(
+        self,
+        peer: str | None,
+        *,
+        real_ip: str | None = None,
+        forwarded_for: str | None = None,
+        local_proto: str | None = None,
+        client_proto: str | None = None,
+        fallback: str = "http",
+    ) -> tuple[str | None, str]:
+        """Resolve (client, scheme) for one request. See the class docstring.
+
+        The returned client is None when no untrusted hop could be proven;
+        callers fall back to the peer itself (a shared, fail-closed bucket).
+        """
+        truth = fallback if fallback in ALLOWED_FORWARDED_SCHEMES else "http"
+        if self._is_loopback(peer):
+            chain = self._chain(forwarded_for)
+            observed = self._address(real_ip)
+            if observed is None and chain:
+                observed = chain[-1]
+            if observed is None:
+                observed = self._address(peer)
+            if observed is None:  # pragma: no cover - loopback peer parses
+                return None, truth
+            if self._is_trusted(observed):
+                # A trusted external proxy speaks for the client behind it.
+                client: str | None = None
+                if chain:
+                    for hop in reversed(chain):
+                        if not self._is_trusted(hop):
+                            client = hop
+                            break
+                scheme = (
+                    self._scheme_value(client_proto)
+                    or self._scheme_value(local_proto)
+                    or truth
+                )
+                return client, scheme
+            # Direct client of the bundled nginx: what nginx observed is the
+            # client, and nothing the client forwarded may be believed —
+            # only nginx's own local scheme decides.
+            return observed, self._scheme_value(local_proto) or truth
+        # No bundled nginx in front: an untrusted direct peer gets nothing.
+        return self.client_ip(peer, forwarded_for), self.scheme(
+            peer, local_proto, fallback=fallback
+        )
 
     def client_ip(self, peer: str | None, forwarded: str | None) -> str | None:
         """Right-most hop outside the trusted set, only from a trusted peer."""

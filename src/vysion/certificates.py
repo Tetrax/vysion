@@ -485,13 +485,22 @@ class CertificateStore:
         leaf_path.write_bytes(ordered[0])
         leaf_path.chmod(0o600)
         if len(ordered) == 1:
-            # A lone certificate must be self-signed to be servable as a chain.
+            # A lone certificate must be self-signed to be servable as a
+            # chain: no partial chain here, so a CA-issued leaf without any
+            # issuer stays refused.
             ca_path = leaf_path
+            partial: tuple[str, ...] = ()
         else:
             ca_path = build / "verify-ca.pem"
             ca_path.write_bytes(b"".join(ordered[1:]))
             ca_path.chmod(0o600)
-        result = self._run("verify", "-CAfile", str(ca_path), str(leaf_path))
+            # A served fullchain stops at the last intermediate: the root
+            # lives in the clients' trust stores, not in the bundle. Any
+            # supplied certificate may anchor the chain (partial chain), but
+            # every signature up to it must still verify — an unrelated or
+            # broken chain keeps failing.
+            partial = ("-partial_chain",)
+        result = self._run("verify", "-CAfile", str(ca_path), *partial, str(leaf_path))
         if result.returncode != 0:
             output = (result.stdout + result.stderr).decode("utf-8", "replace")
             detail = next(
