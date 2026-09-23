@@ -75,21 +75,27 @@ Trois piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans 
 
 | Mode | Pile | TLS | `VYSION_TLS_HOSTNAME` | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
 | --- | --- | --- | --- | --- | --- |
-| VPS / Portainer (production) | `compose.yml` | terminé par le Nginx de l'hôte | — | défaut `127.0.0.1/32` (hôte) | optionnel |
-| Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | optionnel |
-| VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | recommandé |
+| VPS / Portainer (production) | `compose.yml` | terminé par le Nginx de l'hôte | — | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** (cf. `docs/OPERATIONS.md`) | **requis pour l'admin** (503 sinon) |
+| Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | dérivée de `VYSION_TLS_HOSTNAME` |
+| VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | **requis pour l'admin** (503 sinon) |
 
 - `TRUSTED_PROXY_CIDRS` décrit les seules sources dont l'application accepte
   les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) : résolution unique
   dans `vysion.security.TrustedProxy.resolve`, avec le Nginx interne qui
   rejette et complète ces en-têtes avant l'application et uvicorn qui tourne
   sans confiance forwarded. Sans cette variable, `compose.proxy.yml` refuse
-  de se résoudre.
-- `PUBLIC_ORIGIN` fixe l'origine publique de référence : toute mutation
-  `/api/admin/*` doit arriver avec `Origin`/`Host` exacts (sinon 403,
-  l'origine n'étant jamais dérivée d'un `Host` attaquant) et la demande de
-  récupération SMTP est refusée en 503 tant que l'origine n'est pas
-  configurée — aucun lien n'est fabriqué depuis un en-tête contrôlable.
+  de se résoudre. En mode VPS, une requête qui arrive par le port publié est
+  observée depuis la **passerelle du bridge Docker** (jamais depuis
+  `127.0.0.1`) : renseignez-la avec ce hop réellement observé — la pile
+  n'impose aucun subnet — sinon le `https` déclaré par le Nginx hôte est
+  ignoré et le cookie de session n'est pas `Secure`.
+- `PUBLIC_ORIGIN` est l'autorité de toute mutation `/api/admin/*` : `Origin`
+  et `Host` exacts sont exigés (sinon 403, l'origine n'étant jamais dérivée
+  d'un `Host` attaquant) et, sans origine configurée, **aucune mutation
+  n'a lieu** — setup, connexion, récupération et certificats renvoient 503,
+  aucun lien n'étant fabriqué depuis un en-tête contrôlable. En standalone,
+  l'origine est dérivée de `VYSION_TLS_HOSTNAME` (port 443 implicite) ;
+  changez le port public, définissez `PUBLIC_ORIGIN` avec son port.
 - `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms des volumes externes
   pour que validations et smokes n'utilisent jamais les volumes de
   production ; avec le défaut vide les noms restent `vysion-reports`,
@@ -98,7 +104,10 @@ Trois piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans 
 Les trois piles déclarent les mêmes volumes externes (créés une fois par
 `docker volume create`, voir `docs/OPERATIONS.md`) et la sauvegarde manuelle
 coupe de façon cohérente les conteneurs qui les montent
-(`scripts/backup.sh`), avec restauration testée sur volumes jetables.
+(`scripts/backup.sh`), avec restauration testée sur volumes jetables :
+`scripts/restore.sh` lit ses archives avec `VYSION_BACKUP_PREFIX` (le préfixe
+de la sauvegarde, vide pour la production) et écrit ses volumes avec
+`VYSION_VOLUME_PREFIX`, et échoue si aucune archive attendue n'est trouvée.
 
 ## Développement local
 

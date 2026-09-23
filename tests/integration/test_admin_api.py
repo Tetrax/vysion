@@ -119,7 +119,10 @@ def build_app(
     clock=None,
     mailer=None,
     state_directory: Path | None = None,
-    public_origin: str | None = None,
+    # Every admin mutation now needs an authoritative public origin, so the
+    # fixture pins one by default (the authority the client sends). A test
+    # that wants the unconfigured mode passes public_origin="" explicitly.
+    public_origin: str | None = ORIGIN,
     trusted_proxy_cidrs: str | None = None,
 ):
     overrides: dict[str, str] = {}
@@ -140,9 +143,11 @@ def build_app(
     )
 
 
-async def setup_admin(client: httpx.AsyncClient, password: str = STRONG_PASSWORD):
+async def setup_admin(
+    client: httpx.AsyncClient, password: str = STRONG_PASSWORD, *, origin: str = ORIGIN
+):
     response = await client.post(
-        "/api/admin/setup", json={"password": password}, headers={"Origin": ORIGIN}
+        "/api/admin/setup", json={"password": password}, headers={"Origin": origin}
     )
     assert response.status_code == 201, response.text
     return response
@@ -497,12 +502,109 @@ async def test_unauthenticated_mutations_still_require_an_exact_origin(
 
 
 @pytest.mark.asyncio
+async def test_admin_mutations_fail_closed_without_an_authoritative_origin(
+    tmp_path: Path,
+) -> None:
+    """Review round-2 finding 1: PUBLIC_ORIGIN empty is the documented
+    VPS/proxy default, and no mutation may then derive its authority from the
+    caller-controlled Host. Setup, login and recovery are refused outright
+    and first-run never opens under an arbitrary name (DNS rebinding or a
+    permissive Host route)."""
+    app = build_app(tmp_path, public_origin="")
+
+    async with api_client(app) as client:
+        setup = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        poisoned = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={
+                "Host": "attacker.invalid",
+                "Origin": "https://attacker.invalid",
+            },
+        )
+        login = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        recovery = await client.post(
+            "/api/admin/recovery/request", headers={"Origin": ORIGIN}
+        )
+        status = await client.get("/api/admin/status")
+
+    assert setup.status_code == 503
+    assert poisoned.status_code == 503
+    assert login.status_code == 503
+    assert recovery.status_code == 503
+    # First-run stayed closed: nothing exists under an unapproved authority.
+    assert status.json()["setup_required"] is True
+    assert status.json()["authenticated"] is False
+    assert app.state.state_store.has_admin() is False
+
+
+@pytest.mark.asyncio
+async def test_setup_and_login_refuse_an_unapproved_authority(
+    tmp_path: Path,
+) -> None:
+    """Review round-2 finding 1: even with an authority configured, no
+    mutation proceeds under a Host/Origin pair that authority does not
+    approve — the first-run cannot be completed and an existing account
+    cannot be signed in from one."""
+    app = build_app(tmp_path, public_origin="https://vysion.test")
+
+    async with api_client(app) as client:
+        poisoned = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={
+                "Host": "attacker.invalid",
+                "Origin": "https://attacker.invalid",
+            },
+        )
+        right_origin_wrong_host = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={"Host": "attacker.invalid", "Origin": "https://vysion.test"},
+        )
+        status = await client.get("/api/admin/status")
+        created = await client.post(
+            "/api/admin/setup",
+            json={"password": STRONG_PASSWORD},
+            headers={"Host": "vysion.test", "Origin": "https://vysion.test"},
+        )
+
+    assert poisoned.status_code == 403
+    assert right_origin_wrong_host.status_code == 403
+    assert status.json()["setup_required"] is True
+    assert created.status_code == 201, created.text
+
+    async with api_client(app) as client:
+        login_refused = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Host": "attacker.invalid", "Origin": "https://vysion.test"},
+        )
+        login = await client.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Host": "vysion.test", "Origin": "https://vysion.test"},
+        )
+
+    assert login_refused.status_code == 403
+    assert login.status_code == 200, login.text
+
+
+@pytest.mark.asyncio
 async def test_forwarded_headers_are_only_honoured_from_a_trusted_peer(
     tmp_path: Path,
 ) -> None:
-    app = build_app(tmp_path)
-    async with api_client(app) as admin:
-        await setup_admin(admin)
+    app = build_app(tmp_path, public_origin="https://vysion.test")
+    async with api_client(app, origin="https://vysion.test") as admin:
+        await setup_admin(admin, origin="https://vysion.test")
 
     trusted = api_client(
         app,
@@ -522,24 +624,26 @@ async def test_forwarded_headers_are_only_honoured_from_a_trusted_peer(
     untrusted = api_client(
         app,
         peer=("198.51.100.9", 40000),
-        origin=ORIGIN,
+        origin="https://vysion.test",
         headers={"X-Forwarded-Proto": "https"},
     )
     async with untrusted:
-        ignored = await untrusted.post(
-            "/api/admin/login",
-            json={"password": STRONG_PASSWORD},
-            headers={"Origin": ORIGIN},
-        )
         claiming_https = await untrusted.post(
             "/api/admin/login",
             json={"password": STRONG_PASSWORD},
             headers={"Origin": "https://vysion.test"},
         )
-    assert ignored.status_code == 200
-    assert "secure" not in cookie_flags(ignored.headers["set-cookie"])
-    # The claimed https scheme is refused: the peer is not a trusted proxy.
-    assert claiming_https.status_code == 403
+        foreign_authority = await untrusted.post(
+            "/api/admin/login",
+            json={"password": STRONG_PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+    # The peer is outside the trusted CIDRs: its https claim is ignored, the
+    # connection stays plain http and the session cookie is never Secure.
+    assert claiming_https.status_code == 200
+    assert "secure" not in cookie_flags(claiming_https.headers["set-cookie"])
+    # A foreign authority is refused whether or not the peer is trusted.
+    assert foreign_authority.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -646,7 +750,11 @@ async def test_trusted_external_proxy_hop_decides_client_and_scheme(
     """When the hop nginx observed is an explicitly trusted external proxy,
     its forwarded chain picks the client (right-most untrusted hop) and its
     upstream scheme claim decides https."""
-    app = build_app(tmp_path, trusted_proxy_cidrs="10.0.0.0/8, 127.0.0.1/32")
+    app = build_app(
+        tmp_path,
+        public_origin="https://vysion.test",
+        trusted_proxy_cidrs="10.0.0.0/8, 127.0.0.1/32",
+    )
 
     # Rate-limit probes first, while first-run is still open: each weak
     # attempt must count against the client behind the trusted proxy.
@@ -656,7 +764,7 @@ async def test_trusted_external_proxy_hop_decides_client_and_scheme(
         async with api_client(
             app,
             peer=("127.0.0.1", 41000),
-            origin=ORIGIN,
+            origin="https://vysion.test",
             headers={
                 "X-Real-IP": "10.0.0.5",
                 "X-Forwarded-For": f"{value}, 203.0.113.9, 10.0.0.5",
@@ -673,8 +781,8 @@ async def test_trusted_external_proxy_hop_decides_client_and_scheme(
 
     # Now create the administrator from a different (unlocked) scope and
     # sign in through the trusted hop: its scheme claim decides https.
-    async with api_client(app) as client:
-        await setup_admin(client)
+    async with api_client(app, origin="https://vysion.test") as client:
+        await setup_admin(client, origin="https://vysion.test")
 
     async with api_client(
         app,
@@ -699,11 +807,14 @@ async def test_untrusted_hop_cannot_claim_https_through_the_client_proto(
     tmp_path: Path,
 ) -> None:
     """X-Forwarded-Client-Proto is the upstream claim: only a hop inside the
-    trusted CIDRs may make it count. A direct client stays plain http."""
+    trusted CIDRs may make it count. A direct client stays plain http — and
+    no forwarded claim may borrow a different public authority either."""
     app = build_app(tmp_path)
     async with api_client(app) as client:
         await setup_admin(client)
 
+    # Foreign authority (https is not the configured public origin): refused
+    # before the forwarded claim is read at all.
     async with api_client(
         app,
         peer=("127.0.0.1", 41000),
@@ -719,6 +830,8 @@ async def test_untrusted_hop_cannot_claim_https_through_the_client_proto(
         )
     assert refused.status_code == 403
 
+    # Approved authority, untrusted hop: the https claim still counts for
+    # nothing, so the connection truth (http) wins and the cookie is plain.
     async with api_client(
         app,
         peer=("127.0.0.1", 41000),
@@ -734,6 +847,77 @@ async def test_untrusted_hop_cannot_claim_https_through_the_client_proto(
         )
     assert plain.status_code == 200
     assert "secure" not in cookie_flags(plain.headers["set-cookie"])
+
+
+# ---------------------------------------------------------------------------
+# The VPS path: the hop the container observes is the Docker bridge gateway
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_vps_default_trust_leaves_the_cookie_insecure_behind_the_edge(
+    tmp_path: Path,
+) -> None:
+    """Review round-2 finding 2: a request that reaches the container over
+    the published Docker port is observed from the bridge gateway, not from
+    127.0.0.1. With the default trusted CIDR that hop is untrusted, the host
+    edge's https declaration is ignored and the session cookie is NOT
+    Secure — which is exactly why the VPS rollout must configure the
+    observed hop explicitly instead of trusting a default."""
+    app = build_app(tmp_path, public_origin="https://vysion.test")
+    async with api_client(app, origin="https://vysion.test") as client:
+        await setup_admin(client, origin="https://vysion.test")
+
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin="https://vysion.test",
+        headers={
+            "X-Real-IP": "172.31.77.1",  # the observed Docker bridge gateway
+            "X-Forwarded-Proto": "http",  # the container nginx's own scheme
+            "X-Forwarded-Client-Proto": "https",  # the host edge's declaration
+        },
+    ) as edge:
+        login = await edge.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+
+    assert login.status_code == 200, login.text
+    assert "secure" not in cookie_flags(login.headers["set-cookie"])
+
+
+@pytest.mark.asyncio
+async def test_vps_observed_docker_hop_trusted_yields_a_secure_cookie(
+    tmp_path: Path,
+) -> None:
+    """The documented VPS rollout sets TRUSTED_PROXY_CIDRS to the hop the
+    container actually observes — discovered at deploy time, never an
+    imposed subnet — so the host-terminated TLS edge yields a Secure
+    session cookie."""
+    app = build_app(
+        tmp_path,
+        public_origin="https://vysion.test",
+        trusted_proxy_cidrs="172.31.77.1/32",  # the observed hop, explicit
+    )
+    async with api_client(app, origin="https://vysion.test") as client:
+        await setup_admin(client, origin="https://vysion.test")
+
+    async with api_client(
+        app,
+        peer=("127.0.0.1", 41000),
+        origin="https://vysion.test",
+        headers={
+            "X-Real-IP": "172.31.77.1",
+            "X-Forwarded-Proto": "http",
+            "X-Forwarded-Client-Proto": "https",
+        },
+    ) as edge:
+        login = await edge.post(
+            "/api/admin/login", json={"password": STRONG_PASSWORD}
+        )
+
+    assert login.status_code == 200, login.text
+    assert cookie_flags(login.headers["set-cookie"])["secure"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -1034,9 +1218,10 @@ async def test_recovery_is_unavailable_without_a_configured_public_origin(
     safely be built from: recovery fails closed and sends nothing, while the
     status endpoint stops advertising it."""
     mailer = RecordingMailer()
-    app = build_app(tmp_path, mailer=mailer)
-    async with api_client(app) as client:
-        await setup_admin(client)
+    app = build_app(tmp_path, mailer=mailer, public_origin="")
+    # Without an authoritative origin the HTTP first-run itself is refused
+    # (503), so this scenario seeds the account directly in the private state.
+    assert app.state.state_store.create_admin(STRONG_PASSWORD) is True
     app.state.state_store.set_smtp_config(
         host="smtp.internal.example",
         port=587,

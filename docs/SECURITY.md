@@ -2,13 +2,13 @@
 
 ## Frontière d'exposition
 
-- seul Nginx écoute sur le port conteneur `8080`, en HTTP clair ;
-- le Nginx de l'hôte termine TLS pour `vysion.valdev.me` : aucun certificat ni clé dans le conteneur ;
+- en mode proxy hôte (VPS et VM), seul Nginx écoute sur le port conteneur `8080`, en HTTP clair, et le Nginx de l'hôte termine TLS pour `vysion.valdev.me` : aucun certificat ni clé dans le conteneur ;
+- en mode standalone, le Nginx du conteneur termine TLS sur `443` : le seul certificat possible dans le conteneur est alors celui importé depuis l'admin, rangé dans le volume `vysion-certs` ;
 - FastAPI écoute sur `127.0.0.1:8000` ;
-- le port hôte est lié à `${BIND_ADDRESS}:${HOST_PORT}` (`127.0.0.1` et `8080` par défaut), seul ingress de la pile ;
+- l'ingress est le bind de la pile active : `${BIND_ADDRESS}:${HOST_PORT}` (`127.0.0.1` et `8080` par défaut) en mode proxy hôte, `${BIND_ADDRESS}:${HTTPS_PORT:-443}` en standalone ;
 - aucune IP Docker statique et aucun réseau externe (`Subnet-Docker` supprimé) ;
 - l'image est référencée par digest OCI immuable `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : `IMAGE_DIGEST` (`sha256:<64 hex>`) est obligatoire, Compose ne rend que `ghcr.io/tetrax/vysion@${IMAGE_DIGEST}` (aucun tag n'est exprimable), Docker refuse toute référence malformée (`latest`, `sha-latest`, SHA court, hex majuscule ou non hexadécimale) à l'acquisition de l'image avant tout conteneur, le contrat CI exige `ghcr.io/tetrax/vysion@sha256:[0-9a-f]{64}` et la publication vérifie le lien avec le label `org.opencontainers.image.revision` ;
-- le volume `vysion-reports` est déclaré externe : la pile ne le crée ni ne le supprime ;
+- les trois volumes sont déclarés externes : la pile ne crée ni ne supprime `vysion-reports`, `vysion-state` ni `vysion-certs` ;
 - l'accès reste limité par le firewall externe du fournisseur VPS et la source réseau configurée.
 
 ## Défense en profondeur du conteneur
@@ -18,9 +18,9 @@
 - `cap_drop: ALL` ;
 - `no-new-privileges` ;
 - tmpfs bornés ;
-- volume unique pour les rapports ;
+- trois volumes externes séparés : `vysion-reports` (rapports UUID/TTL), `vysion-state` (état d'administration fail-closed) et `vysion-certs` (certificats, mode standalone uniquement) ;
 - limites CPU, mémoire et PID ;
-- configuration HTTP versionnée dans l'image, sans montage de configuration ni de certificat ;
+- configuration HTTP versionnée dans l'image, sans montage de configuration ; le seul certificat pouvant entrer dans le conteneur est celui du mode standalone, écrit dans le volume `vysion-certs` ;
 - aucun Node/Vite dans le runtime.
 
 ## HTTP
@@ -72,8 +72,13 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
 - **Confiance forwarded (règle unique)** : l'application ne croit `X-Forwarded-For`,
   `X-Forwarded-Proto`, `X-Forwarded-Client-Proto` et `X-Real-IP` que selon la
   résolution `vysion.security.TrustedProxy.resolve`, bornée par
-  `VYSION_TRUSTED_PROXY_CIDRS` (défaut `127.0.0.1/32`, **aucun défaut
-  silencieux** dans `compose.proxy.yml`). La couche interne est épinglée par
+  `VYSION_TRUSTED_PROXY_CIDRS` (défaut `127.0.0.1/32` — client local
+  uniquement, **aucun défaut silencieux** dans `compose.proxy.yml`). En mode
+  VPS, une requête qui arrive sur le port publié est observée depuis la
+  passerelle du bridge Docker (jamais depuis `127.0.0.1`) : ce hop doit être
+  ajouté explicitement au déploiement (aucun subnet n'est imposé), sinon le
+  schéma `https` de l'arête hôte est ignoré et le cookie de session n'est
+  pas `Secure`. La couche interne est épinglée par
   contrat : le Nginx du conteneur rejette les en-têtes transférés des clients
   au niveau `server`, réécrit `X-Real-IP` sur l'observation locale
   (`$remote_addr`), complète `X-Forwarded-For` (`$proxy_add_x_forwarded_for`),
@@ -84,10 +89,13 @@ FastAPI applique en plus sa propre limite en octets avant parsing métier.
   verrous par `X-Forwarded-For` forgé est comptée sur le client réellement
   observé, un client non digne de confiance ne peut pas déclarer `https`, et
   un proxy externe explicite transmet correctement chaîne et schéma.
-- **Origine publique** : `VYSION_PUBLIC_ORIGIN` est l'autorité de l'origine
-  (sinon, en standalone, elle est dérivée de `VYSION_TLS_HOSTNAME` et du port
-  d'écoute). Toute mutation `/api/admin/*` doit présenter `Origin` et `Host`
+- **Origine publique** : `VYSION_PUBLIC_ORIGIN` est l'**unique** autorité de
+  l'origine (en standalone elle est dérivée de `VYSION_TLS_HOSTNAME`, port
+  443 implicite : changez le port public, définissez `PUBLIC_ORIGIN` avec son
+  port). Toute mutation `/api/admin/*` doit présenter `Origin` et `Host`
   exacts — l'origine n'est jamais dérivée du `Host` attaquant — sinon 403
-  `origin_mismatch`. Sans origine configurée, la demande de récupération
-  SMTP renvoie 503 « récupération indisponible » et le lien n'est jamais
-  fabriqué depuis un en-tête contrôlable.
+  `origin_mismatch`. Sans origine configurée (défaut VPS/proxy), **aucune
+  mutation admin n'a lieu** : setup, connexion, récupération et certificats
+  renvoient 503 « origine publique non configurée », la première exécution
+  reste fermée, et le lien de récupération n'est jamais fabriqué depuis un
+  en-tête contrôlable.

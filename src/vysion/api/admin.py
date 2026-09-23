@@ -30,7 +30,6 @@ from vysion.security import (
     REAL_IP_HEADER,
     SESSION_COOKIE_NAME,
     TrustedProxy,
-    origin_header_value,
     session_cookie,
 )
 from vysion.state import SessionRecord, StateStore
@@ -67,6 +66,9 @@ PASSWORD_CONTRACT = "mot de passe refus\u00e9 : 12 \u00e0 1024 octets UTF-8"
 LOCKED = "trop de tentatives, r\u00e9essayez plus tard"
 GENERIC_CREDENTIALS = "identifiants invalides"
 BAD_ORIGIN = "origine de la requ\u00eate refus\u00e9e"
+NO_PUBLIC_ORIGIN = (
+    "origine publique non configur\u00e9e : mutations administrateur indisponibles"
+)
 MISSING_CSRF = "jeton CSRF absent ou invalide"
 AUTH_REQUIRED = "authentification requise"
 STATE_UNAVAILABLE = "\u00e9tat administrateur indisponible"
@@ -171,30 +173,26 @@ def _scheme(request: Request) -> str:
     return scheme
 
 
-def _host(request: Request) -> str:
-    return request.headers.get("host") or request.url.netloc
-
-
 def require_origin(request: Request) -> None:
-    """Exact-Origin check against the authoritative origin when one exists.
+    """Exact-Origin check against the authoritative public origin.
 
-    The configured (or standalone-derived) public origin is the only
-    authority: neither the Origin nor the Host header may pick it. Without a
-    configured origin — the default VPS/proxy mode, which cannot know its own
-    public name — the exact same-origin comparison against the authority this
-    request claims is kept, and callers that need an address to link to
-    (recovery) fail closed instead of falling back to Host.
+    The configured (or standalone-derived) ``public_origin`` is the ONE
+    authority an admin mutation may use — neither the Origin nor the
+    caller-controlled Host header may pick it. Without a configured origin
+    (the documented VPS/proxy default), every mutation fails closed with
+    503 instead of falling back to the authority this request claims: no
+    first-run, login, recovery or certificate action can ever complete
+    under an arbitrary name (DNS rebinding, permissive Host routing).
     """
-    origin = request.headers.get("origin")
     configured = _settings(request).public_origin
-    if configured:
-        authority = configured.split("://", 1)[1]
-        host = (request.headers.get("host") or "").strip().lower()
-        if origin is None or origin.strip().lower() != configured or host != authority:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_ORIGIN)
-        return
-    expected = origin_header_value(_scheme(request), _host(request))
-    if origin is None or origin.lower() != expected:
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=NO_PUBLIC_ORIGIN
+        )
+    authority = configured.split("://", 1)[1]
+    origin = request.headers.get("origin")
+    host = (request.headers.get("host") or "").strip().lower()
+    if origin is None or origin.strip().lower() != configured or host != authority:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=BAD_ORIGIN)
 
 

@@ -615,6 +615,25 @@ def test_readme_documents_the_three_modes_and_the_durable_volumes() -> None:
     assert "aucun certificat, aucune clé et aucun montage TLS dans le conteneur" not in (
         readme
     )
+    # Review round-2 finding 2: 127.0.0.1/32 is not "the host hop" in the
+    # VPS path — the rollout must name the Docker hop it actually observes.
+    assert "défaut `127.0.0.1/32` (hôte)" not in readme
+    # Review round-2 finding 1: PUBLIC_ORIGIN gates every admin mutation.
+    assert "503" in readme
+
+
+def test_restore_script_separates_source_archives_from_target_volumes() -> None:
+    """Review round-2 finding 3: restore.sh must read its archives with
+    VYSION_BACKUP_PREFIX (the prefix the backup was taken with) and write
+    its volumes with VYSION_VOLUME_PREFIX, so a production backup restores
+    onto prefixed disposable volumes — and an empty restore must fail."""
+    restore = (ROOT / "scripts/restore.sh").read_text()
+    assert "VYSION_BACKUP_PREFIX" in restore
+    assert "VYSION_VOLUME_PREFIX" in restore
+    assert "no expected archive" in restore
+    assert "exit 1" in restore
+    backup = (ROOT / "scripts/backup.sh").read_text()
+    assert "VYSION_BACKUP_PREFIX" in backup
 
 
 def test_operations_doc_covers_volume_prerequisites_modes_and_coherent_backup() -> None:
@@ -634,5 +653,10 @@ def test_operations_doc_covers_volume_prerequisites_modes_and_coherent_backup() 
         "volume jetable",
         "empreinte",
         "docker volume create vysion-smoke-",
+        # Review round-2 finding 3: the source archive names
+        # (VYSION_BACKUP_PREFIX) are independent from the target volume
+        # prefix (VYSION_VOLUME_PREFIX), and an empty restore must fail.
+        "vysion_backup_prefix",
+        "exit 1",
     ):
         assert marker in operations, marker

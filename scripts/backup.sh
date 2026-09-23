@@ -8,7 +8,10 @@
 #
 # VYSION_VOLUME_PREFIX carries the same meaning as in the compose files: it
 # lets validation/smoke stacks back up their own disjoint volumes without
-# ever touching the live ones.
+# ever touching the live ones. It prefixes BOTH the volumes that are read
+# and the archive names that are produced, which is why restore.sh takes it
+# back as VYSION_BACKUP_PREFIX (where the archives come from) separately
+# from VYSION_VOLUME_PREFIX (where they go).
 #
 # Usage: VYSION_VOLUME_PREFIX= scripts/backup.sh [destination-directory]
 set -eu
@@ -78,4 +81,5 @@ restart_containers
 trap - EXIT INT TERM
 
 echo "Backup complete: $output"
-echo "Restore with: VYSION_VOLUME_PREFIX=$prefix scripts/restore.sh $output"
+echo "Restore onto the same volumes:   VYSION_BACKUP_PREFIX=$prefix VYSION_VOLUME_PREFIX=$prefix scripts/restore.sh $output"
+echo "Control restore on disposable volumes: VYSION_BACKUP_PREFIX=$prefix VYSION_VOLUME_PREFIX=vysion-smoke-<stamp>- scripts/restore.sh $output"

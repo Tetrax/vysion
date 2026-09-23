@@ -333,6 +333,8 @@ async def test_activation_is_refused_outside_the_standalone_mode(
         report_directory=tmp_path / "reports",
         state_directory=tmp_path / "state",
         tls_backend="none",
+        # Every admin mutation needs an authoritative public origin now.
+        public_origin=ORIGIN,
     )
     app = build_app(tmp_path, settings=settings)
     async with api_client(app) as client:

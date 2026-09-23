@@ -180,7 +180,7 @@ def test_backup_quiesces_holders_and_restores_every_fingerprint(
     # ---------------------------------------------------------- restore
     result = _run(
         "scripts/restore.sh", str(archives[0]),
-        env={"VYSION_VOLUME_PREFIX": prefix},
+        env={"VYSION_VOLUME_PREFIX": prefix, "VYSION_BACKUP_PREFIX": prefix},
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -205,3 +205,99 @@ def test_backup_quiesces_holders_and_restores_every_fingerprint(
     assert check_store.has_admin() is True
     assert check_store.verify_password("a-coherent-backup-password") is True
     assert check_store.resolve_session(session_token) is not None
+
+
+def test_restore_refuses_a_directory_without_any_expected_archive(tmp_path: Path) -> None:
+    """Review round-2 finding 3: a control restore that finds no expected
+    archive must FAIL instead of printing 'Restore complete' with exit 0.
+
+    This path needs no docker at all: it fails before any volume exists."""
+    result = _run("scripts/restore.sh", str(tmp_path))
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "no expected archive" in result.stderr, result.stderr
+
+
+def test_restore_decouples_source_archives_from_the_target_volume_prefix(
+    tmp_path: Path,
+) -> None:
+    """Review round-2 finding 3: where the archives come from
+    (VYSION_BACKUP_PREFIX, the prefix the backup was taken with) and where
+    they go (VYSION_VOLUME_PREFIX) are two independent names. The documented
+    control path — a backup taken under one name, restored under another
+    prefix on disposable volumes — must come back with every fingerprint."""
+    _require_docker()
+    source_prefix = f"ci-src-{uuid.uuid4().hex[:8]}-"
+    target_prefix = f"ci-dst-{uuid.uuid4().hex[:8]}-"
+    second_prefix = f"ci-dst2-{uuid.uuid4().hex[:8]}-"
+    source_volumes = [f"{source_prefix}{base}" for base in ("vysion-state", "vysion-reports")]
+    target_volumes = [
+        f"{target_prefix}vysion-state",
+        f"{target_prefix}vysion-reports",
+        f"{second_prefix}vysion-state",
+        f"{second_prefix}vysion-reports",
+    ]
+    try:
+        for volume in source_volumes:
+            result = _run("docker", "volume", "create", volume)
+            assert result.returncode == 0, result.stderr
+
+        # Fingerprints: a real administration database and a report counter.
+        seed_state = tmp_path / "seed-state"
+        store = StateStore(seed_state)
+        assert store.create_admin("a-cross-prefix-password") is True
+        _write_bytes(
+            source_volumes[0], "vysion-state.db", (seed_state / "vysion-state.db").read_bytes()
+        )
+        _write_bytes(source_volumes[1], "counter.txt", b"7\n")
+        expected_state = _sha256(_cat_bytes(source_volumes[0], "vysion-state.db"))
+        expected_counter = _cat_bytes(source_volumes[1], "counter.txt")
+
+        # ONE backup, taken under the source prefix.
+        backup_dir = tmp_path / "backups"
+        result = _run(
+            "scripts/backup.sh", str(backup_dir),
+            env={"VYSION_VOLUME_PREFIX": source_prefix},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        archives = sorted(backup_dir.glob("vysion-*/"))
+        assert len(archives) == 1
+        assert (archives[0] / f"{source_prefix}vysion-state.tar.gz").is_file()
+
+        # (1) Restore under a DIFFERENT prefix: the source archives are
+        # found by their own name, the volumes written are the target ones.
+        result = _run(
+            "scripts/restore.sh", str(archives[0]),
+            env={
+                "VYSION_BACKUP_PREFIX": source_prefix,
+                "VYSION_VOLUME_PREFIX": target_prefix,
+            },
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Restore complete" in result.stdout, result.stdout
+        assert _sha256(_cat_bytes(f"{target_prefix}vysion-state", "vysion-state.db")) == (
+            expected_state
+        )
+        assert _cat_bytes(f"{target_prefix}vysion-reports", "counter.txt") == expected_counter
+
+        # (2) Production naming: a backup of the live volumes carries no
+        # prefix at all (vysion-state.tar.gz, ...). Same archives, renamed
+        # exactly as scripts/backup.sh writes them for the live names, must
+        # restore into a fresh disposable prefix with no source prefix set.
+        production_dir = tmp_path / "production"
+        production_dir.mkdir()
+        for archive in sorted(archives[0].glob("*.tar.gz")):
+            shutil.copy(archive, production_dir / archive.name.removeprefix(source_prefix))
+        assert (production_dir / "vysion-state.tar.gz").is_file()
+
+        result = _run(
+            "scripts/restore.sh", str(production_dir),
+            env={"VYSION_VOLUME_PREFIX": second_prefix},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _sha256(_cat_bytes(f"{second_prefix}vysion-state", "vysion-state.db")) == (
+            expected_state
+        )
+        assert _cat_bytes(f"{second_prefix}vysion-reports", "counter.txt") == expected_counter
+    finally:
+        for volume in target_volumes + source_volumes:
+            _run("docker", "volume", "rm", "-f", volume)

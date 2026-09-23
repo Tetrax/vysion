@@ -24,8 +24,8 @@
 | `BIND_ADDRESS` | IP publiée sur l'hôte (IP uniquement) | `127.0.0.1` |
 | `HOST_PORT` | port publié sur l'hôte (port uniquement) | `8080` en production, `18080` pendant la validation |
 | `VYSION_REVISION` | révision compilée dans l'image | renseignée par CI |
-| `TRUSTED_PROXY_CIDRS` | CIDRs des seuls proxies dont l'application accepte les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) | `127.0.0.1/32` (hôte) en `compose.yml` / `compose.standalone.yml` ; **obligatoire, sans défaut** dans `compose.proxy.yml` |
-| `PUBLIC_ORIGIN` | origine publique de référence (mutations `/api/admin/*` et liens de récupération) | vide : dérivée de `VYSION_TLS_HOSTNAME` en standalone ; sans valeur, la récupération par courriel reste refusée en 503 |
+| `TRUSTED_PROXY_CIDRS` | CIDRs des seules proxies dont l'application accepte les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) | défaut `127.0.0.1/32` (**client local uniquement**, ce n'est pas « l'hôte ») : en VPS, à renseigner explicitement avec le hop Docker observé — la requête publiée arrive depuis la passerelle du bridge, jamais depuis `127.0.0.1` — sans subnet imposé (voir « Modes TLS ») ; **obligatoire, sans défaut** dans `compose.proxy.yml` |
+| `PUBLIC_ORIGIN` | origine publique de référence : toute mutation `/api/admin/*` (setup, connexion, récupération, certificats) et liens de récupération | vide : dérivée de `VYSION_TLS_HOSTNAME` (port 443) en standalone ; sans valeur, **toute mutation admin est refusée en 503** — jamais dérivée du `Host` |
 | `VYSION_VOLUME_PREFIX` | préfixe des noms de volumes externes (isolation des validations et des smokes) | vide : noms stables `vysion-reports`, `vysion-state`, `vysion-certs` |
 
 `BIND_ADDRESS` et `HOST_PORT` sont indépendants : on ne change jamais l'IP pour changer le port.
@@ -145,9 +145,10 @@ ARCHIVE_DIR=$(ls -dt "$BACKUP_DIR"/vysion-* | head -1)
 sha256sum "$ARCHIVE_DIR"/*.tar.gz | tee "$ARCHIVE_DIR/SHA256SUMS"
 
 # restauration de contrôle sur des volumes jetables, jamais sur
-# vysion-reports / vysion-state / vysion-certs
+# vysion-reports / vysion-state / vysion-certs : les archives portent le
+# nom de la production (VYSION_BACKUP_PREFIX vide) et la cible est préfixée
 CHECK_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-VYSION_VOLUME_PREFIX="vysion-smoke-$CHECK_STAMP-" scripts/restore.sh "$ARCHIVE_DIR"
+VYSION_BACKUP_PREFIX= VYSION_VOLUME_PREFIX="vysion-smoke-$CHECK_STAMP-" scripts/restore.sh "$ARCHIVE_DIR"
 for base in vysion-reports vysion-state vysion-certs; do
   docker run --rm -v "vysion-smoke-$CHECK_STAMP-$base":/data alpine:3.20 \
     sh -c 'ls -la /data | head -20' || true
@@ -158,7 +159,7 @@ docker volume rm "vysion-smoke-$CHECK_STAMP-vysion-reports" \
   "vysion-smoke-$CHECK_STAMP-vysion-state" "vysion-smoke-$CHECK_STAMP-vysion-certs"
 ```
 
-**Gate G1** : l'archive existe, ses empreintes sha256 sont notées, et le contenu restauré sur les volumes jetables correspond aux empreintes d'origine. Sans ce test, la sauvegarde n'est pas considérée comme valide.
+**Gate G1** : l'archive existe, ses empreintes sha256 sont notées, et le contenu restauré sur les volumes jetables correspond aux empreintes d'origine. Sans ce test, la sauvegarde n'est pas considérée comme valide. Le nom des archives (`VYSION_BACKUP_PREFIX`, vide pour la production) et le nom des volumes cibles (`VYSION_VOLUME_PREFIX`) sont indépendants ; `scripts/restore.sh` **échoue (exit 1)** lorsqu'aucune archive attendue n'est trouvée, au lieu de signaler une restauration qui n'a rien restauré.
 
 ### G2 — credentials Git et GHCR (dans Portainer, jamais dans Git)
 
@@ -202,8 +203,9 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 ### G5 — déploiement final sur `HOST_PORT=8080`
 
 1. `HOST_PORT=8080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet` ;
-2. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_DIGEST=sha256:<64 hex>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1` (plus les variables métier si nécessaires) ;
-3. ne jamais utiliser `latest` : toute référence non immuable est refusée par Docker avant le démarrage du conteneur.
+2. relever le hop Docker observé (`docker inspect --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' <conteneur de validation>`) et préparer `TRUSTED_PROXY_CIDRS=<passerelle>/32` ainsi que `PUBLIC_ORIGIN=<origine publique exacte>` (voir « Modes TLS ») ;
+3. dans Portainer, déployer la Git Stack `vysion` depuis le repository, chemin `compose.yml`, variables : `IMAGE_DIGEST=sha256:<64 hex>`, `HOST_PORT=8080`, `BIND_ADDRESS=127.0.0.1`, `TRUSTED_PROXY_CIDRS=<passerelle>/32`, `PUBLIC_ORIGIN=<origine publique>` (plus les variables métier si nécessaires) ;
+4. ne jamais utiliser `latest` : toute référence non immuable est refusée par Docker avant le démarrage du conteneur.
 
 ### G6 — contrôles post-bascule
 
@@ -216,6 +218,7 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 - `docker inspect` : volume monté `vysion-reports`, `ReadonlyRootfs`, `CapDrop: ALL`, `no-new-privileges`, limites CPU/RAM/PID, bind `127.0.0.1:8080` ;
 - aucun conteneur `vysion-smoke-*`, aucun service en écoute sur `18080` ;
 - logs Nginx/conteneur sans erreur d'amorçage ni 5xx en chaîne ;
+- session administrateur : le cookie `vysion_session` porte le drapeau `Secure` derrière le Nginx hôte (preuve que `TRUSTED_PROXY_CIDRS` porte le hop observé) ;
 - l'ancien déploiement n'a pas été supprimé (repli disponible).
 
 **Gate de stabilité** : conserver le conteneur de repli au moins 7 jours après validation complète.
@@ -261,13 +264,22 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 ## Modes TLS
 
-- **Proxy hôte (défaut, `VYSION_TLS_BACKEND=none`, VPS Portainer)** : TLS terminé par le Nginx hôte (décision 0006), HTTP loopback 8080 dans le conteneur, allowlist et 403 loopback conservés, aucun volume de certificats. Aucun changement par rapport à l'instance en service.
+- **Proxy hôte (défaut, `VYSION_TLS_BACKEND=none`, VPS Portainer)** : TLS terminé par le Nginx hôte (décision 0006), HTTP loopback 8080 dans le conteneur, allowlist et 403 loopback conservés, aucun volume de certificats — la topologie de l'instance en service ne change pas. **Deux variables explicites à la bascule** :
+  - `TRUSTED_PROXY_CIDRS` doit porter le hop Docker **réellement observé** par le conteneur : une requête qui arrive sur le port publié vient de la passerelle du bridge, pas de `127.0.0.1`. Relevez-la sans imposer aucun subnet :
+
+    ```bash
+    docker inspect --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' vysion-vysion-1
+    # → TRUSTED_PROXY_CIDRS=<passerelle>/32 dans les variables de la stack
+    ```
+
+    Sans ce hop de confiance, le `https` déclaré par le Nginx hôte (`X-Forwarded-Proto` transmis en `X-Forwarded-Client-Proto`) est ignoré : le cookie de session administrateur revient **sans** le drapeau `Secure` (preuve par le smoke VPS de la carte, négatif sur le défaut).
+  - `PUBLIC_ORIGIN` doit porter l'origine publique exacte du navigateur (par ex. `https://vysion.valdev.me`) : sans elle, **toute mutation `/api/admin/*` est refusée en 503** (setup, connexion, récupération, certificats), la première exécution restant fermée plutôt que d'être réalisée sous une autorité arbitraire.
 - **Standalone (`compose.standalone.yml`, `VYSION_TLS_BACKEND=local`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé dans le conteneur sur 443. Au premier démarrage, l'entrypoint génère un certificat auto-signé de 2 jours (bootstrap) pour rendre l'UI accessible en HTTPS ; importer ensuite le vrai certificat depuis `/admin` : PEM complet + clé, ou PKCS#12 + passphrase. La validation refuse tout certificat expiré/à venir, SAN incompatible, chaîne incohérente ou clé non correspondante (test de chargement TLS réel). L'activation passe par un ticket à usage unique lié à la session et au digest du candidat (300 s), puis `nginx -t` + rechargement + vérification de l'empreinte servie, avec rollback automatique vers la génération précédente en cas d'échec. Une chaîne de type production (feuille + intermédiaires, sans racine — la racine vit chez les clients) est acceptée ; une feuille sans son émetteur ou une chaîne incohérente reste refusée.
-- **Proxy externe (`compose.proxy.yml`, `VYSION_TLS_BACKEND=none`)** : TLS terminé par le reverse proxy de l'opérateur, conteneur en HTTP clair sur 8080. `TRUSTED_PROXY_CIDRS` est **obligatoire — aucun défaut silencieux** — et décrit les seules sources dont l'application accepte `X-Forwarded-*` / `X-Real-IP` (couche interne : le Nginx du conteneur rejette les en-têtes clients, réécrit `X-Real-IP` sur l'observation locale et complète `X-Forwarded-For`, uvicorn tourne sans confiance forwarded). `PUBLIC_ORIGIN` fixe l'origine publique de référence : sans lui, la demande de récupération SMTP est refusée en 503 plutôt que de fabriquer un lien depuis un `Host` contrôlable.
+- **Proxy externe (`compose.proxy.yml`, `VYSION_TLS_BACKEND=none`)** : TLS terminé par le reverse proxy de l'opérateur, conteneur en HTTP clair sur 8080. `TRUSTED_PROXY_CIDRS` est **obligatoire — aucun défaut silencieux** — et décrit les seules sources dont l'application accepte `X-Forwarded-*` / `X-Real-IP` (couche interne : le Nginx du conteneur rejette les en-têtes clients, réécrit `X-Real-IP` sur l'observation locale et complète `X-Forwarded-For`, uvicorn tourne sans confiance forwarded). `PUBLIC_ORIGIN` fixe l'autorité de toute mutation `/api/admin/*` et des liens de récupération : sans elle, ces mutations sont refusées en 503 — jamais fabriquées depuis un `Host` contrôlable.
 
 ## Sauvegarde et restauration (manuelles, frontière cohérente)
 
-1. **Sauvegarde** : `scripts/backup.sh /chemin/destination` crée un répertoire horodaté contenant `vysion-state.tar.gz`, `vysion-certs.tar.gz`, `vysion-reports.tar.gz` (volumes absents ignorés, `VYSION_VOLUME_PREFIX` respecté) sous **une seule frontière cohérente** : le script découvre d'abord les conteneurs qui montent ces volumes, les arrête (quiescence — aucun écriture SQLite, certificat ou rapport pendant la prise), archive, puis redémarre ces conteneurs (y compris en cas d'interruption, via un `trap`). Aucun timer hôte ; noter `sha256sum` des archives produites.
+1. **Sauvegarde** : `scripts/backup.sh /chemin/destination` crée un répertoire horodaté contenant `vysion-state.tar.gz`, `vysion-certs.tar.gz`, `vysion-reports.tar.gz` (volumes absents ignorés, `VYSION_VOLUME_PREFIX` respecté — le préfixe s'applique alors aussi aux **noms d'archives** et se transmet à la restauration par `VYSION_BACKUP_PREFIX`) sous **une seule frontière cohérente** : le script découvre d'abord les conteneurs qui montent ces volumes, les arrête (quiescence — aucun écriture SQLite, certificat ou rapport pendant la prise), archive, puis redémarre ces conteneurs (y compris en cas d'interruption, via un `trap`). Aucun timer hôte ; noter `sha256sum` des archives produites.
 2. **Restauration (même hôte ou VM vierge)** : créer les volumes s'ils sont absents —
 
    ```bash
@@ -276,8 +288,8 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
    docker volume create vysion-reports
    ```
 
-   — arrêter la pile, `scripts/restore.sh /chemin/destination/vysion-HORODATAGE`, puis `docker compose up -d` (ou Git Stack Portainer) — la restauration de `vysion-certs` réactive HTTPS standalone sans re-import.
-3. **Test de restauration (obligatoire avant toute bascule)** : uniquement sur des volumes jetables, jamais sur les volumes en service : `VYSION_VOLUME_PREFIX=restore-<stamp>- scripts/restore.sh <répertoire d'archives>`, comparer les empreintes SHA-256 des fichiers restaurés à celles notées à la sauvegarde, puis supprimer ces volumes. Le round-trip complet (quiescence, archives, mutation, restauration, empreintes) est rejoué automatiquement par `tests/contract/test_backup_restore_roundtrip.py`.
+   — arrêter la pile, `scripts/restore.sh /chemin/destination/vysion-HORODATAGE` (`VYSION_BACKUP_PREFIX` vide pour une sauvegarde de production, sinon le préfixe sous lequel elle a été prise), puis `docker compose up -d` (ou Git Stack Portainer) — la restauration de `vysion-certs` réactive HTTPS standalone sans re-import.
+3. **Test de restauration (obligatoire avant toute bascule)** : uniquement sur des volumes jetables, jamais sur les volumes en service : `VYSION_BACKUP_PREFIX=<préfixe de la sauvegarde, vide pour la production> VYSION_VOLUME_PREFIX=restore-<stamp>- scripts/restore.sh <répertoire d'archives>`, comparer les empreintes SHA-256 des fichiers restaurés à celles notées à la sauvegarde, puis supprimer ces volumes. Le script **échoue (exit 1)** si aucune archive attendue n'est trouvée : un contrôle qui ne restaure rien n'est jamais vert. Le round-trip complet (quiescence, archives, mutation, restauration, empreintes) est rejoué automatiquement par `tests/contract/test_backup_restore_roundtrip.py`, y compris une sauvegarde prise sous un nom puis restaurée sous un autre préfixe.
 4. **Vérification** : `GET /healthz`, `GET /api/admin/status`, connexion sur `/admin`, téléchargement d'un rapport existant par UUID, `GET /api/admin/certificates` en standalone.
 5. **Rollback applicatif** : `git revert` / repointage de la stack sur le digest d'image précédent ; aucun rollback ne supprime ni ne recrée `vysion-state`, `vysion-certs` ni `vysion-reports`.
 
