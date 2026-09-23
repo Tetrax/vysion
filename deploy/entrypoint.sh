@@ -61,11 +61,17 @@ fi
 # Uvicorn runs without forwarded-header trust: it must never rewrite the
 # peer or the scheme from client-controlled headers. The bundled nginx
 # appends what it observed and the application resolves trust itself (see
-# vysion.security.TrustedProxy.resolve).
+# vysion.security.TrustedProxy.resolve). proxy_headers defaults to ON in
+# uvicorn, so it must be disabled explicitly: with the default, uvicorn
+# rewrote the scope client from X-Forwarded-For and made the peer look
+# untrusted, which defeated the loopback-gated resolve entirely (the
+# round-2 smoke caught it: a trusted edge's https claim produced no
+# Secure session cookie).
 uvicorn vysion.api.app:create_app \
   --factory \
   --host 127.0.0.1 \
   --port 8000 \
+  --no-proxy-headers \
   --no-access-log &
 api_pid=$!
 

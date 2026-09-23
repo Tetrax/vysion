@@ -413,8 +413,12 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
     assert "--factory" in entrypoint
     # uvicorn must not trust forwarded headers on its own: the peer and the
     # scheme come from the application's own TrustedProxy.resolve, so no
-    # client-controlled X-Forwarded-* value can rewrite either.
-    assert "--proxy-headers" not in entrypoint
+    # client-controlled X-Forwarded-* value can rewrite either. uvicorn's
+    # proxy_headers default is ON (the round-2 smoke caught the scope client
+    # being rewritten from X-Forwarded-For, which defeated the loopback-gated
+    # trust), so the disable flag is mandatory, not implied by absence.
+    assert "--no-proxy-headers" in entrypoint
+    assert "--proxy-headers" not in entrypoint.replace("--no-proxy-headers", "")
     assert "--forwarded-allow-ips" not in entrypoint
     # The default runtime stays plain HTTP: the standalone TLS terminator is
     # an explicit opt-in (VYSION_TLS_BACKEND=local selects the separate

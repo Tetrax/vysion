@@ -80,13 +80,18 @@ def cmd_reset_password(args: argparse.Namespace, stdin: TextIO) -> tuple[int, st
     store = StateStore(_state_directory(args.state_dir))
     if not store.has_admin():
         return EXIT_FAILURE, "admin=absent : setup web requis\n"
+    sessions_before = len(store.list_sessions())
     try:
         secret = _read_secret(stdin)
         store.set_password(secret)
     except ValueError as exc:
         detail = PASSWORD_CONTRACT if "password" in str(exc) else str(exc)
         return EXIT_FAILURE, f"refus : {detail}\n"
-    revoked = store.revoke_all_sessions()
+    # set_password already revokes every session inside the same command:
+    # report what this command actually killed, then sweep anything a
+    # racing request could have created in between.
+    revoked = sessions_before - len(store.list_sessions())
+    revoked += store.revoke_all_sessions()
     return EXIT_OK, f"mot de passe reinitialise, sessions_revoquees={revoked}\n"
 
 

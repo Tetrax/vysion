@@ -85,11 +85,14 @@ def test_reset_password_revokes_every_session(tmp_path) -> None:
     raw_token, _ = store.create_session(43_200)
     assert store.resolve_session(raw_token) is not None
 
-    code, _, err = run(
+    code, out, err = run(
         "reset-password", "--state-dir", state, stdin="a-brand-new-password\n"
     )
 
     assert code == 0, err
+    # The command must report the sessions it actually killed, not a
+    # trailing no-op revocation after set_password already deleted them.
+    assert "sessions_revoquees=1" in out
     store = StateStore(tmp_path / "state")
     assert store.verify_password("a-first-admin-password") is False
     assert store.verify_password("a-brand-new-password") is True
