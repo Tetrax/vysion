@@ -12,8 +12,24 @@
 # « Vérifier l'image réellement exécutée »), and an exceptional rollback
 # pins `ghcr.io/tetrax/vysion:sha-<commit>` or the digest in this file.
 #
-#   VYSION_TLS_HOSTNAME=vysion.example.com \
+#   TLS_HOSTNAME=vysion.example.com \
 #     docker compose -f compose.standalone.yml config
+#
+# TLS_HOSTNAME is the ONLY required Portainer variable: it is the DNS name
+# this instance serves, passed to the application under the internal name
+# it has always read (VYSION_TLS_HOSTNAME).
+#
+# Optional, deterministic network attachment — all three empty by default,
+# so a stack deployed without them behaves exactly as it always did:
+#
+#   DOCKER_NETWORK=<name>           attach to that Docker network
+#   DOCKER_NETWORK_EXTERNAL=true    require it to pre-exist (default false)
+#   IPV4_ADDRESS=<ipv4>             static address on that network
+#
+# All three empty (the default) => the stack's own <project>_default network,
+# created by Compose as it always was.
+#
+# See the `networks` section below and docs/OPERATIONS.md.
 services:
   vysion:
     image: ghcr.io/tetrax/vysion:stable
@@ -24,6 +40,15 @@ services:
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
+    networks:
+      # The single attachment point of the container. Left empty this is the
+      # plain stack network Compose already creates today.
+      default:
+        # Static IPv4 (optional): empty => Compose drops the key and Docker
+        # assigns an address as usual (no value imposed). A value outside the
+        # subnet of the target network is refused by the daemon before any
+        # container exists ("no configured subnet contains IP address ...").
+        ipv4_address: ${IPV4_ADDRESS:-}
     environment:
       VYSION_REPORT_DIRECTORY: /app/data/reports
       VYSION_REPORT_TTL_SECONDS: ${REPORT_TTL_SECONDS:-3600}
@@ -32,7 +57,9 @@ services:
       VYSION_TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-127.0.0.1/32}
       VYSION_PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       VYSION_TLS_BACKEND: local
-      VYSION_TLS_HOSTNAME: ${VYSION_TLS_HOSTNAME:?set VYSION_TLS_HOSTNAME to the DNS name this instance serves}
+      # The operator enters the generic TLS_HOSTNAME in Portainer; the
+      # application keeps reading the internal name it has always read.
+      VYSION_TLS_HOSTNAME: ${TLS_HOSTNAME:?set TLS_HOSTNAME to the DNS name this instance serves}
     volumes:
       - vysion-reports:/app/data/reports
       - vysion-state:/app/data/state
@@ -66,3 +93,31 @@ volumes:
     name: ${VYSION_VOLUME_PREFIX:-}vysion-state
   vysion-certs:
     name: ${VYSION_VOLUME_PREFIX:-}vysion-certs
+
+networks:
+  # Stack network. By default the Compose project network (<project>_default),
+  # created by Compose itself: no host-specific value, no prerequisite —
+  # the historical, unchanged behaviour.
+  #
+  # To attach Vysion to an EXISTING Docker network, set in the Portainer
+  # Environment variables:
+  #   DOCKER_NETWORK=<network name>     name of the network to join
+  #   DOCKER_NETWORK_EXTERNAL=true      optional: the network must already
+  #                                     exist, otherwise Compose may create
+  #                                     a homonym of its own (default false)
+  #   IPV4_ADDRESS=<ipv4>               optional: static address — the target
+  #                                     network must own a subnet containing
+  #                                     it, else the daemon refuses the
+  #                                     container
+  # All three are optional: left empty they fall back to the stack's own
+  # <project>_default network, created by Compose as always. No subnet,
+  # address, network name or port of any specific site is ever pinned here.
+  default:
+    # Empty => the stack's own <project>_default network. The name is COMPUTED
+    # rather than left blank: an interpolated empty `name` is hidden by
+    # `docker compose config` yet still reaches the deployment path, where `up`
+    # fails with "invalid network name or ID: value is empty". COMPOSE_PROJECT_NAME
+    # is the effective project name (-p, i.e. the Portainer stack name), so this
+    # resolves to exactly the network Compose creates on its own.
+    name: ${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion-standalone}_default}
+    external: ${DOCKER_NETWORK_EXTERNAL:-false}

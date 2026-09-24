@@ -99,18 +99,24 @@ def test_the_online_standalone_stack_renders_with_the_hostname_alone(
     tmp_path: Path,
 ) -> None:
     """No IMAGE_DIGEST is entered on a fresh online install: the stack
-    resolves from VYSION_TLS_HOSTNAME alone, keeps the three stable volume
-    names (data untouched), and an IMAGE_DIGEST in the environment is read
-    by nothing."""
+    resolves from the generic TLS_HOSTNAME alone — the only variable the
+    operator types in Portainer, handed to the application as its internal
+    VYSION_TLS_HOSTNAME — keeps the three stable volume names (data
+    untouched), and an IMAGE_DIGEST in the environment is read by nothing."""
     _require_docker_compose()
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("")
 
     missing = _render_standalone(empty_env)
     assert missing.returncode != 0, missing.stdout + missing.stderr
-    assert "VYSION_TLS_HOSTNAME" in missing.stderr
+    assert "TLS_HOSTNAME" in missing.stderr
 
-    rendered = _render_standalone(empty_env, VYSION_TLS_HOSTNAME="vysion.example.com")
+    # The legacy entry the operator may still have typed must no longer
+    # resolve the stack: the Portainer interface is TLS_HOSTNAME only.
+    legacy = _render_standalone(empty_env, VYSION_TLS_HOSTNAME="vysion.example.com")
+    assert legacy.returncode != 0, legacy.stdout + legacy.stderr
+
+    rendered = _render_standalone(empty_env, TLS_HOSTNAME="vysion.example.com")
     assert rendered.returncode == 0, rendered.stdout + rendered.stderr
     compose = yaml.safe_load(rendered.stdout)
     service = compose["services"]["vysion"]
@@ -124,7 +130,7 @@ def test_the_online_standalone_stack_renders_with_the_hostname_alone(
 
     ignored = _render_standalone(
         empty_env,
-        VYSION_TLS_HOSTNAME="vysion.example.com",
+        TLS_HOSTNAME="vysion.example.com",
         IMAGE_DIGEST="sha256:" + "ab" * 32,
     )
     assert ignored.returncode == 0, ignored.stdout + ignored.stderr

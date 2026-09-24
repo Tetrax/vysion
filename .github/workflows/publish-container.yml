@@ -132,11 +132,18 @@ jobs:
           # IMAGE_DIGEST: it tracks the promoted `stable` channel and forces a
           # re-pull, which is what lets Portainer's "Update the stack" acquire
           # the new manifest and recreate the container without any edit.
+          # The variable the operator types is the generic TLS_HOSTNAME; the
+          # container receives it as VYSION_TLS_HOSTNAME (the internal name
+          # the application has always read).
           if docker compose -f compose.standalone.yml config --quiet; then
-            echo "compose.standalone.yml resolved without VYSION_TLS_HOSTNAME, it must be required" >&2
+            echo "compose.standalone.yml resolved without TLS_HOSTNAME, it must be required" >&2
             exit 1
           fi
-          VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config > /tmp/vysion-standalone.yml
+          if VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config --quiet; then
+            echo "compose.standalone.yml still resolves from the legacy VYSION_TLS_HOSTNAME entry" >&2
+            exit 1
+          fi
+          TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config > /tmp/vysion-standalone.yml
           grep -Eq '^ *image: ghcr\.io/tetrax/vysion:stable$' /tmp/vysion-standalone.yml
           grep -q '^ *pull_policy: always$' /tmp/vysion-standalone.yml
           if grep -q 'IMAGE_DIGEST' /tmp/vysion-standalone.yml || grep -q '\${IMAGE_DIGEST' compose.standalone.yml; then
