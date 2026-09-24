@@ -16,7 +16,7 @@ project network itself), the published port stays governed by
 ``BIND_ADDRESS`` / ``HTTPS_PORT``, and no site-specific network name,
 subnet, address or port may ever be pinned in Git.
 
-The last two tests are the isolated Docker recette: they need a daemon and
+The last three tests are the isolated Docker recette: they need a daemon and
 are skipped unless ``VYSION_NETWORK_RECETTE=1`` is set, so the default suite
 (and CI) never starts a container::
 
@@ -40,6 +40,11 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 STANDALONE = "compose.standalone.yml"
+# Fixed project name for every render: the stack network is named
+# `<project>_default`, so the default rendering must be reproducible on any
+# checkout (the directory name of a worktree is not).
+RENDER_PROJECT = "vysion-contract"
+RENDER_DEFAULT_NETWORK = f"{RENDER_PROJECT}_default"
 STABLE_VOLUMES = ("vysion-reports", "vysion-state", "vysion-certs")
 NETWORK_VARIABLES = ("DOCKER_NETWORK", "DOCKER_NETWORK_EXTERNAL", "IPV4_ADDRESS")
 
@@ -91,7 +96,18 @@ def _clean_env(**env: str) -> dict[str, str]:
 
 def _render(empty_env: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["docker", "compose", "-f", STANDALONE, "--env-file", str(empty_env), *args, "config"],
+        [
+            "docker",
+            "compose",
+            "-p",
+            RENDER_PROJECT,
+            "-f",
+            STANDALONE,
+            "--env-file",
+            str(empty_env),
+            *args,
+            "config",
+        ],
         capture_output=True,
         text=True,
         cwd=ROOT,
@@ -200,7 +216,7 @@ def test_the_network_variables_are_generic_optional_and_never_site_specific() ->
     raw = _read(STANDALONE)
 
     for expression in (
-        "name: ${DOCKER_NETWORK:-}",
+        "name: ${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion-standalone}_default}",
         "external: ${DOCKER_NETWORK_EXTERNAL:-false}",
         "ipv4_address: ${IPV4_ADDRESS:-}",
     ):
@@ -218,9 +234,13 @@ def test_the_network_variables_are_generic_optional_and_never_site_specific() ->
     service = compose["services"]["vysion"]
     assert service["networks"]["default"] == {"ipv4_address": "${IPV4_ADDRESS:-}"}
     assert compose["networks"]["default"] == {
-        "name": "${DOCKER_NETWORK:-}",
+        "name": "${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion-standalone}_default}",
         "external": "${DOCKER_NETWORK_EXTERNAL:-false}",
     }
+    # The fallback names the stack's own network, never a fixed one: whatever
+    # the project is, an empty DOCKER_NETWORK resolves to `<project>_default`.
+    fallback = compose["networks"]["default"]["name"]
+    assert "${DOCKER_NETWORK:-" in fallback and fallback.endswith("_default}")
 
 
 def test_the_scope_of_the_change_is_the_online_standalone_only() -> None:
@@ -266,7 +286,12 @@ def test_without_any_network_variable_the_stack_renders_as_it_always_did(tmp_pat
     document = yaml.safe_load(rendered.stdout)
 
     network = document["networks"]["default"]
-    assert "name" not in network and "external" not in network and "ipam" not in network
+    # Criterion 1 on the render: the stack's own Compose-managed network,
+    # named after the project — and never an empty network name, which
+    # `config` hides while `up` rejects it.
+    assert network.get("name") == RENDER_DEFAULT_NETWORK, network
+    assert network.get("external") in (None, False), network
+    assert "ipam" not in network
     attachment = document["services"]["vysion"]["networks"]["default"] or {}
     assert "ipv4_address" not in attachment
 
@@ -297,7 +322,8 @@ def test_without_any_network_variable_the_stack_renders_as_it_always_did(tmp_pat
 
 def test_the_three_network_variables_reach_the_rendered_stack(tmp_path: Path) -> None:
     """With them the stack joins the named network — external or not — with
-    the requested address; left empty they render nothing at all."""
+    the requested address; left empty they fall back to the stack's own
+    `<project>_default` network instead of an unusable blank name."""
     _require_docker_compose()
     empty_env = tmp_path / "empty.env"
     empty_env.write_text("")
@@ -334,8 +360,11 @@ def test_the_three_network_variables_reach_the_rendered_stack(tmp_path: Path) ->
     )
     assert blank.returncode == 0, blank.stderr
     document = yaml.safe_load(blank.stdout)
-    assert "name" not in document["networks"]["default"]
-    assert "external" not in document["networks"]["default"]
+    # An empty Portainer field is the same as never touching it: the stack's
+    # own network, no external requirement, no imposed address.
+    blank_network = document["networks"]["default"]
+    assert blank_network.get("name") == RENDER_DEFAULT_NETWORK, blank_network
+    assert blank_network.get("external") in (None, False), blank_network
     assert "ipv4_address" not in (document["services"]["vysion"]["networks"]["default"] or {})
 
 
@@ -424,6 +453,128 @@ def _recette_kwargs(env: dict) -> dict:
     return {key: value for key, value in env.items() if not key.startswith("_")}
 
 
+def _wait_for_a_healthy_container(
+    project: str, empty_env: Path, kwargs: dict
+) -> tuple[str, str, list]:
+    """A container that merely started is not a stack that works: wait for the
+    daemon's own healthcheck, and read its probe log — a bare `healthy` status
+    is cheap to misread."""
+    container = ""
+    for _ in range(60):
+        found = _compose(project, empty_env, "ps", "-q", "vysion", **kwargs)
+        container = found.stdout.strip()
+        if container:
+            break
+        time.sleep(1)
+    assert container, f"no container of the {project} stack"
+
+    healthy = ""
+    for _ in range(90):
+        inspected = subprocess.run(
+            ["docker", "inspect", container, "--format", "{{.State.Health.Status}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        healthy = inspected.stdout.strip()
+        if healthy in ("healthy", "unhealthy"):
+            break
+        time.sleep(2)
+    assert healthy == "healthy", f"container state: {healthy}"
+
+    log = subprocess.run(
+        ["docker", "inspect", container, "--format", "{{json .State.Health.Log}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    probes = json.loads(log.stdout or "[]")
+    assert probes and probes[-1]["ExitCode"] == 0, probes
+    return container, healthy, probes
+
+
+def _attachments(container: str) -> dict:
+    inspected = subprocess.run(
+        ["docker", "inspect", container, "--format", "{{json .NetworkSettings.Networks}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(inspected.stdout)
+
+
+def _mounted_volumes(container: str) -> set[str]:
+    mounts = subprocess.run(
+        ["docker", "inspect", container, "--format", "{{range .Mounts}}{{.Name}} {{end}}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return set(mounts.stdout.split())
+
+
+@requires_recette
+def test_recette_without_any_network_variable_the_stack_deploys_on_its_default_network(
+    tmp_path: Path,
+) -> None:
+    """Criterion 1 on a REAL daemon — the part `docker compose config` cannot
+    see: with all three network variables unset, `up` must not merely resolve,
+    it must deploy. Compose creates the project's own `<project>_default`
+    network, the container becomes healthy on it, and `down` removes that
+    network while the three prefixed volumes survive."""
+    _require_docker_compose()
+    _require_docker_daemon()
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("")
+
+    stamp = time.strftime("%Y%m%d%H%M%S")
+    project = f"vysion-defrec-{stamp}"
+    network = f"{project}_default"
+    kwargs = {
+        "TLS_HOSTNAME": "vysion.recette.test",
+        "VYSION_VOLUME_PREFIX": f"{project}-",
+        "BIND_ADDRESS": "127.0.0.1",
+        "HTTPS_PORT": str(_free_port()),
+    }
+    production_before = {name for name in _volume_names() if name in STABLE_VOLUMES}
+
+    try:
+        # No DOCKER_NETWORK, no DOCKER_NETWORK_EXTERNAL, no IPV4_ADDRESS.
+        up = _compose(project, empty_env, "up", "-d", **kwargs)
+        assert up.returncode == 0, up.stdout + up.stderr
+
+        container, healthy, probes = _wait_for_a_healthy_container(project, empty_env, kwargs)
+        attachments = _attachments(container)
+        assert network in attachments, sorted(attachments)
+        # Nothing imposed: the daemon assigns the address itself.
+        assert attachments[network]["IPAddress"], attachments
+        print(
+            f"recette {project}: default network={network} "
+            f"ip={attachments[network]['IPAddress']} healthy={healthy} probes={len(probes)}"
+        )
+        assert _mounted_volumes(container) == {f"{project}-{name}" for name in STABLE_VOLUMES}
+        assert {name for name in _volume_names() if name in STABLE_VOLUMES} == production_before
+
+        down = _compose(project, empty_env, "down", **kwargs)
+        assert down.returncode == 0, down.stdout + down.stderr
+        assert _project_containers(project) == []
+        # Compose-managed: the default network belongs to the stack and leaves
+        # with it, exactly like the historical behaviour.
+        assert network not in _network_names(), sorted(_network_names())
+        assert {name for name in _volume_names() if name in STABLE_VOLUMES} == production_before
+        for name in STABLE_VOLUMES:
+            assert f"{project}-{name}" in _volume_names()
+    finally:
+        _compose(project, empty_env, "down", **kwargs)
+        subprocess.run(["docker", "network", "rm", network], capture_output=True, text=True)
+        for name in STABLE_VOLUMES:
+            subprocess.run(
+                ["docker", "volume", "rm", f"{project}-{name}"],
+                capture_output=True,
+                text=True,
+            )
+
+
 @requires_recette
 def test_recette_the_container_joins_the_existing_network_with_the_requested_ipv4(
     tmp_path: Path,
@@ -460,61 +611,18 @@ def test_recette_the_container_joins_the_existing_network_with_the_requested_ipv
 
         # Wait for the healthcheck: the recette proves a deployable stack,
         # not only a syntactically valid one.
-        container = ""
-        for _ in range(60):
-            found = _compose(project, empty_env, "ps", "-q", "vysion", **kwargs)
-            container = found.stdout.strip()
-            if container:
-                break
-            time.sleep(1)
-        assert container, "no container of the recette stack"
+        container, healthy, probes = _wait_for_a_healthy_container(project, empty_env, kwargs)
 
-        healthy = ""
-        for _ in range(90):
-            inspected = subprocess.run(
-                ["docker", "inspect", container, "--format", "{{.State.Health.Status}}"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            healthy = inspected.stdout.strip()
-            if healthy in ("healthy", "unhealthy"):
-                break
-            time.sleep(2)
-        assert healthy == "healthy", f"container state: {healthy}"
-        # The status alone is cheap to misread: the daemon's own probe log
-        # must show a real, successful healthcheck of this container.
-        log = subprocess.run(
-            ["docker", "inspect", container, "--format", "{{json .State.Health.Log}}"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        probes = json.loads(log.stdout or "[]")
-        assert probes and probes[-1]["ExitCode"] == 0, probes
-
-        inspected = subprocess.run(
-            ["docker", "inspect", container, "--format", "{{json .NetworkSettings.Networks}}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        attachments = json.loads(inspected.stdout)
+        attachments = _attachments(container)
         assert network in attachments, sorted(attachments)
         assert attachments[network]["IPAddress"] == address
 
-        mounts = subprocess.run(
-            ["docker", "inspect", container, "--format", "{{range .Mounts}}{{.Name}} {{end}}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
         # Opt-in recette: one line of evidence when run with -s.
         print(
             f"recette {project}: network={network} subnet={subnet} ip={address} "
             f"healthy={healthy} probes={len(probes)}"
         )
-        assert set(mounts.stdout.split()) == {f"{project}-{name}" for name in STABLE_VOLUMES}
+        assert _mounted_volumes(container) == {f"{project}-{name}" for name in STABLE_VOLUMES}
         # The stable production volumes are untouched by the recette.
         assert {name for name in _volume_names() if name in STABLE_VOLUMES} == production_before
 

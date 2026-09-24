@@ -52,7 +52,7 @@ TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config 
 
 ## Réseau Docker et IPv4 statique (standalone, optionnel)
 
-`compose.standalone.yml` accepte trois variables **toutes optionnelles**, saisies dans les *Environment variables* de la stack Portainer. Aucune n'a de valeur par défaut : sans elles, Compose crée le réseau de la pile (`<nom de pile>_default`) comme toujours, et le déploiement — `Update the stack` compris — se comporte exactement comme avant.
+`compose.standalone.yml` accepte trois variables **toutes optionnelles**, saisies dans les *Environment variables* de la stack Portainer. Aucune n'a de valeur par défaut : sans elles, Compose crée le réseau de la pile (`<nom de pile>_default`) comme toujours, et le déploiement — `Update the stack` compris — se comporte exactement comme avant. Ce nom par défaut est **calculé** dans le fichier (`${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion-standalone}_default}`), jamais laissé vide : un `name` vidé par interpolation est masqué par `docker compose config` mais rejeté au déploiement avec `invalid network name or ID: value is empty`.
 
 | Variable | Rôle | Valeur par défaut |
 | --- | --- | --- |
@@ -82,7 +82,7 @@ HTTPS_PORT=443
 **Vérifications :**
 
 ```bash
-# rendu par défaut : le réseau de la pile ne porte ni nom ni external
+# rendu par défaut : le réseau de la pile, nommé <nom de pile>_default
 TLS_HOSTNAME=<nom-dns> docker compose -f compose.standalone.yml config
 # rendu avec rattachement
 TLS_HOSTNAME=<nom-dns> DOCKER_NETWORK=<nom> DOCKER_NETWORK_EXTERNAL=true IPV4_ADDRESS=<ipv4> \

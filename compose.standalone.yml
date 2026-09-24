@@ -26,6 +26,9 @@
 #   DOCKER_NETWORK_EXTERNAL=true    require it to pre-exist (default false)
 #   IPV4_ADDRESS=<ipv4>             static address on that network
 #
+# All three empty (the default) => the stack's own <project>_default network,
+# created by Compose as it always was.
+#
 # See the `networks` section below and docs/OPERATIONS.md.
 services:
   vysion:
@@ -106,10 +109,15 @@ networks:
   #                                     network must own a subnet containing
   #                                     it, else the daemon refuses the
   #                                     container
-  # All three are optional: left empty they render nothing and the stack
-  # keeps its own default network. No subnet, address, network name or port
-  # of any specific site is ever pinned here.
+  # All three are optional: left empty they fall back to the stack's own
+  # <project>_default network, created by Compose as always. No subnet,
+  # address, network name or port of any specific site is ever pinned here.
   default:
-    # Empty => Compose drops the key and names the network itself.
-    name: ${DOCKER_NETWORK:-}
+    # Empty => the stack's own <project>_default network. The name is COMPUTED
+    # rather than left blank: an interpolated empty `name` is hidden by
+    # `docker compose config` yet still reaches the deployment path, where `up`
+    # fails with "invalid network name or ID: value is empty". COMPOSE_PROJECT_NAME
+    # is the effective project name (-p, i.e. the Portainer stack name), so this
+    # resolves to exactly the network Compose creates on its own.
+    name: ${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion-standalone}_default}
     external: ${DOCKER_NETWORK_EXTERNAL:-false}
