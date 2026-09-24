@@ -941,7 +941,18 @@ def test_offline_stack_renders_only_with_the_imported_reference(
 
     missing = _render("compose.standalone.offline.yml", empty_env)
     assert missing.returncode != 0, missing.stdout + missing.stderr
-    assert "VYSION_IMAGE" in missing.stderr
+
+    # Exactly one required variable is missing here, so every compose
+    # reporting policy (first error only, or all of them) must name
+    # VYSION_IMAGE: the assertion must not depend on which missing
+    # variable the renderer happens to walk first.
+    missing_image = _render(
+        "compose.standalone.offline.yml",
+        empty_env,
+        VYSION_TLS_HOSTNAME="vysion.example.com",
+    )
+    assert missing_image.returncode != 0, missing_image.stdout + missing_image.stderr
+    assert "VYSION_IMAGE" in missing_image.stderr
 
     rendered = _render(
         "compose.standalone.offline.yml",
