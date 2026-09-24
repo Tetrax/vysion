@@ -439,8 +439,9 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
 
 def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -> None:
     """Decision 0007 + zero-CLI Portainer install: the standalone stack
-    terminates TLS itself and must resolve only with an immutable digest
-    plus an explicit hostname, while mounting the three stable volumes —
+    terminates TLS itself and must resolve with an explicit hostname only —
+    no `IMAGE_DIGEST` (the online install tracks the promoted `stable`
+    channel, decision 0011) — while mounting the three stable volumes —
     Compose-managed (not external), so a fresh Git Stack creates them
     itself with the stable names, without any host command, and the data
     survives recreate. Certificates live apart from state and reports."""
@@ -448,8 +449,12 @@ def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -
     compose = yaml.safe_load(raw)
 
     service = compose["services"]["vysion"]
-    assert service["image"].startswith("ghcr.io/tetrax/vysion@${IMAGE_DIGEST:")
-    assert ":?" in service["image"]
+    # The one stack that is updatable in one click: a literal channel tag
+    # plus a pull policy that re-acquires it, never an interpolation.
+    assert service["image"] == "ghcr.io/tetrax/vysion:stable"
+    assert service["pull_policy"] == "always"
+    assert "${" not in service["image"]
+    assert "${IMAGE_DIGEST" not in raw
     environment = service["environment"]
     assert environment["VYSION_TLS_BACKEND"] == "local"
     assert environment["VYSION_TLS_HOSTNAME"].startswith("${VYSION_TLS_HOSTNAME:?")
@@ -589,7 +594,6 @@ def test_volume_prefix_isolates_validation_stacks_from_the_live_volumes(
     prefixed = _render(
         "compose.standalone.yml",
         empty_env,
-        IMAGE_DIGEST=VALID_DIGEST,
         VYSION_TLS_HOSTNAME="vysion.example.com",
         VYSION_VOLUME_PREFIX="smoke-20260922-",
     )
@@ -937,7 +941,18 @@ def test_offline_stack_renders_only_with_the_imported_reference(
 
     missing = _render("compose.standalone.offline.yml", empty_env)
     assert missing.returncode != 0, missing.stdout + missing.stderr
-    assert "VYSION_IMAGE" in missing.stderr
+
+    # Exactly one required variable is missing here, so every compose
+    # reporting policy (first error only, or all of them) must name
+    # VYSION_IMAGE: the assertion must not depend on which missing
+    # variable the renderer happens to walk first.
+    missing_image = _render(
+        "compose.standalone.offline.yml",
+        empty_env,
+        VYSION_TLS_HOSTNAME="vysion.example.com",
+    )
+    assert missing_image.returncode != 0, missing_image.stdout + missing_image.stderr
+    assert "VYSION_IMAGE" in missing_image.stderr
 
     rendered = _render(
         "compose.standalone.offline.yml",

@@ -128,13 +128,21 @@ jobs:
 
       - name: Validate the standalone stack with the expected TLS material
         run: |
-          DIGEST="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          if IMAGE_DIGEST="$DIGEST" docker compose -f compose.standalone.yml config --quiet; then
+          # The online standalone stack is the one stack that never asks for
+          # IMAGE_DIGEST: it tracks the promoted `stable` channel and forces a
+          # re-pull, which is what lets Portainer's "Update the stack" acquire
+          # the new manifest and recreate the container without any edit.
+          if docker compose -f compose.standalone.yml config --quiet; then
             echo "compose.standalone.yml resolved without VYSION_TLS_HOSTNAME, it must be required" >&2
             exit 1
           fi
-          IMAGE_DIGEST="$DIGEST" VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config > /tmp/vysion-standalone.yml
-          grep -Eq '^ *image: ghcr\.io/tetrax/vysion@sha256:[0-9a-f]{64}$' /tmp/vysion-standalone.yml
+          VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config > /tmp/vysion-standalone.yml
+          grep -Eq '^ *image: ghcr\.io/tetrax/vysion:stable$' /tmp/vysion-standalone.yml
+          grep -q '^ *pull_policy: always$' /tmp/vysion-standalone.yml
+          if grep -q 'IMAGE_DIGEST' /tmp/vysion-standalone.yml || grep -q '\${IMAGE_DIGEST' compose.standalone.yml; then
+            echo "compose.standalone.yml must not depend on IMAGE_DIGEST" >&2
+            exit 1
+          fi
           grep -q 'VYSION_TLS_BACKEND: local' /tmp/vysion-standalone.yml
           grep -q 'VYSION_TLS_HOSTNAME: vysion.example.com' /tmp/vysion-standalone.yml
           grep -q 'host_ip: 127.0.0.1' /tmp/vysion-standalone.yml
@@ -230,3 +238,23 @@ jobs:
           echo "Link digest <-> commit verified (revision label == github.sha)."
           echo "IMAGE_DIGEST value for the Portainer stack (copy after the @):"
           docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "ghcr.io/tetrax/vysion:sha-${{ github.sha }}"
+
+      - name: Promote the verified image to the stable channel (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          # The ONE mutable tag of the delivery chain. It moves only here:
+          # after the three gates (python, frontend, stack), on a push to
+          # main — never from a pull_request, never from another ref, never
+          # from a workflow_dispatch. The promotion copies the manifest of
+          # the commit tag that was just verified, so no image is rebuilt
+          # and no second provenance can exist.
+          source="ghcr.io/tetrax/vysion:sha-${{ github.sha }}"
+          docker buildx imagetools create --tag ghcr.io/tetrax/vysion:stable "$source"
+          source_digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$source")"
+          stable_digest="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' ghcr.io/tetrax/vysion:stable)"
+          if [ -z "$source_digest" ] || [ "$source_digest" != "$stable_digest" ]; then
+            echo "stable -> ${stable_digest:-<none>} does not match $source -> $source_digest" >&2
+            exit 1
+          fi
+          echo "ghcr.io/tetrax/vysion:stable -> $stable_digest (same manifest as $source)"
+          echo "Rollback pin for an online standalone stack: $source_digest"

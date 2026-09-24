@@ -71,7 +71,7 @@ Décision d'edge : `docs/decisions/0001-single-container-http-edge.json` et
 
 ## Modes de déploiement
 
-Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans IP Docker statique :
+Quatre piles coexistent, toutes sans IP Docker statique : trois épinglées par digest (`IMAGE_DIGEST` requis — `compose.yml`, `compose.helper.yml`, `compose.proxy.yml`) et `compose.standalone.yml`, seule pile sans digest à saisir, qui suit le canal promu `ghcr.io/tetrax/vysion:stable` pour se mettre à jour en un clic depuis Portainer :
 
 | Mode | Pile | TLS | `VYSION_TLS_HOSTNAME` | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
 | --- | --- | --- | --- | --- | --- |
@@ -80,6 +80,17 @@ Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans
 | Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | dérivée de `VYSION_TLS_HOSTNAME` |
 | VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | **requis pour l'admin** (503 sinon) |
 
+- **Mise à jour en un clic (standalone en ligne)** : `compose.standalone.yml`
+  référence `ghcr.io/tetrax/vysion:stable` avec `pull_policy: always`, aucune
+  variable à saisir. La mise à jour tient en **Portainer → Stacks → Vysion →
+  Update the stack** (aucune variable à changer), puis vérifier `healthy` et
+  `/healthz`. `stable` est le seul tag mutable de la chaîne : la CI ne le
+  promeut qu'après les trois gates sur `main`, jamais depuis une pull request,
+  en copiant le manifeste du tag `sha-<commit>` déjà vérifié. Ce qui tourne
+  reste vérifiable (label `org.opencontainers.image.revision`, digest réel) et
+  rollbackable par pin `sha-<commit>`/digest — compromis assumé, documenté
+  dans `docs/decisions/0011-stable-update-channel-for-online-standalone.json`
+  et `docs/OPERATIONS.md`.
 - `TRUSTED_PROXY_CIDRS` décrit les seules sources dont l'application accepte
   les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) : résolution unique
   dans `vysion.security.TrustedProxy.resolve`, avec le Nginx interne qui
@@ -155,13 +166,17 @@ npm audit --audit-level=high
 
 ## Validation de livraison
 
-`IMAGE_DIGEST` est obligatoire et vaut le digest OCI `sha256:<64 hex>` de
-l'image : Compose en déduit la référence immuable `ghcr.io/tetrax/vysion@<digest>`.
+`IMAGE_DIGEST` est obligatoire pour les piles épinglées et vaut le digest OCI
+`sha256:<64 hex>` de l'image : Compose en déduit la référence immuable
+`ghcr.io/tetrax/vysion@<digest>`.
 Sans lui — ou avec une valeur vide — la commande échoue ; `latest`, `sha-latest`,
 un SHA court ou une valeur non hexadécimale sont refusés par Docker lui-même
 à l'acquisition de l'image, avant tout conteneur. Le digest se lit dans le
 journal de la CI de publication ou avec
 `docker buildx imagetools inspect ghcr.io/tetrax/vysion:sha-<commit>`.
+`compose.standalone.yml` est la seule exception : elle ne demande aucun digest
+et se rend avec le seul `VYSION_TLS_HOSTNAME` (canal `stable`, voir
+« Modes de déploiement »).
 
 ```bash
 IMAGE_DIGEST="sha256:<64 hex>" docker compose config --quiet
