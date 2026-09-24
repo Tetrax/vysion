@@ -1,13 +1,26 @@
 # Standalone deployment: this container terminates TLS itself with the
 # certificate imported through the administrator UI (PEM/PKCS#12) and
 # serves HTTPS on 443. The loopback plaintext port stays only for the
-# container healthcheck. Render with the immutable image digest:
+# container healthcheck.
 #
-#   IMAGE_DIGEST=sha256:<64 hex> VYSION_TLS_HOSTNAME=vysion.example.com \
+# ONLINE install, one-click update: the image is tracked through the
+# `stable` channel — a tag CI promotes only after the main gates pass
+# (never from a PR) — so Portainer's "Update the stack" re-acquires the
+# manifest and recreates the container without any variable to edit.
+# No IMAGE_DIGEST is entered anywhere in this stack; the digest and the
+# commit of what actually runs stay verifiable (see docs/OPERATIONS.md
+# « Vérifier l'image réellement exécutée »), and an exceptional rollback
+# pins `ghcr.io/tetrax/vysion:sha-<commit>` or the digest in this file.
+#
+#   VYSION_TLS_HOSTNAME=vysion.example.com \
 #     docker compose -f compose.standalone.yml config
 services:
   vysion:
-    image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
+    image: ghcr.io/tetrax/vysion:stable
+    # "Update the stack" must re-resolve `stable` on every deployment:
+    # without an explicit always pull, compose keeps whatever image
+    # already carries that tag locally and never recreates the container.
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"

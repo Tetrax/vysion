@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "decision_id": "0011-stable-update-channel-for-online-standalone",
+  "status": "accepted",
+  "scope": "Mise a jour en un clic du parcours standalone EN LIGNE via Portainer Git Stack : publication du canal stable ghcr.io/tetrax/vysion:stable, consommation par compose.standalone.yml avec pull_policy always, contrats CI/tests et runbook. Ne touche ni les piles compose.yml / compose.proxy.yml / compose.helper.yml (contrat digest immuable conserve), ni le parcours hors ligne (VYSION_IMAGE), ni le runtime VPS, ni aucun secret.",
+  "decision": "1) La CI publie, en plus du tag immuable sha-<commit> et de son digest, le tag mutable ghcr.io/tetrax/vysion:stable dans le job publish qui a besoin des trois gates (python, frontend, stack), sous la condition d'etape github.event_name == 'push' && github.ref == 'refs/heads/main' : jamais depuis une pull request, jamais depuis une autre reference, jamais depuis un workflow_dispatch. La promotion ne reconstruit rien : docker buildx imagetools create copie le manifeste exact du tag sha-<commit> deja verifie (revision label == github.sha) puis les deux digests sont compares et doivent etre identiques. 2) compose.standalone.yml reference ghcr.io/tetrax/vysion:stable en litteral, sans aucune interpolation, avec pull_policy: always : c'est la clause qui rend « Update the stack » effectif — sans re-pull, Compose se contenterait de l'image deja presente sous ce tag local et ne recreerait rien. Aucune IMAGE_DIGEST n'est saisie sur une installation standalone en ligne. 3) Volumes, donnees, certificats et variables metier sont inchanges : la promotion ne touche qu'a l'image, les trois volumes Compose-manages conservent leurs noms stables. 4) Contrats automatises : stable present uniquement dans compose.standalone.yml, absent des autres piles et des publications de PR, promotion conditionnee a push+main dans le job post-gates, tag sha-<commit> et label OCI conservation, rendu standalone sans variable d'image. 5) Runbook OPERATIONS.md : section « Le canal stable », parcours opereur resume en « Portainer -> Stacks -> Vysion -> Update the stack » (aucune variable a changer) puis verification healthy et /healthz, limite Portainer reelle explicitee, rollback par pin sha-<commit> ou digest, compromis de mutabilite assume et documente (decision 0011, README, SECURITY.md).",
+  "alternatives": [
+    "Tag latest : rejete, nom ambigu qui ne dit ni la politique de promotion ni le niveau de stabilite ; le libelle stable decrit le contrat reel (promu apres gates).",
+    "Conserver IMAGE_DIGEST comme seule voie en ligne : rejete, l'objectif produit est explicitement la mise a jour en un clic sans variable a saisir.",
+    "Publier stable a chaque build y compris depuis les PR : rejete, une PR aurait pu deplacer le canal vers un commit non fusionne (boucle de publication et canal non controle).",
+    "Reconstruire l'image pour la taguer stable : rejete, imagetools create copie le manifeste deja verifie — une seule provenance, pas de second build.",
+    "Rendre IMAGE_DIGEST optionnel avec defaut stable dans toutes les piles : rejete, elargit le perimetre ; seules les piles proxy/VPS/helper restent epinglees par digest.",
+    "Forcer le re-pull en supprimant le tag local avant update : impossible sans CLI sur la VM cliente, Portainer n'expose pas de purge de tag."
+  ],
+  "criteria": [
+    "Nouvelle installation Portainer standalone en ligne : VYSION_TLS_HOSTNAME plus variables reseau seulement, jamais IMAGE_DIGEST ; docker compose -f compose.standalone.yml config --quiet ne demande aucune variable d'image.",
+    "Apres fusion sur main, le job publish pousse sha-<commit> ET stable, uniquement apres python + frontend + stack, sous la condition push sur refs/heads/main ; un workflow sur une PR ne publie jamais stable.",
+    "compose.standalone.yml reference ghcr.io/tetrax/vysion:stable avec pull_policy: always et aucune interpolation d'image.",
+    "Les piles compose.yml, compose.proxy.yml, compose.helper.yml gardent ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?...} et compose.standalone.offline.yml garde ${VYSION_IMAGE:?...} ; le mot stable n'apparait dans aucune d'elles.",
+    "Contrats automatises : stable absent des publications de PR, tag sha-<commit> et label org.opencontainers.image.revision conserves, promotion verifiee par comparaison de digests.",
+    "Tests cibles, pytest, Ruff et rendu Compose verts ; documentation opereur resumee en un clic, verification healthy + /healthz, rollback et compromis de mutabilite documentes sans masquage.",
+    "PR publiee avec CI exact-head verte et review independante demandee sur le meme commit ; aucun merge sans autorisation explicite."
+  ],
+  "rationale": [
+    "L'utilisateur privilegie une mise a jour normale en un clic Update the stack : le canal mutable est le prix a payer, et il est rendu le plus sur possible en le bornant a un evenement (push main) et a une preuve (digest identique au tag sha-<commit> verifie).",
+    "pull_policy always est la seule clause qui rend la mise a jour independante du contenu de la pile : Portainer relance le deploiement, Compose reacquiert le manifeste, le conteneur est recree si l'identifiant d'image change.",
+    "L'immutabilite n'est pas abandonnee, elle est deplacee : ce qui execute se verifie par le label OCI org.opencontainers.image.revision, par le digest reel (RepoDigests) et par le tag sha-<commit> correspondant, qui sert aussi de pin de rollback.",
+    "Les piles VPS/proxy/helper et le mode hors ligne restent sous leur contrat d'origine : aucun elargissement sans necessite."
+  ],
+  "constraints": [
+    "Ne jamais pousser stable depuis une pull request, une autre reference ou un workflow_dispatch.",
+    "Eviter toute boucle de publication : la promotion ne construit rien et n'ecrit aucun code.",
+    "Ne pas casser les modes proxy/VPS/helper epingles par digest ni le parcours hors ligne.",
+    "Preserver le package GHCR public et le pull anonyme ; aucun secret ajoute.",
+    "Pas de deploiement sur l'instance Vysion actuelle ; modification minimale, branche et PR dediees, pas de merge sans autorisation.",
+    "Documenter le compromis de mutabilite et la limite Portainer reelle au lieu de la masquer."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Decision produit transmise sur la carte kanban t_69ab0c1f : mise a jour normale en un clic Update the stack, canal explicite stable plutot que latest, stable ne bougeant qu'apres succes des gates main, autres piles conservees sous contrat digest immuable",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "Consigne d'execution sur la carte, sans source externe."
+    },
+    {
+      "url": null,
+      "purpose": "Etat du repository au cadrage : main@672cedfdf056d5f9f535aff24431e94644fc401e, .github/workflows/publish-container.yml ne publie que ghcr.io/tetrax/vysion:sha-${{ github.sha }} et compose.standalone.yml exige IMAGE_DIGEST",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "Lu dans le worktree avant modification."
+    },
+    {
+      "url": null,
+      "purpose": "Decisions 0006 (TLS termine par l'hote, HTTP loopback), 0007 (surface standalone TLS etat durable), 0008 (trois modes, confiance transferee) et 0010 (installation Portainer zero-CLI, volumes geres par Compose, distribution hors ligne) qui encadrent celle-ci",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "docs/decisions/0006-*.json a 0010-*.json."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Suite de 0010 : le parcours zero-CLI gagne une mise a jour zero-variable en ligne, sans modifier le contrat digest des autres piles ni le mode hors ligne.",
+    "remote_publication": "PR uniquement, review independante obligatoire sur le meme commit, pas de merge",
+    "portainer_deployment": "not executed - aucun runtime distant modifie pendant le developpement ; le rendu Compose et les contrats CI/tests font foi, la recette Portainer reelle reste a faire sur une instance isolee"
+  },
+  "rollback_boundary": "Revert de la PR sans effet sur un runtime : aucun deploiement n'est modifie en production pendant le developpement. Tant que stable n'a jamais ete publie, le revert ne retire qu'une condition d'etape inoccupee et remet compose.standalone.yml sous IMAGE_DIGEST (installation a re-saisir). Apres publication, retirer stable revient a arreter la promotion : les images deja publiees restent dans GHCR, les tags sha-<commit> et les digests demeurent pour trace et rollback. Un rollback d'instance se fait en pinant ghcr.io/tetrax/vysion:sha-<commit> ou le digest dans l'editeur de la pile : aucune variable n'est creee, aucun volume n'est touche."
+}

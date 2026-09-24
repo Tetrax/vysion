@@ -4,7 +4,7 @@
 
 - repository GitHub privé unique ;
 - `compose.yml` versionné unique, servi par la Git Stack Portainer unique ;
-- image GHCR immuable référencée par digest OCI `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : la CI publie en plus un tag humain `sha-<commit complet>` et lie l'image à son commit par le label OCI `org.opencontainers.image.revision`, vérifié à la publication ; la stack de production ne contient volontairement aucune section `build`, car Portainer doit consommer cette image publiée et Docker ne peut pas taguer un build local avec un digest ;
+- image GHCR immuable référencée par digest OCI `ghcr.io/tetrax/vysion@sha256:<64 hex>`, jamais par tag : la CI publie en plus un tag humain `sha-<commit complet>` et lie l'image à son commit par le label OCI `org.opencontainers.image.revision`, vérifié à la publication ; la seule exception est `compose.standalone.yml` en ligne, qui suit le canal promu `ghcr.io/tetrax/vysion:stable` pour permettre une mise à jour en un clic (« Mise à jour en un clic », décision 0011) ; la stack de production ne contient volontairement aucune section `build`, car Portainer doit consommer cette image publiée et Docker ne peut pas taguer un build local avec un digest ;
 - aucun `docker compose up/down` dans le parcours normal : la bascule et le rollback utilisent Portainer, l'arrêt de l'ancienne instance est la seule opération hôte documentée ;
 - aucun secret dans Git : identifiants Git et GHCR saisis dans Portainer uniquement.
 
@@ -20,7 +20,7 @@
 
 | Variable | Rôle | Valeur |
 | --- | --- | --- |
-| `IMAGE_DIGEST` | digest OCI `sha256:<64 hex>` de l'image déployée (voir « Obtenir et saisir la référence immuable ») | **requis**, aucune valeur par défaut |
+| `IMAGE_DIGEST` | digest OCI `sha256:<64 hex>` de l'image déployée (voir « Obtenir et saisir la référence immuable ») | **requis** dans `compose.yml`, `compose.proxy.yml` et `compose.helper.yml` ; **jamais saisi** dans `compose.standalone.yml` en ligne, qui suit le canal `stable` |
 | `BIND_ADDRESS` | IP publiée sur l'hôte (IP uniquement) | `127.0.0.1` |
 | `HOST_PORT` | port publié sur l'hôte (port uniquement) | `8080` en production, `18080` pendant la validation |
 | `VYSION_REVISION` | révision compilée dans l'image | renseignée par CI |
@@ -30,10 +30,10 @@
 
 `BIND_ADDRESS` et `HOST_PORT` sont indépendants : on ne change jamais l'IP pour changer le port.
 
-`IMAGE_DIGEST` est le digest complet `sha256:<64 hex>` de l'image : Compose ne peut rendre que `ghcr.io/tetrax/vysion@${IMAGE_DIGEST}`, une référence adressée par le contenu. Un tag n'est tout simplement pas exprimable à cet endroit. Sans `IMAGE_DIGEST` ou avec une valeur vide, la pile refuse de se résoudre (interpolation Compose). Pour toute autre valeur non conforme — `latest`, `sha-latest`, un SHA court, une valeur majuscule ou non hexadécimale — Compose rend la référence mais Docker lui-même la refuse à l'acquisition de l'image (`invalid reference format` / `invalid checksum digest format`), avant tout contact au registre et avant toute création de conteneur : aucun service ne peut devenir `healthy`. Une image construite localement ne peut pas non plus usurper la référence déployée, Docker refusant de taguer un digest (`build tag cannot contain a digest`). Le contrat CI rejette en plus tout rendu différent de `ghcr.io/tetrax/vysion@sha256:[0-9a-f]{64}` et toute référence que `docker pull` accepterait.
+`IMAGE_DIGEST` est le digest complet `sha256:<64 hex>` de l'image : pour les trois piles épinglées (`compose.yml`, `compose.proxy.yml`, `compose.helper.yml`), Compose ne peut rendre que `ghcr.io/tetrax/vysion@${IMAGE_DIGEST}`, une référence adressée par le contenu. Un tag n'est tout simplement pas exprimable à cet endroit. Sans `IMAGE_DIGEST` ou avec une valeur vide, la pile refuse de se résoudre (interpolation Compose). Pour toute autre valeur non conforme — `latest`, `sha-latest`, un SHA court, une valeur majuscule ou non hexadécimale — Compose rend la référence mais Docker lui-même la refuse à l'acquisition de l'image (`invalid reference format` / `invalid checksum digest format`), avant tout contact au registre et avant toute création de conteneur : aucun service ne peut devenir `healthy`. Une image construite localement ne peut pas non plus usurper la référence déployée, Docker refusant de taguer un digest (`build tag cannot contain a digest`). Le contrat CI rejette en plus tout rendu différent de `ghcr.io/tetrax/vysion@sha256:[0-9a-f]{64}` et toute référence que `docker pull` accepterait. `compose.standalone.offline.yml` reste hors de ce contrat digest : il demande le tag importé `VYSION_IMAGE` (voir le mode hors ligne).
 
 ```bash
-# la pile refuse de se résoudre sans le digest d'image
+# les piles épinglées par digest refusent de se résoudre sans le digest d'image
 docker compose config --quiet                       # échec attendu
 IMAGE_DIGEST= docker compose config --quiet         # échec attendu (valeur vide)
 # l'ancien nom mutable ne résout plus rien
@@ -42,9 +42,21 @@ IMAGE_TAG=latest docker compose config --quiet      # échec attendu
 HOST_PORT=8080  IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
 # validation temporaire à côté de l'instance en service
 HOST_PORT=18080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
+# standalone en ligne : AUCUN digest à saisir, le canal stable suffit
+VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config --quiet
 ```
 
+## Le canal `stable` (mise à jour en un clic du standalone en ligne)
+
+`compose.standalone.yml` est la seule pile qui ne demande **aucune** `IMAGE_DIGEST` : elle référence `ghcr.io/tetrax/vysion:stable` avec `pull_policy: always`.
+
+- `stable` est le **seul tag mutable** de la chaîne de livraison. La CI ne le promeut que dans le job `publish`, qui a besoin des trois gates (`python`, `frontend`, `stack`), avec la condition `github.event_name == 'push' && github.ref == 'refs/heads/main'` : jamais depuis une pull request, jamais depuis une autre référence, jamais depuis un `workflow_dispatch`. La promotion copie le manifeste exact du tag `sha-<commit>` déjà vérifié (`docker buildx imagetools create`) et compare les digests — aucun rebuild, une seule provenance.
+- `pull_policy: always` est ce qui rend **Update the stack** effectif : sans re-pull, Compose se contenterait de l'image déjà présente sous ce tag local et ne recréerait rien.
+- **Compromis assumé** : un canal mutable, contrepartie d'une mise à jour en un clic. Ce qui est réellement exécuté reste vérifiable — label OCI `org.opencontainers.image.revision`, digest réel du conteneur, tag `sha-<commit>` correspondant (« Vérifier l'image réellement exécutée ») — et rollbackable par pin `ghcr.io/tetrax/vysion:sha-<commit>` ou digest (« Rollback »). Volumes, données, certificats et variables métier ne sont jamais touchés par la promotion.
+
 ## Obtenir et saisir la référence immuable
+
+> Ce parcours sert les piles épinglées par digest. **En ligne en standalone, aucune saisie n'est nécessaire** : la pile suit `stable`, voir « Mise à jour en un clic ».
 
 1. relever le commit à déployer (`git rev-parse HEAD`, 40 hex) et vérifier que la CI **exact-head** de ce commit est entièrement verte ;
 2. obtenir le digest `sha256:<64 hex>` publié par la CI pour ce commit, au choix :
@@ -67,6 +79,8 @@ docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revisi
 ```
 
 Le premier doit être la saisie `IMAGE_DIGEST`, le troisième doit être le commit 40 hex déployé. Un digest local reconstruit (RepoDigests vide) ou un label absent signe une image qui n'a pas été publiée par la CI : rollback.
+
+Sur la pile standalone en ligne, la référence configurée est `ghcr.io/tetrax/vysion:stable` : c'est donc le **label** qui donne le commit réellement exécuté et `RepoDigests` qui donne le digest derrière `stable` (les deux doivent appartenir au même commit annoncé). Le tag `ghcr.io/tetrax/vysion:sha-<commit>` de ce digest est le pin de rollback.
 
 ## Volumes (rapports, état, certificats) et isolation des validations
 
@@ -153,9 +167,10 @@ Le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publ
    - Compose path : `compose.standalone.yml` ;
    - Ref : `main` (ou la branche/tag livré par le fournisseur) ;
    - Variables d'environnement — **aucun secret** ne s'y écrit :
-     - **obligatoires** : `IMAGE_DIGEST=sha256:<64 hex>` (communiqué par le fournisseur — voir « Obtenir et saisir la référence immuable »), `VYSION_TLS_HOSTNAME=vysion.entreprise.lan` ;
+     - **obligatoire** : `VYSION_TLS_HOSTNAME=vysion.entreprise.lan` ;
+     - **jamais `IMAGE_DIGEST`** : la pile suit le canal `ghcr.io/tetrax/vysion:stable` (« Le canal `stable` ») ;
      - optionnels : `BIND_ADDRESS=0.0.0.0` (généralement nécessaire pour servir le réseau ; défaut `127.0.0.1` = hôte seul), `HTTPS_PORT=443`, `PUBLIC_ORIGIN=https://vysion.entreprise.lan` (dérivé de `VYSION_TLS_HOSTNAME` si vide), `TRUSTED_PROXY_CIDRS=<sources autorisées>`, `MEM_LIMIT=512m`, `CPU_LIMIT=1.0`, `REPORT_TTL_SECONDS=3600`, `MAX_UPLOAD_BYTES=5242880`, `VYSION_VOLUME_PREFIX=` (vide) ;
-3. **Déployer** : Portainer tire l'image depuis `ghcr.io` en lecture anonyme et crée lui-même les trois volumes nommés stables (`vysion-reports`, `vysion-state`, `vysion-certs`) au premier démarrage : **aucune commande hôte**, aucune étape `docker volume create` ;
+3. **Déployer** : Portainer tire `ghcr.io/tetrax/vysion:stable` depuis `ghcr.io` en lecture anonyme (`pull_policy: always`) et crée lui-même les trois volumes nommés stables (`vysion-reports`, `vysion-state`, `vysion-certs`) au premier démarrage : **aucune commande hôte**, aucune étape `docker volume create` ;
 4. **Santé** : attendre l'état `healthy` (le healthcheck traverse Nginx puis FastAPI — voir « Healthcheck »), puis ouvrir `https://vysion.entreprise.lan/admin`.
 
 ### Mode hors ligne (image tar importée + Compose téléversé)
@@ -165,7 +180,7 @@ Le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publ
 3. **Stack** : Portainer → *Stacks* → *Add stack* → *Web editor* ou *Upload* → fournir `compose.standalone.offline.yml` avec :
    - **obligatoires** : `VYSION_IMAGE=ghcr.io/tetrax/vysion:sha-<commit>` (le tag exact de l'image importée), `VYSION_TLS_HOSTNAME=…` ;
    - mêmes variables optionnelles qu'en ligne ;
-   - ne jamais forcer un « pull » : hors ligne il n'y a rien à tirer. **Limite documentée du mode hors ligne** : une image importée depuis un tar ne porte pas son digest OCI, l'immutabilité repose alors sur l'archive livrée et sa somme annoncée — le mode en ligne conserve, lui, le contrat digest strict ;
+   - ne jamais forcer un « pull » : hors ligne il n'y a rien à tirer. **Limite documentée du mode hors ligne** : une image importée depuis un tar ne porte pas son digest OCI, l'immutabilité repose alors sur l'archive livrée et sa somme annoncée — le mode en ligne, lui, suit le canal `stable` promu par la CI, dont le digest et le commit restent vérifiables (« Le canal `stable` ») ;
 4. mêmes étapes de santé et d'onboarding que le mode en ligne.
 
 ### Onboarding (depuis le navigateur uniquement)
@@ -181,16 +196,29 @@ Le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publ
 
 La sauvegarde chiffrée documentée côté client est l'export depuis `/admin` (*Compte* → « Sauvegarde de migration ») : bundle `.vysmig` scellé (AES-256-GCM + scrypt), rapporté dans la section « Migration chiffrée entre instances ». Les archives de volumes (`scripts/backup.sh`) restent réservées à un opérateur disposant d'un accès hôte ; sans CLI sur la VM cliente, elles ne font pas partie du parcours client.
 
-### Mise à jour (par digest en ligne, par tar hors ligne)
+### Mise à jour en un clic (standalone en ligne)
 
-1. le fournisseur communique le commit à déployer, son digest (`IMAGE_DIGEST`) et ses notes, après CI exact-head verte ;
-2. **en ligne** : Portainer → la stack → *Update* → remplacer `IMAGE_DIGEST` → *Update the stack* ;
-   **hors ligne** : importer le nouveau tar (*Images* → *Upload*) puis remplacer `VYSION_IMAGE` dans la stack → *Update* ;
-3. **vérifier** : conteneur `healthy`, révision OCI = commit livré (labels du conteneur — voir « Vérifier l'image réellement exécutée », ou le tag `sha-<commit>` en mode hors ligne), `/admin` connectif, `GET /healthz` vert.
+**Résumé** : `Portainer → Stacks → Vysion → Update the stack` (**aucune variable à changer**) → vérifier l'état `healthy` puis `GET /healthz`.
+
+1. le fournisseur annonce que la CI **exact-head** de `main` est verte et que le job **Publish container image** a promu le canal : la dernière ligne de l'étape « Promote the verified image to the stable channel (main only) » affiche `ghcr.io/tetrax/vysion:stable -> sha256:<64 hex>` ainsi que le commit correspondant ;
+2. **en ligne** : dans Portainer, ouvrir la pile puis cliquer **Portainer → Stacks → Vysion → Update the stack** — **aucune variable à changer**, ni `IMAGE_DIGEST` ni aucune autre : la configuration de la pile reste celle de l'installation ;
+3. `pull_policy: always` force le re-pull de `stable` : Compose recrée le conteneur sur le nouveau manifeste ; volumes, données, certificats et variables métier restent inchangés ;
+4. **vérifier** : conteneur `healthy` puis `GET /healthz` vert, révision OCI = commit annoncé (label `org.opencontainers.image.revision`, voir « Vérifier l'image réellement exécutée »), `/admin` connectif.
+
+**Limite Portainer réelle** : la mise à jour n'a d'effet que si Portainer relance bien le déploiement de la pile et si le re-pull a effectivement lieu — c'est précisément ce que `pull_policy: always` rend indépendant du contenu de la pile. L'étape 4 tranche : si la révision OCI n'a pas bougé, rouvrir la pile dans l'éditeur Portainer et relancer *Update the stack* ; en dernier recours, y épingler `ghcr.io/tetrax/vysion:sha-<commit>` du livrage, relancer *Update the stack* puis revérifier. Aucune de ces étapes ne touche aux volumes.
+
+### Mise à jour hors ligne (par tar)
+
+1. le fournisseur communique le commit à déployer, son tag et ses notes, après CI exact-head verte ;
+2. importer le nouveau tar (*Images* → *Upload*) puis remplacer `VYSION_IMAGE` dans la stack → *Update* ;
+3. **vérifier** : conteneur `healthy`, révision = commit livré (le tag `sha-<commit>` en mode hors ligne), `/admin` connectif, `GET /healthz` vert.
 
 ### Rollback
 
-1. le rollback porte uniquement sur la stack : **en ligne**, remettre l'`IMAGE_DIGEST` précédent puis *Update* ; **hors ligne**, réimporter le tar précédent puis remettre l'`VYSION_IMAGE` précédent ;
+1. le rollback porte uniquement sur la stack :
+   - **standalone en ligne** : dans l'éditeur de la pile, remplacer `ghcr.io/tetrax/vysion:stable` par le pin du dernier état sain — `ghcr.io/tetrax/vysion:sha-<commit>` ou `ghcr.io/tetrax/vysion@sha256:<64 hex>` (tous deux affichés par la CI) — puis *Update the stack* : la pile redevient immuable le temps du retour arrière et aucune variable n'est créée. C'est la contrepartie assumée du canal mutable : une *Update the stack* ultérieure depuis la version Git de la pile réactive `stable` ;
+   - **VPS / proxy / helper** : remettre l'`IMAGE_DIGEST` précédent puis *Update* ;
+   - **hors ligne** : réimporter le tar précédent puis remettre l'`VYSION_IMAGE` précédent ;
 2. les trois volumes ne sont ni créés ni supprimés par un rollback : état, certificats et rapports traversent la bascule à l'identique ;
 3. si l'état lui-même est en cause : restaurer le bundle de migration ou les archives de volumes (« Sauvegarde et restauration ») — cette dernière voie exige un accès hôte ;
 4. un gate non vert (conteneur pas `healthy`, `/admin` inaccessible, empreinte TLS différente) impose le retour au livrable précédent avant toute autre action.
@@ -199,7 +227,7 @@ La sauvegarde chiffrée documentée côté client est l'export depuis `/admin` (
 
 | Fournisseur | Client |
 | --- | --- |
-| image publiée `linux/amd64`, digest (en ligne) et somme du tar (hors ligne), notes de version | VM Linux x86_64 à jour, Docker Engine, Portainer, DNS, pare-feu TCP 443 limité aux sources autorisées |
+| image publiée `linux/amd64`, canal `stable` promu (standalone en ligne), digest (piles épinglées) et somme du tar (hors ligne), notes de version | VM Linux x86_64 à jour, Docker Engine, Portainer, DNS, pare-feu TCP 443 limité aux sources autorisées |
 | correctifs, communications de mise à jour, réponse aux incidents applicatifs | accès sortant `github.com`/`ghcr.io` en mode en ligne (sans credential), certificat d'entreprise, passphrase de migration |
 | runbook, contrats de déploiement, format de sauvegarde chiffrée | exécution régulière de la sauvegarde chiffrée et garde de la passphrase hors de Vysion |
 | — | exposition limitée au réseau interne ou filtré : l'audit est anonyme, sans login applicatif |
@@ -207,7 +235,8 @@ La sauvegarde chiffrée documentée côté client est l'export depuis `/admin` (
 ### Limites assumées de l'installation
 
 - image `linux/amd64` (x86_64) **uniquement** ;
-- hors ligne : tag local importé, digest OCI non porté — immuabilité reposant sur le tar livré et sa somme annoncée ;
+- hors ligne : tag local importé, digest OCI non porté — immutabilité reposant sur le tar livré et sa somme annoncée ;
+- en ligne standalone : le tag `stable` est **mutable** — promu uniquement après les gates de `main`, jamais depuis une pull request — c'est la contrepartie assumée de la mise à jour en un clic ; la vérification de la révision OCI (label `org.opencontainers.image.revision`, digest réel) et le rollback par pin `sha-<commit>`/digest en sont le contre-poids ;
 - toute migration passe par l'UI : les volumes restent inaccessibles sans CLI (Portainer n'expose pas le navigateur de volumes), la restauration d'un état se fait donc par le bundle `.vysmig` ;
 - parcours d'audit **sans login applicatif** : instance pour réseau interne/filtré, jamais exposée sur Internet ouvert ;
 - `client_max_body_size 5m` : un bundle au-delà de la borne de 4 Mo est refusé (borne volontaire, testée).

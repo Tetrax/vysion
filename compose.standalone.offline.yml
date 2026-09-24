@@ -13,7 +13,8 @@
 # Immutability therefore rests on the tar archive itself (verify the sha256
 # the supplier states through your transfer channel) rather than on a
 # registry digest: that is the documented offline trade-off. The online
-# path (compose.standalone.yml + IMAGE_DIGEST) keeps the digest contract.
+# path (compose.standalone.yml) tracks the promoted `stable` channel
+# instead, whose digest and revision stay verifiable (decision 0011).
 services:
   vysion:
     image: ${VYSION_IMAGE:?set VYSION_IMAGE to the imported image tag ghcr.io/tetrax/vysion:sha-<commit>}
