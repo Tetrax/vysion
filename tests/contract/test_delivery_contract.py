@@ -684,13 +684,102 @@ def test_compose_helper_mounts_a_read_only_socket_and_never_a_certificate() -> N
     assert "${TRUSTED_PROXY_CIDRS:?" in environment["VYSION_TRUSTED_PROXY_CIDRS"]
 
     mounts = service["volumes"]
-    helper_mounts = [entry for entry in mounts if "/run/vysion-cert-helper" in entry]
-    assert helper_mounts == ["/run/vysion-cert-helper:/run/vysion-cert-helper:ro"]
+    helper_mounts = [entry for entry in mounts if entry.startswith("/run/vysion-cert-helper:")]
+    # The host directory does not move — the systemd unit owns it — while the
+    # container side is exactly the path compose hands to the application.
+    # That path must also survive the declared tmpfs: see
+    # test_the_helper_socket_path_cannot_be_masked_by_a_mount_or_tmpfs.
+    assert helper_mounts == [
+        f"/run/vysion-cert-helper:{os.path.dirname(environment['VYSION_HELPER_SOCKET_PATH'])}:ro"
+    ]
     # The application must never receive a writable certificate path, and the
     # helper's generations are not a Docker volume: they live on the host.
     assert not any("certs" in entry for entry in mounts)
     assert "vysion-certs" not in compose.get("volumes", {})
     assert list(compose["volumes"]) == ["vysion-reports", "vysion-state"]
+
+
+# ``/var/run`` is a symlink to ``/run`` inside the image: a tmpfs declared on
+# ``/var/run`` (Nginx needs one) therefore hides whatever is mounted *under*
+# ``/run``. This is not theoretical — it is how the helper socket vanished
+# when the certificate administration of PR #16 reached a real host: the
+# container stayed healthy, ``docker inspect`` kept announcing the bind, and
+# ``stat /run/vysion-cert-helper`` returned ENOENT.
+IMAGE_SYMLINKS = {"/var/run": "/run"}
+
+
+def _inside_image(path: str) -> str:
+    """A mount target as the container resolves it, known symlinks included."""
+    normalized = os.path.normpath(path)
+    for link, target in IMAGE_SYMLINKS.items():
+        if normalized == link or normalized.startswith(f"{link}/"):
+            normalized = f"{target}{normalized[len(link) :]}"
+    return os.path.normpath(normalized)
+
+
+def _covers(parent: str, child: str) -> bool:
+    """``parent`` sits on ``child`` — equal, or above it: mounting there hides it."""
+    return child == parent or child.startswith(f"{parent}/")
+
+
+def _declared_mount_targets(service: dict) -> dict[str, str]:
+    """Every destination a volume, a bind or a tmpfs occupies, with its entry."""
+    targets: dict[str, str] = {}
+    for entry in service.get("volumes", []):
+        parts = entry.split(":")
+        if len(parts) >= 2:
+            targets[parts[1]] = entry
+    for entry in service.get("tmpfs", []):
+        targets[entry.split(":", 1)[0]] = entry
+    return targets
+
+
+def test_the_helper_socket_path_cannot_be_masked_by_a_mount_or_tmpfs() -> None:
+    """The socket helper mode consumes must survive every declared mount.
+
+    The defect this pins down: a bind on ``/run/vysion-cert-helper`` was
+    announced by ``docker inspect`` yet absent in the container, because the
+    tmpfs mounted on ``/var/run`` — a symlink to ``/run`` — mounted over it.
+    Declaration is not reachability, so the contract is structural rather
+    than anecdotal:
+
+    * the path the application consumes is stated in compose, never left to
+      the in-image default and never interpolated;
+    * it is fed by the host directory the systemd unit owns, still ``:ro``;
+    * no other declared mount sits on that path, above it or below it,
+      ``/var/run`` symlink included.
+    """
+    compose = yaml.safe_load((ROOT / "compose.helper.yml").read_text())
+    service = compose["services"]["vysion"]
+    environment = service["environment"]
+
+    declared = environment.get("VYSION_HELPER_SOCKET_PATH")
+    assert declared, "helper mode must set VYSION_HELPER_SOCKET_PATH explicitly"
+    assert "${" not in declared, f"the socket path must be a literal, got {declared}"
+    socket_path = _inside_image(declared)
+    socket_directory = _inside_image(os.path.dirname(declared))
+
+    # Host side: the helper's own directory, unchanged, still read-only.
+    host_source = "/run/vysion-cert-helper"
+    helper_binds = [
+        entry for entry in service["volumes"] if entry.split(":", 1)[0] == host_source
+    ]
+    assert helper_binds == [f"{host_source}:{os.path.dirname(declared)}:ro"]
+
+    # The helper's own bind is what supplies the socket: every *other*
+    # declared mount must leave both the socket and its directory alone.
+    mounts = _declared_mount_targets(service)
+    mounts.pop(os.path.dirname(declared), None)
+    for target, entry in mounts.items():
+        resolved = _inside_image(target)
+        for reference, label in ((socket_path, "socket"), (socket_directory, "directory")):
+            assert not _covers(resolved, reference), (
+                f"{entry} is mounted at {resolved} and hides the helper {label} {declared} "
+                f"(the /var/run tmpfs resolves to /run)"
+            )
+            assert not _covers(reference, resolved), (
+                f"{entry} is mounted at {resolved}, inside the helper {label} {declared}"
+            )
 
 
 def test_helper_scripts_and_unit_are_shipped_and_idempotent_by_construction() -> None:
