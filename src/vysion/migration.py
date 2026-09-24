@@ -12,10 +12,12 @@ optional TLS material and nothing else out of or into an instance:
   and a strict manifest (format, version, sizes, SHA-256 per entry,
   TTL reports explicitly listed as excluded);
 * state restore — the candidate database is staged in a private directory,
-  proved to be a coherent initialized Vysion schema (integrity check,
-  schema version, required tables, admin row), stripped of transient rows
-  (sessions, recovery tokens, lockouts, certificate tickets), then swapped
-  in atomically with a byte-identical rollback on any verification failure.
+  proved to match the canonical Vysion schema object for object (integrity
+  check, schema version, exact stored CREATE statements of every object,
+  admin row), stripped of transient rows (sessions, recovery tokens,
+  lockouts, certificate tickets), proved fully usable through the
+  application's own StateStore, then swapped in atomically with a
+  byte-identical rollback on any verification failure.
 
 Every refusal is a fixed, operator-safe message: no bundle byte, path or
 ever the passphrase is echoed. Cryptography stays delegated to recognized
@@ -411,11 +413,14 @@ def parse_bundle(data: bytes, passphrase: str) -> BundlePayload:
 def prepare_staged_state(state_db: bytes, staging_directory: Path) -> Path:
     """Prove the candidate is a coherent, initialized Vysion state.
 
-    Refused: foreign or corrupt database, unknown schema version, missing
-    table, or an instance without an administrator (there is nothing to
-    migrate then). Transient rows — sessions, recovery tokens, lockouts,
-    certificate tickets — are purged so nothing from the previous instance
-    can ever authenticate against the restored one.
+    Refused: foreign or corrupt database, unknown schema version, any
+    deviation from the canonical schema — missing table, look-alike table
+    with arbitrary columns, unexpected view/trigger/index — an instance
+    without an administrator (there is nothing to migrate then), or a
+    candidate that does not reopen and serve reads through the
+    application's own StateStore. Transient rows — sessions, recovery
+    tokens, lockouts, certificate tickets — are purged so nothing from the
+    previous instance can ever authenticate against the restored one.
     """
     if len(state_db) > MAX_STATE_DB_BYTES:
         raise MigrationError(OVERSIZED)
@@ -454,6 +459,14 @@ def prepare_staged_state(state_db: bytes, staging_directory: Path) -> Path:
         }
         if not set(STATE_REQUIRED_TABLES).issubset(tables):
             raise MigrationError(BAD_STATE)
+        try:
+            # Object for object, the stored CREATE statements this
+            # application itself executes: columns, constraints and defaults
+            # come from the very text SQLite parsed, and any object we never
+            # created (view, trigger, extra table or index) is a refusal.
+            StateStore.require_canonical_schema(connection)
+        except StateError as exc:
+            raise MigrationError(BAD_STATE) from exc
         admin = connection.execute("SELECT 1 FROM admin WHERE id = 1").fetchone()
         if admin is None:
             raise MigrationError(BAD_STATE)
@@ -472,7 +485,29 @@ def prepare_staged_state(state_db: bytes, staging_directory: Path) -> Path:
     finally:
         connection.close()
     staged.chmod(DATABASE_MODE)
+    _require_usable_state(staging_directory, staged)
     return staged
+
+
+def _require_usable_state(staging_directory: Path, staged: Path) -> None:
+    """Open the staged database exactly as the application will.
+
+    Structural validity is not usability: this runs the real StateStore
+    constructor (schema read, migration, transient purge) plus the reads a
+    restored instance lives on — administrator row, e-mail row typing,
+    session list — against the staged copy, before any live byte is
+    touched. A candidate that cannot serve the instance never becomes the
+    state the instance serves; the staging file is removed and the original
+    database stays in place.
+    """
+    try:
+        store = StateStore(staging_directory)
+        store.admin_revision()
+        store.email_config()
+        store.list_sessions()
+    except (StateError, sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
+        staged.unlink(missing_ok=True)
+        raise MigrationError(BAD_STATE) from exc
 
 
 def _verify_restored_state(state_directory: Path) -> bool:

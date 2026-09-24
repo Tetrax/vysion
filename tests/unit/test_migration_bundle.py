@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import sqlite3
 import struct
 import threading
 import zipfile
@@ -481,3 +482,136 @@ def test_full_restore_report_and_staging_cleanup(tmp_path: Path) -> None:
         "correct horse battery staple"
     )
     assert list(state_directory.glob(".migration-staging-*")) == []
+
+
+def candidate_database(tmp_path: Path, name: str, *, email: bool = False) -> Path:
+    """A genuine initialized state database, ready for a hostile mutation."""
+    store = StateStore(tmp_path / f"{name}-origin", clock=lambda: NOW)
+    assert store.create_admin("correct horse battery staple")
+    if email:
+        store.set_email_config(
+            transport="smtp",
+            from_address="vysion@example.com",
+            smtp_host="mail.example",
+            smtp_password="a-smtp-secret",
+        )
+    candidate = tmp_path / f"{name}.db"
+    candidate.write_bytes((tmp_path / f"{name}-origin" / "vysion-state.db").read_bytes())
+    return candidate
+
+
+def name_only_look_alike(path: Path) -> bytes:
+    """The probe shape: table names, schema version and admin.id=1 — nothing else."""
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.execute("INSERT INTO meta (key, value) VALUES ('schema_version', '1')")
+    connection.execute("CREATE TABLE admin (id INTEGER PRIMARY KEY, note TEXT)")
+    connection.execute("INSERT INTO admin (id) VALUES (1)")
+    for table in (
+        "sessions",
+        "lockouts",
+        "recovery_tokens",
+        "smtp",
+        "email",
+        "certificate_tickets",
+    ):
+        connection.execute(f"CREATE TABLE {table} (garbage TEXT)")
+    connection.commit()
+    connection.close()
+    return path.read_bytes()
+
+
+@pytest.mark.parametrize("shape", ["forged-admin-row", "name-only"])
+def test_look_alike_schema_is_refused_and_the_original_target_survives(
+    tmp_path: Path, shape: str
+) -> None:
+    """A candidate that only *looks* initialized never becomes the state.
+
+    The name-only check used to accept exactly this (all table names, a
+    valid schema version, an admin row) and swap it in, closing first-run
+    on an instance the canonical StateStore could no longer open. Both
+    look-alike shapes must now be refused before any live byte moves.
+    """
+    if shape == "forged-admin-row":
+        # Canonical everywhere except the admin table: right name, right
+        # row id, arbitrary columns.
+        candidate = candidate_database(tmp_path, "forged")
+        connection = sqlite3.connect(candidate)
+        connection.execute("DROP TABLE admin")
+        connection.execute("CREATE TABLE admin (id INTEGER PRIMARY KEY, forged TEXT)")
+        connection.execute("INSERT INTO admin (id, forged) VALUES (1, 'forged')")
+        connection.commit()
+        connection.close()
+        forged = candidate.read_bytes()
+    else:
+        forged = name_only_look_alike(tmp_path / "name-only.db")
+    bundle = build_bundle(state_db=forged, passphrase=PASSPHRASE, created_at=NOW)
+
+    state_directory = tmp_path / "target"
+    StateStore(state_directory, clock=lambda: NOW)
+    before = (state_directory / "vysion-state.db").read_bytes()
+
+    with pytest.raises(MigrationError) as captured:
+        restore_bundle(
+            state_directory=state_directory,
+            data=bundle,
+            passphrase=PASSPHRASE,
+            lock=threading.Lock(),
+        )
+    assert str(captured.value) == BAD_STATE
+    # The original target is byte-identical: first-run was never closed, no
+    # staging or backup residue, and normal enrollment still works after.
+    assert (state_directory / "vysion-state.db").read_bytes() == before
+    assert StateStore.probe_has_admin(state_directory) is False
+    assert list(state_directory.glob(".migration-staging-*")) == []
+    assert list(state_directory.glob("*.pre-restore-*")) == []
+    assert StateStore(state_directory, clock=lambda: NOW).create_admin(
+        "correct horse battery staple"
+    )
+
+
+@pytest.mark.parametrize(
+    "ddl",
+    [
+        "CREATE VIEW forged AS SELECT 1",
+        "CREATE TRIGGER forged AFTER INSERT ON lockouts BEGIN SELECT RAISE(IGNORE); END",
+        "CREATE TABLE extra (x INTEGER)",
+        "CREATE INDEX idx_sessions ON sessions(expires_at)",
+    ],
+    ids=["view", "trigger", "extra-table", "explicit-index"],
+)
+def test_unexpected_schema_objects_are_refused(
+    tmp_path: Path, ddl: str
+) -> None:
+    """Only the objects this application created may exist in the state."""
+    candidate = candidate_database(tmp_path, "object")
+    connection = sqlite3.connect(candidate)
+    connection.execute(ddl)
+    connection.commit()
+    connection.close()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with pytest.raises(MigrationError) as captured:
+        prepare_staged_state(candidate.read_bytes(), staging)
+    assert str(captured.value) == BAD_STATE
+    assert list(staging.iterdir()) == []
+
+
+def test_candidate_with_unusable_rows_is_refused(tmp_path: Path) -> None:
+    """Canonical DDL with a row the application cannot read is still refused.
+
+    The schema check passes here; the StateStore usability probe is what
+    refuses — structural validity alone can never close first-run on an
+    instance whose reads would fail after the swap.
+    """
+    candidate = candidate_database(tmp_path, "unusable", email=True)
+    connection = sqlite3.connect(candidate)
+    connection.execute("UPDATE email SET timeout_seconds = 'not-an-integer'")
+    connection.commit()
+    connection.close()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with pytest.raises(MigrationError) as captured:
+        prepare_staged_state(candidate.read_bytes(), staging)
+    assert str(captured.value) == BAD_STATE
+    assert list(staging.iterdir()) == []

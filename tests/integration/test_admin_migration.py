@@ -33,6 +33,7 @@ HOSTNAME = "vysion.example"
 PASSWORD = "a-first-admin-password"
 PASSPHRASE = "a-migration-passphrase"
 SMTP_SECRET = "smtp-password-secret-value"
+M365_SECRET = "m365-client-secret-value"
 
 
 class SilentFortiGuard:
@@ -473,4 +474,94 @@ async def test_incompatible_certificate_keeps_the_restored_state_usable(
     body = certificates.json()
     assert body["active"] is None
     assert body["staging"] is None
+    await client.aclose()
+
+
+async def seed_email_source(tmp_path: Path, *, transport: str) -> dict:
+    """An initialized instance whose e-mail row is fully configured."""
+    app = build_app(tmp_path / f"source-{transport}")
+    client = client_for(app)
+    await enroll(client)
+    store = app.state.state_store
+    if transport == "smtp":
+        store.set_email_config(
+            transport="smtp",
+            from_address="vysion@example.com",
+            recovery_email="operator@example.com",
+            timeout_seconds=21,
+            smtp_host="mail.example",
+            smtp_port=2525,
+            smtp_security="tls",
+            smtp_username="vysion-sync",
+            smtp_password=SMTP_SECRET,
+        )
+    else:
+        store.set_email_config(
+            transport="microsoft365",
+            from_address="vysion@example.com",
+            recovery_email="operator@example.com",
+            timeout_seconds=33,
+            m365_tenant_id="tenant-identifier-value",
+            m365_client_id="client-identifier-value",
+            m365_client_secret=M365_SECRET,
+            m365_mailbox="ops@example.com",
+        )
+    config = store.email_config()
+    assert config is not None
+    email_view = await client.get("/api/admin/email")
+    assert email_view.status_code == 200, email_view.text
+    export = await export_bundle(client)
+    assert export.status_code == 200, export.text
+    await client.aclose()
+    return {"bundle": export.content, "config": config, "plaintext": [email_view]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["smtp", "microsoft365"])
+async def test_email_configuration_survives_migration_exactly_without_http_disclosure(
+    tmp_path: Path, transport: str
+) -> None:
+    """Non-secret settings and the selected transport's secret survive exactly.
+
+    The restored row is compared field for field with the source row, and
+    every plaintext HTTP response of the journey is scanned byte-wise for
+    the secret: only the encrypted bundle body ever carries it out.
+    """
+    source = await seed_email_source(tmp_path, transport=transport)
+    secret = SMTP_SECRET if transport == "smtp" else M365_SECRET
+    assert source["config"].secret == secret
+    for response in source["plaintext"]:
+        assert secret not in response.text
+
+    target = build_app(tmp_path / f"target-{transport}")
+    client = client_for(target)
+    assert (await client.get("/api/admin/status")).json()["setup_required"] is True
+    imported = await import_bundle(client, source["bundle"])
+    assert imported.status_code == 201, imported.text
+    # The public projection of the import: presence and transport, never a value.
+    assert imported.json()["email"] == {
+        "configured": True,
+        "transport": transport,
+        "provenance": "state",
+        "secret_configured": True,
+        "recovery_email_configured": True,
+    }
+
+    # Exact preservation: every non-secret field and the selected secret.
+    restored = target.state.state_store.email_config()
+    assert restored == source["config"]
+    assert restored is not None and restored.secret == secret
+
+    login = await client.post("/api/admin/login", json={"password": PASSWORD})
+    assert login.status_code == 200, login.text
+    email_status = await client.get("/api/admin/email")
+    assert email_status.status_code == 200, email_status.text
+    assert email_status.json()["transport"] == transport
+    assert email_status.json()["secret_configured"] is True
+    assert email_status.json()["recovery_enabled"] is True
+    status = await client.get("/api/admin/status")
+
+    for response in (imported, login, email_status, status):
+        assert secret not in response.text
+        assert PASSWORD not in response.text
     await client.aclose()
