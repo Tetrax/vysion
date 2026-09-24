@@ -70,7 +70,9 @@ Le premier doit être la saisie `IMAGE_DIGEST`, le troisième doit être le comm
 
 ## Volumes (rapports, état, certificats) et isolation des validations
 
-Trois volumes externes, créés **une fois** sur l'hôte — Portainer ne crée jamais un volume déclaré `external` :
+Trois volumes nommés stables — leur **création** dépend de la pile :
+
+- `compose.yml`, `compose.proxy.yml` et `compose.helper.yml` les déclarent **externes** : ils doivent exister **une fois** sur l'hôte avant le déploiement — Portainer ne crée jamais un volume déclaré `external` :
 
 ```bash
 docker volume create vysion-reports
@@ -78,10 +80,14 @@ docker volume create vysion-state
 docker volume create vysion-certs
 ```
 
+- `compose.standalone.yml` et `compose.standalone.offline.yml` les déclarent **gérés par Compose** (même nom stable, sans `external`) : une Git Stack ou un Upload Portainer zéro-commande les crée au premier démarrage — initialisés depuis les répertoires de l'image, droits applicatif (uid 10001) compris — les données survivent au recreate, et Portainer ne les supprime pas à la suppression de la pile : un volume surviv à la stack, seule la sauvegarde protège son contenu.
+
+Dans les deux cas :
+
 - `vysion-reports` : rapports UUID/TTL, même volume pour toutes les piles attachées ;
 - `vysion-state` : SQLite privé de l'administration (fail-closed) ;
 - `vysion-certs` : générations de certificats du mode standalone ;
-- la pile ne les crée, ne les renomme et ne les supprime jamais (`external: true`) ;
+- la pile ne renomme ni ne supprime jamais les volumes en service ; en mode externe elle ne les crée pas non plus (`external: true`) ;
 - `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms rendus par Compose : avec le défaut vide les noms restent stables et aucun changement de production n'a lieu. Pour une validation ou un smoke on crée d'abord des volumes dédiés, de sorte qu'aucune écriture n'atteigne jamais les volumes de production :
 
 ```bash
@@ -120,6 +126,123 @@ La requête traverse Nginx puis est proxifiée vers `127.0.0.1:8000/api/health` 
 - un rapport expiré est refusé et supprimé lors de sa lecture ;
 - le stockage purge aussi les rapports expirés au démarrage de l'application et avant chaque nouvelle écriture ;
 - la purge ne remplace pas une politique séparée de rétention des sauvegardes du volume.
+
+## Installation neuve chez une entreprise (VM Linux + Portainer, zéro commande)
+
+Le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publics** (état vérifié le 2026-09-24 : `visibility=public`, `GET /v2/tetrax/vysion/tags/list` en lecture anonyme répond HTTP 200) : le parcours en ligne ne nécessite **aucun registre ni PAT dans Portainer**, le clone comme le pull sont anonymes. Aucune commande n'est requise sur la VM cliente : le parcours se fait entièrement depuis l'UI Portainer (Git Stack ou Upload) et l'UI `/admin` de Vysion.
+
+> **Rappel d'exposition** : le parcours d'audit (upload, preview, création, téléchargements UUID+TTL) reste **anonyme** — aucune Vysion n'a de login applicatif sur ce parcours. Une instance Vysion est destinée à un **réseau interne ou filtré** (TCP 443 limité aux sources autorisées) : ce n'est pas une application à exposer sur Internet ouvert.
+
+### Prérequis (à réunir avant le jour J)
+
+| # | Prérequis | Détail |
+| --- | --- | --- |
+| 1 | VM Linux x86_64 à jour | Debian 12 / Ubuntu 22.04 ou plus récent ; Docker Engine récent installé — l'image Vysion est construite en `linux/amd64` (x86_64) **uniquement** : sur toute autre architecture le conteneur échoue en `exec format error` |
+| 2 | Portainer | instance atteignable par l'opérateur depuis un navigateur (c'est son unique console) |
+| 3 | DNS | enregistrement (ex. `vysion.entreprise.lan`) pointant vers la VM, résoluble par les postes clients |
+| 4 | Pare-feu TCP 443 | port 443 ouvert **uniquement** aux sources autorisées (réseau interne) — jamais en exposition publique |
+| 5 | Certificat d'entreprise | PEM chaîne + clé (feuille et intermédiaires ; la racine vit chez les clients) correspondant au hostname DNS, ou fichier PKCS#12 avec passphrase — importé ensuite dans `/admin` |
+| 6 | Mode en ligne | accès sortant de la VM vers `github.com` et `ghcr.io` pour le clone et le pull **anonymes** (dépôt public + package public vérifié le 2026-09-24) — **aucun credential** ; un PAT `read:packages` ne redeviendrait nécessaire qu'en variante registry privée, voir G2 |
+| 7 | Mode hors ligne | aucun accès sortant : le fournisseur livre l'image tar `linux/amd64`, la somme sha-256 annoncée par un canal fiable et le fichier Compose adapté |
+
+### Mode en ligne (Git Stack + image GHCR publique)
+
+1. **Registre — aucune étape** : dépôt `Tetrax/vysion` **et** package GHCR `vysion` sont publics (2026-09-24) : Portainer clone la Git Stack et tire l'image **anonymement**, sans *Registries* ni PAT. **Variante (registry privée)** : si le package redevenait privé, configurer Portainer → *Registries* → *Add registry* → `ghcr.io` avec un PAT de portée `read:packages` — alors obligatoire, sans lui le pull échoue ;
+2. **Stack** : Portainer → *Stacks* → *Add stack* → *Git repository* :
+   - Repository URL : `https://github.com/Tetrax/vysion` (dépôt public, aucune étape Git) ;
+   - Compose path : `compose.standalone.yml` ;
+   - Ref : `main` (ou la branche/tag livré par le fournisseur) ;
+   - Variables d'environnement — **aucun secret** ne s'y écrit :
+     - **obligatoires** : `IMAGE_DIGEST=sha256:<64 hex>` (communiqué par le fournisseur — voir « Obtenir et saisir la référence immuable »), `VYSION_TLS_HOSTNAME=vysion.entreprise.lan` ;
+     - optionnels : `BIND_ADDRESS=0.0.0.0` (généralement nécessaire pour servir le réseau ; défaut `127.0.0.1` = hôte seul), `HTTPS_PORT=443`, `PUBLIC_ORIGIN=https://vysion.entreprise.lan` (dérivé de `VYSION_TLS_HOSTNAME` si vide), `TRUSTED_PROXY_CIDRS=<sources autorisées>`, `MEM_LIMIT=512m`, `CPU_LIMIT=1.0`, `REPORT_TTL_SECONDS=3600`, `MAX_UPLOAD_BYTES=5242880`, `VYSION_VOLUME_PREFIX=` (vide) ;
+3. **Déployer** : Portainer tire l'image depuis `ghcr.io` en lecture anonyme et crée lui-même les trois volumes nommés stables (`vysion-reports`, `vysion-state`, `vysion-certs`) au premier démarrage : **aucune commande hôte**, aucune étape `docker volume create` ;
+4. **Santé** : attendre l'état `healthy` (le healthcheck traverse Nginx puis FastAPI — voir « Healthcheck »), puis ouvrir `https://vysion.entreprise.lan/admin`.
+
+### Mode hors ligne (image tar importée + Compose téléversé)
+
+1. le fournisseur livre `vysion-sha-<commit>.tar` (sortie `docker save`, `linux/amd64`), la somme sha-256 de cette archive annoncée par un canal fiable, et `compose.standalone.offline.yml` (versionné dans le dépôt public) ;
+2. **Image** : Portainer → *Images* → *Upload* (import d'image) → sélectionner le tar → l'image apparaît avec son tag `ghcr.io/tetrax/vysion:sha-<commit>` ; avant import, comparer la somme du tar reçu à celle annoncée — Portainer n'affiche pas la somme du fichier, la comparaison se fait par le canal de transfert ;
+3. **Stack** : Portainer → *Stacks* → *Add stack* → *Web editor* ou *Upload* → fournir `compose.standalone.offline.yml` avec :
+   - **obligatoires** : `VYSION_IMAGE=ghcr.io/tetrax/vysion:sha-<commit>` (le tag exact de l'image importée), `VYSION_TLS_HOSTNAME=…` ;
+   - mêmes variables optionnelles qu'en ligne ;
+   - ne jamais forcer un « pull » : hors ligne il n'y a rien à tirer. **Limite documentée du mode hors ligne** : une image importée depuis un tar ne porte pas son digest OCI, l'immutabilité repose alors sur l'archive livrée et sa somme annoncée — le mode en ligne conserve, lui, le contrat digest strict ;
+4. mêmes étapes de santé et d'onboarding que le mode en ligne.
+
+### Onboarding (depuis le navigateur uniquement)
+
+1. ouvrir `https://<hostname>/admin` : premier écran, au choix :
+   - **Configuration initiale** : création de l'unique compte administrateur (12 à 1024 octets UTF-8) puis connexion directe ;
+   - **Restauration d'une sauvegarde de migration** : sélectionner le fichier `.vysmig` fourni par l'ancienne instance (export « Sauvegarde de migration »), saisir la passphrase du bundle → compte, SMTP et certificat actif sont restaurés ; sessions, codes de récupération et verrous antérieurs sont révoqués → se connecter avec l'ancien compte (procédure complète : « Migration chiffrée entre instances ») ;
+2. **Certificat** : *Certificats* → PEM complet + clé (ou PKCS#12 + passphrase) → *Valider* puis activer (ticket à usage unique lié à la session, `nginx -t`, rechargement, empreinte servie) ; sans import, le certificat auto-signé de bootstrap (2 jours) reste servi et l'UI l'annonce ;
+3. **E-mail** (facultatif) : configurer SMTP/M365 depuis *E-mail* si la récupération par courriel est voulue — les secrets s'y écrivent et n'y sont **jamais** relus ;
+4. **Vérification** : `https://<hostname>/healthz` vert, statut depuis `/admin`, création et téléchargement d'un rapport d'audit.
+
+### Sauvegarde chiffrée (sans aucune commande hôte)
+
+La sauvegarde chiffrée documentée côté client est l'export depuis `/admin` (*Compte* → « Sauvegarde de migration ») : bundle `.vysmig` scellé (AES-256-GCM + scrypt), rapporté dans la section « Migration chiffrée entre instances ». Les archives de volumes (`scripts/backup.sh`) restent réservées à un opérateur disposant d'un accès hôte ; sans CLI sur la VM cliente, elles ne font pas partie du parcours client.
+
+### Mise à jour (par digest en ligne, par tar hors ligne)
+
+1. le fournisseur communique le commit à déployer, son digest (`IMAGE_DIGEST`) et ses notes, après CI exact-head verte ;
+2. **en ligne** : Portainer → la stack → *Update* → remplacer `IMAGE_DIGEST` → *Update the stack* ;
+   **hors ligne** : importer le nouveau tar (*Images* → *Upload*) puis remplacer `VYSION_IMAGE` dans la stack → *Update* ;
+3. **vérifier** : conteneur `healthy`, révision OCI = commit livré (labels du conteneur — voir « Vérifier l'image réellement exécutée », ou le tag `sha-<commit>` en mode hors ligne), `/admin` connectif, `GET /healthz` vert.
+
+### Rollback
+
+1. le rollback porte uniquement sur la stack : **en ligne**, remettre l'`IMAGE_DIGEST` précédent puis *Update* ; **hors ligne**, réimporter le tar précédent puis remettre l'`VYSION_IMAGE` précédent ;
+2. les trois volumes ne sont ni créés ni supprimés par un rollback : état, certificats et rapports traversent la bascule à l'identique ;
+3. si l'état lui-même est en cause : restaurer le bundle de migration ou les archives de volumes (« Sauvegarde et restauration ») — cette dernière voie exige un accès hôte ;
+4. un gate non vert (conteneur pas `healthy`, `/admin` inaccessible, empreinte TLS différente) impose le retour au livrable précédent avant toute autre action.
+
+### Responsabilités fournisseur / client
+
+| Fournisseur | Client |
+| --- | --- |
+| image publiée `linux/amd64`, digest (en ligne) et somme du tar (hors ligne), notes de version | VM Linux x86_64 à jour, Docker Engine, Portainer, DNS, pare-feu TCP 443 limité aux sources autorisées |
+| correctifs, communications de mise à jour, réponse aux incidents applicatifs | accès sortant `github.com`/`ghcr.io` en mode en ligne (sans credential), certificat d'entreprise, passphrase de migration |
+| runbook, contrats de déploiement, format de sauvegarde chiffrée | exécution régulière de la sauvegarde chiffrée et garde de la passphrase hors de Vysion |
+| — | exposition limitée au réseau interne ou filtré : l'audit est anonyme, sans login applicatif |
+
+### Limites assumées de l'installation
+
+- image `linux/amd64` (x86_64) **uniquement** ;
+- hors ligne : tag local importé, digest OCI non porté — immuabilité reposant sur le tar livré et sa somme annoncée ;
+- toute migration passe par l'UI : les volumes restent inaccessibles sans CLI (Portainer n'expose pas le navigateur de volumes), la restauration d'un état se fait donc par le bundle `.vysmig` ;
+- parcours d'audit **sans login applicatif** : instance pour réseau interne/filtré, jamais exposée sur Internet ouvert ;
+- `client_max_body_size 5m` : un bundle au-delà de la borne de 4 Mo est refusé (borne volontaire, testée).
+
+## Migration chiffrée entre instances (export / import par le navigateur)
+
+Vysion transporte son état durable (compte administrateur, SMTP/M365, jetons, certificat actif) dans un **bundle de migration chiffré**, manipulable entièrement depuis le navigateur : aucun CLI, aucune commande hôte, aucun secret dans une URL, un journal d'accès ou un message d'erreur.
+
+### Format (versionné, authentifié, jamais maison)
+
+- conteneur `VYSIONMIG`, version 1 : en-tête (magique, version, sel 16 o, nonce 12 o) préfixe le contenu chiffré **AES-256-GCM** (chiffrement authentifié, en-tête en AAD) ;
+- KDF `scrypt` via `hashlib` (OpenSSL), mêmes paramètres bornés que le mot de passe : `n=2**15, r=8, p=1, dklen=32, maxmem=64 MiB` — toute version ou algorithme inconnu est refusé avant toute allocation utile ;
+- dépendance unique épinglée : `cryptography==46.0.5` (empreintes verrouillées dans `requirements.lock`, installation par hash vérifiée dans l'image) ;
+- contenu ZIP borné : `manifest.json` (format, version, horodatage, version Vysion, empreintes SHA-256, `excluded: ["reports"]`), `state/vysion-state.db`, et en mode standalone `certs/fullchain.pem` + `certs/key.pem`. **Les rapports TTL sont volontairement exclus** : leur rétention reste une affaire d'archives de volumes.
+
+### Export (instance source — `/admin` → *Compte* → « Sauvegarde de migration »)
+
+1. session admin authentifiée, jeton `X-CSRF-Token` et `Origin` exact, puis **ré-authentification** du mot de passe courant (échecs bornés → 429, même verrou que le changement de mot de passe) ;
+2. saisir une passphrase de migration (contrat 12 à 1024 octets UTF-8) — elle ne quitte jamais le formulaire ;
+3. le navigateur télécharge `vysion-migration-<horodatage>.vysmig` (`Content-Disposition: attachment`, `Cache-Control: no-store, private`) ;
+4. bornes : état ≤ 16 Mo, certificat ≤ 512 Ko par pièce, bundle ≤ 4 Mo (au-delà : 413, réponse sans détail).
+
+### Import (instance cible neuve — écran « Configuration initiale »)
+
+1. la route existe **uniquement** tant qu'aucun compte n'existe : dès qu'un administrateur existe elle répond `409` — aucun endpoint de restauration anonyme n'existe après l'enrôlement ; `Origin` exact exigé (503 sans `PUBLIC_ORIGIN`), tentatives bornées (5 échecs → 429 pendant 15 min) ;
+2. sélection du `.vysmig` et de la passphrase depuis le formulaire de premier rendu ; l'enrôlement et la restauration partagent un verrou « premier rendu » : un seul des deux peut gagner ;
+3. validation stricte **avant toute écriture durable** : format et version, déchiffrement (secret erroné ou archive altérée → même refus constant), manifeste exact (clés, format, version, empreintes, tailles), arbre ZIP borné (4 entrées au plus, noms autorisés uniquement — traversée, symlink, entrée inattendue, doublon, méthode/ratio/taille hors bornes refusés), base SQLite testée (`integrity_check`, tables attendues, version de schéma ≤ courante, compte présent) — base étrangère, vide ou corrompue refusée ;
+4. restauration atomique sous verrou : copie de sauvegarde de l'état d'origine → remplacement → vérification ; **toute panne pendant l'application roule en arrière sur l'état d'origine** — ni état partiel, ni fichier illisible, et l'enrôlement reste exactement celui d'avant la tentative (fail-closed partout ailleurs : un état illisible n'est jamais lu comme « aucun admin ») ;
+5. après restauration : sessions, codes de récupération, verrous transitoires et tickets de certificat de l'export sont **révoqués** — se connecter avec l'ancien compte et son ancien mot de passe ;
+6. certificat (mode standalone uniquement) : validé avec les contrôles TLS existants (SAN, validité, cohérence de chaîne, chargement réel) et activé **seulement** s'il correspond à `VYSION_TLS_HOSTNAME` (`nginx -t`, rechargement, empreinte servie) ; sinon le certificat bootstrap continue d'être servi, l'état restauré reste utilisable et l'UI présente l'action d'import manuel ;
+7. réponse : projection publique uniquement — `status`, `certificate` (inclus/importé/génération/empreinte/raison), `email` (configuré, transport, hôte expédié), `reports_included: false` : aucun mot de passe, aucune clé, aucun secret renvoyé.
+
+### Smoke post-restauration
+
+`GET /healthz` vert ; sur `/admin` : connexion avec l'ancien compte, mot de passe courant inchangé, ancienne session refusée (401), ancien code de récupération refusé, SMTP configuré identique à la source (l'adresse de récupération est visible, le mot de passe SMTP ne l'est jamais), certificat servi conforme (empreinte), création puis téléchargement d'un rapport d'audit. Après enrôlement, un second import répond `409`.
 
 ## Checklist de bascule vers la Git Stack Portainer
 
@@ -161,13 +284,13 @@ docker volume rm "vysion-smoke-$CHECK_STAMP-vysion-reports" \
 
 **Gate G1** : l'archive existe, ses empreintes sha256 sont notées, et le contenu restauré sur les volumes jetables correspond aux empreintes d'origine. Sans ce test, la sauvegarde n'est pas considérée comme valide. Le nom des archives (`VYSION_BACKUP_PREFIX`, vide pour la production) et le nom des volumes cibles (`VYSION_VOLUME_PREFIX`) sont indépendants ; `scripts/restore.sh` **échoue (exit 1)** lorsqu'aucune archive attendue n'est trouvée, au lieu de signaler une restauration qui n'a rien restauré.
 
-### G2 — credentials Git et GHCR (dans Portainer, jamais dans Git)
+### G2 — accès GHCR (lecture anonyme actuellement ; jamais de secret dans Git)
 
-1. créer dans Portainer un credential Git avec un PAT GitHub de portée `repo` (lecture du repository privé) ;
-2. créer dans Portainer un registre `ghcr.io` avec un PAT de portée `read:packages` ;
+1. le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publics** — vérifié le 2026-09-24 (API `visibility=public`, `GET /v2/tetrax/vysion/tags/list` en jeton anonyme répond HTTP 200) : Portainer clone la Git Stack **et tire l'image en lecture anonyme**, sans *Registries* ni PAT ;
+2. **variante (registry privée)** : si le package redevenait privé, créer dans Portainer un registre `ghcr.io` avec un PAT GitHub de portée `read:packages` — alors obligatoire, sans lui le pull échoue ; aucun credential n'est jamais placé dans le repository ;
 3. vérifier dans Portainer que l'image `ghcr.io/tetrax/vysion:sha-<commit complet>` est listable/pullable.
 
-**Gate G2** : les deux credentials sont en place et aucune valeur n'a été commitée ni envoyée dans le repository.
+**Gate G2** : le parcours d'accès est explicite (lecture anonyme actuellement, credential `read:packages` en variante registry privée) et aucune valeur n'a été commitée ni envoyée dans le repository.
 
 ### G3 — validation temporaire sur `HOST_PORT=18080`
 
@@ -256,7 +379,7 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
 ## Surface d'administration (V2)
 
-- URL : `/admin` (SPA servie par nginx via `try_files`), API sous `/api/admin/*` ; première exécution : le formulaire « Configuration initiale » crée l'unique compte administrateur (12 à 1024 octets UTF-8), puis connexion normale ;
+- URL : `/admin` (SPA servie par nginx via `try_files`), API sous `/api/admin/*` ; première exécution : le formulaire « Configuration initiale » crée l'unique compte administrateur (12 à 1024 octets UTF-8), **ou restaure un bundle de migration chiffré** (voir « Migration chiffrée entre instances »), puis connexion normale ;
 - protections : session `vysion_session` (HttpOnly, SameSite=Strict, Secure en HTTPS), jeton `X-CSRF-Token`, `Origin` exact sur toute mutation, verrouillage après échecs et anti-énumération (réponses uniformes puis 429) ;
 - **le parcours d'audit reste anonyme** (upload, preview, création d'audit, téléchargements UUID+TTL) : aucune authentification globale n'est installée, non-régression prouvée par `tests/integration/test_admin_api.py` et `tests/integration/test_admin_certificates.py` ;
 - SMTP et adresse de récupération : `vysion-admin configure-smtp` (secrets saisis sur stdin, jamais en argument). Sans SMTP, la récupération par courriel reste proprement indisponible ; le recours break-glass est `vysion-admin reset-password` ;

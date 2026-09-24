@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "decision_id": "0010-portainer-zero-cli-install-and-encrypted-migration",
+  "status": "accepted",
+  "scope": "Installation neuve sans CLI via Portainer (mode en ligne GHCR et mode hors ligne tar), volumes standalone geres par Compose, bundle de migration chiffre (export/import /admin) et runbook operateur correspondant. Ne touche ni le moteur d'audit, ni les parcours publics, ni les modes VPS/proxy/helper.",
+  "decision": "1) compose.standalone.yml et le nouveau compose.standalone.offline.yml declarent les trois volumes stables sans external: true : Portainer les cree au premier deploiement (initialisation depuis l'image, droits uid 10001 inclus), sans aucune commande hote, et la donnee survit au recreate ; les piles compose.yml, compose.proxy.yml et compose.helper.yml gardent leurs volumes externes invariants. 2) La distribution hors ligne s'appuie sur compose.standalone.offline.yml, qui exige VYSION_IMAGE=ghcr.io/tetrax/vysion:sha-<commit> (une image importee via Portainer Images -> Import porte son tag mais pas son digest OCI) ; l'immutabilite hors ligne repose sur l'archive tar livree et sa somme annoncee, le contrat digest restant strict en ligne via IMAGE_DIGEST. 3) Sauvegarde/restauration d'etat sans CLI : export /api/admin/migration/export depuis une session admin apres re-authentification du mot de passe courant, bundle .vysmig scelle AES-256-GCM (en-tete en AAD) avec KDF scrypt borne (n=2**15, r=8, p=1, dklen=32, maxmem=64 MiB) via hashlib/OpenSSL et dependance unique epinglee cryptography==46.0.5 (empreintes verrouillees dans requirements.lock, installation par hash) ; import /api/admin/migration/import uniquement sur une instance reellement non initialisee (Origin exact, 5 echecs -> 429), validation stricte (format/version/manifeste empreintes/entrees ZIP a liste blanche bornes/integrity_check SQLite) avant toute ecriture durable, restauration atomique par os.replace sous un verrou premier rendu partage avec l'enrolement, rollback sur l'etat d'origine en cas de panne pendant l'application, revocation sessions/recovery/lockouts/tickets apres restauration, certificat standalone active seulement s'il correspond a VYSION_TLS_HOSTNAME sinon conservation du bootstrap avec action manuelle, rapports TTL exclus du bundle. 4) Runbook OPERATIONS.md : section « Installation neuve chez une entreprise » (pre-requis VM x86_64/Docker-Portainer/DNS/443 restreint/certificat d'entreprise/acces GHCR ou tar, parcours en ligne et hors ligne depuis l'UI Portainer, onboarding, mise a jour par digest, sauvegarde chiffree, rollback, responsabilites fournisseur/client, limites dont l'audit sans login applicatif destine a un reseau interne filtre) plus section « Migration chiffree entre instances » ; correction du drift G2 (repository ET package GHCR publics au 2026-09-24 : clone et pull anonymes, aucun registre ni PAT requis ; variante registry privee read:packages conservee comme note future).",
+  "alternatives": [
+    "Conserver external: true partout et ajouter un pre-requis « docker volume create » : rejete, Portainer ne cree jamais un volume external et l'installation cliente est sans CLI.",
+    "Chiffrer le bundle avec une construction maison (chiffrement de flux + HMAC) : rejete, les regles imposent chiffrement authentifie et KDF d'une bibliotheque reconnue.",
+    "Importer l'etat par copie de volume via un conteneur auxiliaire ou un Upload Portainer de fichier SQLite : rejete, aucun chemin de volume n'est accessible sans CLI et cela contournerait les validations fail-closed de l'etat.",
+    "Referencer l'image hors ligne par digest : impossible, docker save/docker load ne conserve pas les RepoDigests ; le tag sha-<commit> transporteur de la trace de build est la reference exacte que l'import Portainer conserve.",
+    "Permettre la restauration une fois l'admin cree (rollback applicatif plus souple) : rejete, aucun endpoint de restauration anonyme ne doit exister apres l'enrolement."
+  ],
+  "criteria": [
+    "Deploiement sur VM vierge sans commande host : volumes crees par Compose avec les noms stables VYSION_VOLUME_PREFIX, droits applicatif corrects au premier demarrage, healthcheck vert (G4).",
+    "Les piles compose.yml, compose.proxy.yml et compose.helper.yml ne changent pas : volumes externes et contrats CI intacts.",
+    "Distribution hors ligne complete depuis l'UI Portainer : Images -> Import (tar) + Stacks -> Upload (compose.standalone.offline.yml + VYSION_IMAGE), sans accès sortant.",
+    "Export exige session admin + CSRF + Origin + re-authentification ; le bundle contient l'etat et le certificat actif en mode standalone, jamais les rapports TTL ; aucun secret dans URL, journal, en-tete ou message d'erreur.",
+    "Import refuse : mauvais format/version, secret errone ou archive alteree, manifeste incoherent, entrees hors liste blanche (traversee, symlink, inattendue, doublon), zip bomb, base etrangere/corrompue/future, instance deja initialisee, origine absente, tentatives rate-limites.",
+    "Panne simulee pendant l'application : rollback sur l'etat d'origine octet a octet, ni etat partiel ni enrOlement rouvert au-dela de l'etat d'avant tentative.",
+    "Certificat hostname incompatible : conservation du certificat bootstrap, etat restaure reste utilisable, action d'import manuel presentee ; hostname compatible : activation complete (nginx -t, rechargement, empreinte servie).",
+    "Recette complete : export ancien etat -> instance neuve sur volumes vierges -> import par HTTP/UI -> connexion avec l'ancien compte -> secrets jamais retournes, e-mails non secrets identiques, sessions et recoveries anterieures invalides, certificat valide, healthcheck vert.",
+    "Gates CI : pytest (unitaires + integration + contrats mis a jour), Ruff, frontend tests/lint/build/audit, docker compose config pour chaque pile dont compose.standalone.offline.yml, git diff --check."
+  ],
+  "rationale": [
+    "Portainer est la seule console de l'instance cliente : chaque etape restreinte a l'UI (Git Repository, Images Import, Stacks Upload) est une etape realisable sans terminal.",
+    "Le repository Tetrax/vysion est public ; le package GHCR vysion etait prive au cadrage et a ete rendu public par Valentin le 2026-09-24 (visibility=public, tags/list anonyme HTTP 200) : le parcours en ligne ne demande aucun registre ni PAT dans Portainer, la variante registry privee (read:packages) restant documentee si le package redevenait prive, d'ou la correction du gate G2.",
+    "Le bundle chiffre est le seul canal d'etat qui peut franchir une VM sans CLI tout en restant inutilisable sans la passphrase et en preservant les validations fail-closed existantes.",
+    "Un verrou premier rendu partage entre enrOlement et restauration supprime la course qui aurait pu laisser deux decideurs sur la meme question d'etat."
+  ],
+  "constraints": [
+    "Ne toucher a aucun element du moteur d'audit ni aux parcours publics.",
+    "Ne modifier ni le runtime VPS, ni les piles compose.yml/compose.proxy.yml/compose.helper.yml, ni leurs contrats CI.",
+    "Pas de crypto maison : format versionne, chiffrement authentifie et KDF d'une bibliotheque reconnue, parametres bornes et testes, dependance minimale epinglee.",
+    "L'instance publique reste sans login applicatif : le runbook rappelle la destination reseau interne/filtre et l'interdiction d'exposition Internet ouverte.",
+    "Aucun secret dans Git ni dans une URL ; refus constants sans echo."
+  ],
+  "sources": [
+    {
+      "url": null,
+      "purpose": "Note operateur sur la carte t_11d0a921 : parcours d'installation neuve en entreprise sans CLI, depot public, package GHCR rendu public le 2026-09-24 (lecture anonyme), deux modes de distribution, prerequis et responsabilites fournisseur/client",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "Consigne transmise en cours d'execution sur la carte kanban."
+    },
+    {
+      "url": null,
+      "purpose": "Etat du depot verifie au cadrage : Tetrax/vysion PUBLIC, package GHCR vysion PRIVATE a ce moment-la, corrige PUBLIC par note operateur le 2026-09-24 (visibility=public, tags/list anonyme HTTP 200)",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "Verifie sur GitHub/ghcr avant redaction du runbook."
+    },
+    {
+      "url": null,
+      "purpose": "Decisions 0007 (surface /admin, TLS standalone, etat durable), 0008 (confiance transferee, sauvegarde coherente, trois modes) et 0009 (certificats administrables, SMTP/M365, helper root) qui encadrent celle-ci",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "docs/decisions/0007-*.json, 0008-*.json, 0009-*.json."
+    },
+    {
+      "url": null,
+      "purpose": "Compositions de reference des deploiements sans CLI : hub/compose.standalone.yaml (volumes nommes geres par Compose) et FortiUpgrade docker-compose.portainer-import.yml (Images Import + Stacks Upload)",
+      "retrieved_at": "2026-09-24",
+      "retrieval_note": "Lues en cadrage, hors repository Vysion."
+    }
+  ],
+  "approval": {
+    "status": "accepted",
+    "note": "Suite de 0007-0009 : parite operateur elargie au deploiement Portainer zero-commande et au transport d'etat chiffre, sans elargir le perimetre moteur ni les parcours publics.",
+    "remote_publication": "PR uniquement, review independante obligatoire (L3), pas de merge",
+    "portainer_deployment": "not executed - aucun runtime distant modifie pendant le developpement ; la recette standalone reelle est executee en local (build image + stack sur volumes vierges) et documentee dans le handoff"
+  },
+  "rollback_boundary": "Revert de la PR sans effet sur un runtime : les piles VPS/proxy/helper ni leurs volumes externes ne changent, les piles standalone redeviennent external (les volumes nommes crees par Compose restent sur place et sont reutilisables si external est reintroduit sous les memes noms). Le module migration, les routes /api/admin/migration/* et l'UI first-run sont purement additionnels : aucun endpoint anonyme n'existe avant cette PR, leur retrait ne rouvre rien. Les bundles .vysmig produits restent lisibles par la version courante (format versionne, refus des versions inconnues des deux cotes). La dependance cryptography est purement additive dans requirements.lock."
+}

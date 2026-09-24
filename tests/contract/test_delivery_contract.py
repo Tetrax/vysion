@@ -438,10 +438,12 @@ def test_image_contains_the_http_runtime_config_and_drops_every_tls_reference() 
 
 
 def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -> None:
-    """Decision 0007: the standalone stack terminates TLS itself and must
-    resolve only with an immutable digest plus an explicit hostname, while
-    mounting the three stable external volumes (certificates live apart from
-    state and reports)."""
+    """Decision 0007 + zero-CLI Portainer install: the standalone stack
+    terminates TLS itself and must resolve only with an immutable digest
+    plus an explicit hostname, while mounting the three stable volumes —
+    Compose-managed (not external), so a fresh Git Stack creates them
+    itself with the stable names, without any host command, and the data
+    survives recreate. Certificates live apart from state and reports."""
     raw = (ROOT / "compose.standalone.yml").read_text()
     compose = yaml.safe_load(raw)
 
@@ -468,10 +470,13 @@ def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -
         ("vysion-state", "vysion-state:/app/data/state"),
         ("vysion-certs", "vysion-certs:/app/certs"),
     ):
+        # Managed by Compose with the stable name: `external: true` would
+        # force a `docker volume create` on the host before the stack could
+        # even start, which a Portainer-only install cannot perform.
         assert compose["volumes"][volume] == {
-            "external": True,
             "name": "${VYSION_VOLUME_PREFIX:-}" + volume,
         }
+        assert "external" not in compose["volumes"][volume]
         assert mount in service["volumes"]
     assert service["healthcheck"]["test"][-1] == (
         "curl --fail --silent --show-error http://127.0.0.1:8080/healthz"
@@ -888,3 +893,134 @@ def test_the_runbook_installs_every_helper_path_the_unit_requires() -> None:
     readwrite = next(line for line in unit.splitlines() if line.startswith("ReadWritePaths"))
     for path in readwrite.partition("=")[2].split():
         assert path.lstrip("-") in install_text, path
+
+
+def test_offline_stack_requires_the_imported_tag_and_the_same_hardening() -> None:
+    """Decision 0010: offline distribution through Portainer's
+    Images → Import alone. A `docker load`ed tar carries its tag but never
+    its OCI digest, so this stack demands the imported tag (`VYSION_IMAGE`)
+    while keeping every standalone hardening guarantee — including the
+    three stable Compose-managed volumes that make the install zero-CLI."""
+    raw = (ROOT / "compose.standalone.offline.yml").read_text()
+    compose = yaml.safe_load(raw)
+
+    assert list(compose["services"]) == ["vysion"]
+    service = compose["services"]["vysion"]
+    assert service["image"].startswith("${VYSION_IMAGE:?")
+    assert "IMAGE_DIGEST" not in service["image"]
+    environment = service["environment"]
+    assert environment["VYSION_TLS_BACKEND"] == "local"
+    assert "${VYSION_TLS_HOSTNAME:?" in environment["VYSION_TLS_HOSTNAME"]
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["healthcheck"]["test"][-1] == (
+        "curl --fail --silent --show-error http://127.0.0.1:8080/healthz"
+    )
+    assert compose["volumes"] == {
+        "vysion-reports": {"name": "${VYSION_VOLUME_PREFIX:-}vysion-reports"},
+        "vysion-state": {"name": "${VYSION_VOLUME_PREFIX:-}vysion-state"},
+        "vysion-certs": {"name": "${VYSION_VOLUME_PREFIX:-}vysion-certs"},
+    }
+    # Neither standalone stack may reintroduce `external`: a Portainer-only
+    # install has no host command to pre-create a volume.
+    for stack in ("compose.standalone.yml", "compose.standalone.offline.yml"):
+        assert "external: true" not in (ROOT / stack).read_text()
+
+
+def test_offline_stack_renders_only_with_the_imported_reference(
+    tmp_path: Path,
+) -> None:
+    _require_docker_compose()
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("")
+
+    missing = _render("compose.standalone.offline.yml", empty_env)
+    assert missing.returncode != 0, missing.stdout + missing.stderr
+    assert "VYSION_IMAGE" in missing.stderr
+
+    rendered = _render(
+        "compose.standalone.offline.yml",
+        empty_env,
+        VYSION_IMAGE="ghcr.io/tetrax/vysion:sha-deadbeef",
+        VYSION_TLS_HOSTNAME="vysion.example.com",
+    )
+    assert rendered.returncode == 0, rendered.stderr
+    assert "image: ghcr.io/tetrax/vysion:sha-deadbeef" in rendered.stdout
+    assert "name: vysion-certs" in rendered.stdout
+
+
+def test_runbook_documents_the_zero_cli_fresh_install_and_the_bundle() -> None:
+    """Valentin's requirement: a company-fresh install must be documented
+    end to end from the Portainer UI only — both distributions, the exact
+    prerequisites, onboarding, digest updates, encrypted backup, rollback
+    and the supplier/client split — plus the migration bundle itself."""
+    operations = (ROOT / "docs/OPERATIONS.md").read_text().casefold()
+    for marker in (
+        "installation neuve chez une entreprise",
+        "compose.standalone.offline.yml",
+        # online: public repo + public package (2026-09-24) -> anonymous
+        # clone/pull, NO registry credential; read:packages kept only as the
+        # documented private-registry variant
+        "aucun registre ni pat",
+        "lecture anonyme",
+        "variante (registry privée)",
+        "read:packages",
+        "ghcr",
+        "git repository",
+        "image_digest",
+        # offline: image tar via Images → Import, compose via Stacks → Upload
+        "*images* → *upload*",
+        "*stacks*",
+        "vysion_image",
+        # prerequisites spelled out
+        "vysion_tls_hostname",
+        "tcp 443",
+        "linux/amd64",
+        "dns",
+        "dépôt public",
+        # anonymous audit => internal/filtered network, never open Internet
+        "réseau interne ou filtré",
+        "sans login applicatif",
+        # the operator's checklist
+        "onboarding",
+        "sauvegarde chiffrée",
+        "migration chiffrée entre instances",
+        "vysmig",
+        "aes-256-gcm",
+        "scrypt",
+        "rollback",
+        "responsabilités fournisseur / client",
+        "healthz",
+    ):
+        assert marker in operations, marker
+
+    security = (ROOT / "docs/SECURITY.md").read_text().casefold()
+    for marker in (
+        "bundle de migration chiffré",
+        "aes-256-gcm",
+        "cryptography==46.0.5",
+        "aucun endpoint de restauration anonyme",
+        'excluded: ["reports"]',
+    ):
+        assert marker in security, marker
+
+    readme = (ROOT / "README.md").read_text()
+    assert ".vysmig" in readme
+    assert "compose.standalone.offline.yml" in readme
+
+
+def test_the_migration_dependency_is_pinned_with_verified_hashes() -> None:
+    """The authenticated cipher is the one added dependency: pinned to an
+    exact version in pyproject, and every hash locked in requirements.lock
+    so the image's `pip install --require-hashes` verifies each artifact."""
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert '"cryptography==' in pyproject
+    lock = (ROOT / "requirements.lock").read_text()
+    index = lock.index("cryptography==")
+    window = lock[index : index + 4096]
+    assert "--hash=sha256:" in window
+    version = window.partition("==")[2].partition("\\")[0].partition("\n")[0].strip(" \t\\")
+    assert version
+    pyproject_version = pyproject.partition('"cryptography==')[2].partition('"')[0]
+    assert version == pyproject_version

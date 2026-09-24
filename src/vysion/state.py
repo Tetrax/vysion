@@ -188,6 +188,35 @@ class StateStore:
             raise StateError("state database has no schema version")
         return int(row["value"])
 
+    @property
+    def directory(self) -> Path:
+        """Where the durable database lives (migration staging target)."""
+        return self._directory
+
+    def export_snapshot_bytes(self) -> bytes:
+        """Consistent point-in-time snapshot of the database (backup API).
+
+        Used by the migration export: SQLite's serialization is taken from
+        one read transaction, so an export can never capture a half-written
+        admin row or a session created between two statements. The bytes
+        leave this method only toward the in-process bundle builder — no
+        path, no log, no argv.
+        """
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                f"file:{self._path.resolve().as_posix()}?mode=ro", uri=True, timeout=5.0
+            )
+            snapshot = connection.serialize()
+        except sqlite3.Error as exc:
+            raise StateError("state database snapshot failed") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+        if not snapshot:
+            raise StateError("state database snapshot is empty")
+        return bytes(snapshot)
+
     def _create_database_file(self) -> bool:
         """Create the database exclusively; True only for the creating call."""
         if self._path.exists():

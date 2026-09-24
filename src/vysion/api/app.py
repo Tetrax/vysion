@@ -1,4 +1,5 @@
 import json
+import threading
 from collections.abc import Callable, Iterable
 from datetime import date, datetime, timedelta
 from typing import Annotated, Any
@@ -607,6 +608,11 @@ def create_app(
     app.state.settings = resolved_settings
     app.state.state_store = state_store
     app.state.trusted_proxy = trusted_proxy
+    # One clock and one first-run decision point for the whole surface:
+    # first-run enrollment and a migration restore serialize on this lock
+    # (held only across synchronous, sub-millisecond critical sections).
+    app.state.clock = clock
+    app.state.first_run_lock = threading.Lock()
     app.state.recovery_mailer = (
         recovery_mailer if recovery_mailer is not None else TransportMailer(state_store)
     )
