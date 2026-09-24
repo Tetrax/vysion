@@ -92,6 +92,19 @@ const configuredEmail = {
   recovery_email_configured: true,
 }
 
+const authenticatedRoutes: Routes = {
+  '/api/admin/status': () => jsonResponse(authenticatedStatus),
+  '/api/admin/sessions': () => jsonResponse(emptySessions),
+  '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+  '/api/admin/email': () => jsonResponse(emptyEmail),
+}
+
+const TAB_LABELS = ['Certificats', 'Messagerie', 'Système', 'Compte']
+
+async function openTab(user: ReturnType<typeof userEvent.setup>, label: string) {
+  await user.click(screen.getByRole('tab', { name: label }))
+}
+
 describe('administration Vysion', () => {
   it('shows the login form for an anonymous visitor', async () => {
     mockFetch({ '/api/admin/status': () => jsonResponse(anonymousStatus) })
@@ -118,10 +131,15 @@ describe('administration Vysion', () => {
     render(<AdminApp />)
 
     expect(await screen.findByText('Configuration initiale')).toBeInTheDocument()
+    // Tant que la session n'existe pas, aucun onglet métier n'est proposé.
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+
     await user.type(screen.getByLabelText('Nouveau mot de passe administrateur'), 'a-first-admin-password')
     await user.click(screen.getByRole('button', { name: 'Créer le compte administrateur' }))
 
-    expect(await screen.findByRole('button', { name: 'Révoquer toutes les sessions' })).toBeInTheDocument()
+    expect(await screen.findByRole('tablist', { name: 'Sections d’administration' })).toBeInTheDocument()
+    await openTab(user, 'Compte')
+    expect(screen.getByRole('button', { name: 'Révoquer toutes les sessions' })).toBeInTheDocument()
     expect(screen.getByText(/\(courante\)/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
   })
@@ -150,7 +168,7 @@ describe('administration Vysion', () => {
     const user = userEvent.setup()
     render(<AdminApp />)
 
-    expect(await screen.findByText('Certificats TLS')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
     expect(screen.getByText('Aucun certificat actif.')).toBeInTheDocument()
 
     validationDone = true
@@ -183,70 +201,154 @@ describe('administration Vysion', () => {
 })
 
 describe('interface d’administration Vysion', () => {
-  const authenticatedRoutes: Routes = {
-    '/api/admin/status': () => jsonResponse(authenticatedStatus),
-    '/api/admin/sessions': () => jsonResponse(emptySessions),
-    '/api/admin/certificates': () => jsonResponse(emptyCertificates),
-    '/api/admin/email': () => jsonResponse(emptyEmail),
-  }
-
-  it('organise l’administration authentifiée en cinq sections', async () => {
+  it('présente quatre onglets ARIA et un seul panneau métier à la fois', async () => {
     mockFetch(authenticatedRoutes)
     const user = userEvent.setup()
     render(<AdminApp />)
 
-    expect(await screen.findByRole('heading', { name: 'Vue d’ensemble' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Email' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Système' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Compte' })).toBeInTheDocument()
+    const tablist = await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    const tabs = within(tablist).getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual(TAB_LABELS)
 
-    const nav = screen.getByRole('navigation', { name: 'Sections d’administration' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(5)
-    expect(within(nav).getByRole('link', { name: 'Vue d’ensemble' })).toHaveAttribute('aria-current', 'page')
+    expect(tabs[0]).toHaveAttribute('id', 'admin-tab-certificates')
+    expect(tabs[0]).toHaveAttribute('aria-controls', 'admin-panel-certificates')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveAttribute('tabindex', '0')
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'false')
+    expect(tabs[1]).toHaveAttribute('tabindex', '-1')
 
-    await user.click(within(nav).getByRole('link', { name: 'Compte' }))
-    expect(within(nav).getByRole('link', { name: 'Compte' })).toHaveAttribute('aria-current', 'page')
-    expect(within(nav).getByRole('link', { name: 'Vue d’ensemble' })).not.toHaveAttribute('aria-current')
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+    const certificatesPanel = screen.getByRole('tabpanel')
+    expect(certificatesPanel).toHaveAttribute('id', 'admin-panel-certificates')
+    expect(certificatesPanel).toHaveAttribute('aria-labelledby', 'admin-tab-certificates')
+    expect(within(certificatesPanel).getByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+
+    await user.click(tabs[1])
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-email')
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[1]).toHaveAttribute('tabindex', '0')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'false')
+    expect(tabs[0]).toHaveAttribute('tabindex', '-1')
+    expect(screen.queryByRole('heading', { name: 'Certificats TLS' })).not.toBeInTheDocument()
+
+    await user.click(tabs[3])
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-account')
+    expect(screen.queryByRole('heading', { name: 'Messagerie' })).not.toBeInTheDocument()
   })
 
-  it('affiche l’identité, le retour à l’audit, le thème et la déconnexion', async () => {
+  it('navigue entre les onglets au clavier (Gauche, Droite, Home, End)', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    const tablist = await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    const tabs = within(tablist).getAllByRole('tab')
+    tabs[0].focus()
+
+    await user.keyboard('{ArrowRight}')
+    expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[1]).toHaveFocus()
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-email')
+
+    await user.keyboard('{ArrowLeft}')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveFocus()
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-certificates')
+
+    await user.keyboard('{End}')
+    expect(tabs[3]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[3]).toHaveFocus()
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-account')
+
+    await user.keyboard('{Home}')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveFocus()
+
+    // La barre droite referme la boucle depuis le dernier onglet.
+    await user.keyboard('{End}{ArrowRight}')
+    expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+    expect(tabs[0]).toHaveFocus()
+  })
+
+  it('ne s’appuie plus sur des ancres de défilement', async () => {
     mockFetch(authenticatedRoutes)
     render(<AdminApp />)
 
-    expect(await screen.findByText('Vysion')).toBeInTheDocument()
-    expect(screen.getByText('Administration')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Retour à l’audit' })).toHaveAttribute('href', '/')
-    expect(screen.getByRole('button', { name: 'Thème : système' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
-    expect(screen.getByText('Vysion — administration privée')).toBeInTheDocument()
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    expect(document.querySelectorAll('a[href^="#"]')).toHaveLength(0)
+    expect(screen.queryByRole('navigation', { name: 'Sections d’administration' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Vue d’ensemble')).not.toBeInTheDocument()
   })
 
-  it('tient chaque action essentielle à un seul endroit', async () => {
+  it('garde un bandeau de statuts commun au-dessus du panneau actif', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    const strip = await screen.findByRole('region', { name: 'État courant' })
+    expect(within(strip).getByText('Version')).toBeInTheDocument()
+    expect(within(strip).getByText('2.0.0')).toBeInTheDocument()
+    expect(within(strip).getByText('TLS')).toBeInTheDocument()
+    expect(within(strip).getByText('Session')).toBeInTheDocument()
+    expect(within(strip).getByText('Certificat')).toBeInTheDocument()
+    // Le bandeau n'est pas un cinquième onglet.
+    expect(within(strip).queryByRole('tab')).not.toBeInTheDocument()
+
+    await openTab(user, 'Messagerie')
+    expect(screen.getByRole('region', { name: 'État courant' })).toBeInTheDocument()
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('id', 'admin-panel-email')
+  })
+
+  it('tient chaque action essentielle à un seul endroit, dans son panneau', async () => {
     mockFetch({
       '/api/admin/status': () => jsonResponse(standaloneStatus),
       '/api/admin/sessions': () => jsonResponse(emptySessions),
       '/api/admin/certificates': () => jsonResponse(emptyCertificates),
       '/api/admin/email': () => jsonResponse(emptyEmail),
     })
+    const user = userEvent.setup()
     render(<AdminApp />)
 
-    expect(await screen.findByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    // Actions globales : jamais dupliquées, toujours présentes.
     expect(screen.getAllByText('Retour à l’audit')).toHaveLength(1)
     expect(screen.getAllByText('Se déconnecter')).toHaveLength(1)
-    expect(screen.getAllByText('Révoquer toutes les sessions')).toHaveLength(1)
-    expect(screen.getAllByText('Changer le mot de passe')).toHaveLength(1)
-    expect(screen.getAllByText('Valider le certificat')).toHaveLength(1)
+
+    const actionsByTab: Record<string, string[]> = {
+      Certificats: ['Valider le certificat'],
+      Messagerie: ["Enregistrer l’email", 'Tester l’envoi'],
+      Système: [],
+      Compte: ['Changer le mot de passe', 'Révoquer toutes les sessions'],
+    }
+
+    for (const label of TAB_LABELS) {
+      await openTab(user, label)
+      for (const [otherLabel, actions] of Object.entries(actionsByTab)) {
+        for (const action of actions) {
+          const matches = screen.queryAllByText(action)
+          if (otherLabel === label) {
+            expect(matches, `${action} devrait être visible dans ${label}`).toHaveLength(1)
+          } else {
+            expect(matches, `${action} ne devrait pas exister hors de ${otherLabel}`).toHaveLength(0)
+          }
+        }
+      }
+    }
   })
 
   it('explique que le proxy hôte termine le TLS en mode proxy', async () => {
     mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
     render(<AdminApp />)
 
     expect(await screen.findByText('Le TLS est géré par le proxy hôte')).toBeInTheDocument()
     expect(screen.getByText(/Vysion n’importe ni n’active aucun certificat dans ce mode/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Valider le certificat' })).not.toBeInTheDocument()
     expect(screen.getByText('Géré par le proxy hôte')).toBeInTheDocument()
+
+    await openTab(user, 'Système')
+    expect(screen.getByText(/TLS géré par le proxy hôte/)).toBeInTheDocument()
   })
 
   it('présente le contrat du mot de passe à la configuration initiale', async () => {
@@ -260,7 +362,7 @@ describe('interface d’administration Vysion', () => {
       'aria-describedby',
       'setup-password-help',
     )
-    expect(screen.queryByRole('navigation', { name: 'Sections d’administration' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
   })
 
   it('applique et mémorise le thème clair, sombre puis système', async () => {
@@ -294,6 +396,18 @@ describe('interface d’administration Vysion', () => {
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
   })
 
+  it('affiche l’identité, le retour à l’audit, le thème et la déconnexion', async () => {
+    mockFetch(authenticatedRoutes)
+    render(<AdminApp />)
+
+    expect(await screen.findByText('Vysion')).toBeInTheDocument()
+    expect(screen.getByText('Administration')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Retour à l’audit' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('button', { name: 'Thème : système' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
+    expect(screen.getByText('Vysion — administration privée')).toBeInTheDocument()
+  })
+
   it('change le mot de passe avec le jeton CSRF et annonce le résultat', async () => {
     mockFetch({
       ...authenticatedRoutes,
@@ -302,7 +416,8 @@ describe('interface d’administration Vysion', () => {
     const user = userEvent.setup()
     render(<AdminApp />)
 
-    await screen.findByRole('heading', { name: 'Compte' })
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
     await user.type(screen.getByLabelText('Mot de passe actuel'), 'current-admin-password')
     await user.type(screen.getByLabelText('Nouveau mot de passe'), 'a-new-admin-password')
     await user.click(screen.getByRole('button', { name: 'Changer le mot de passe' }))
@@ -313,7 +428,7 @@ describe('interface d’administration Vysion', () => {
     expect((call?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value')
   })
 
-  it('révoque les sessions depuis la section Compte', async () => {
+  it('révoque les sessions depuis l’onglet Compte', async () => {
     let revoked = false
     mockFetch({
       '/api/admin/status': () => jsonResponse(authenticatedStatus),
@@ -332,29 +447,80 @@ describe('interface d’administration Vysion', () => {
     const user = userEvent.setup()
     render(<AdminApp />)
 
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
+
     expect(await screen.findByText('(courante)')).toBeInTheDocument()
+    expect(screen.getByText('1 session ouverte')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Révoquer toutes les sessions' }))
     expect(await screen.findByRole('status')).toHaveTextContent('Toutes les sessions ont été révoquées')
     const call = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === '/api/admin/sessions/revoke')
     expect((call?.[1]?.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-value')
   })
 
-  it('ouvre le panneau de certificats en mode helper comme en standalone', async () => {
+  it('affiche une liste de sessions vide sans casser les actions', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
+    expect(screen.getByText('Aucune session ouverte.')).toBeInTheDocument()
+    expect(screen.getByText('0 sessions ouvertes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Révoquer toutes les sessions' })).toBeEnabled()
+  })
+
+  it('ouvre l’onglet de certificats en mode helper comme en standalone', async () => {
     mockFetch({
       ...authenticatedRoutes,
       '/api/admin/status': () =>
         jsonResponse({ ...authenticatedStatus, tls_backend: 'helper', tls_hostname: 'vysion.example' }),
     })
+    const user = userEvent.setup()
     render(<AdminApp />)
 
     expect(await screen.findByRole('heading', { name: 'Certificats TLS' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Valider le certificat' })).toBeInTheDocument()
     expect(screen.queryByText('Le TLS est géré par le proxy hôte')).not.toBeInTheDocument()
     expect(screen.getByText('Helper')).toBeInTheDocument()
+
+    await openTab(user, 'Système')
     expect(screen.getByText(/Helper — Vysion pilote le Nginx hôte/)).toBeInTheDocument()
   })
 
-  it('présente une section Email au transport commutable et aux secrets en écriture seule', async () => {
+  it('matérialise le parcours validation → contrôles → activation', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/status': () => jsonResponse(standaloneStatus),
+      '/api/admin/certificates/validate': () =>
+        jsonResponse({ certificate: certificateInfo, ticket: { token: 'ticket-value', expires_in: 300 } }),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    const steps = await screen.findByRole('list', { name: 'Parcours du certificat' })
+    const labels = within(steps).getAllByRole('listitem').map((item) => item.textContent ?? '')
+    expect(labels).toHaveLength(3)
+    expect(labels[0]).toContain('Valider')
+    expect(labels[1]).toContain('Contrôles')
+    expect(labels[2]).toContain('Activer')
+    // Tant que rien n'est validé, l'activation reste annoncée comme en attente.
+    expect(labels[2]).toContain('En attente')
+    expect(screen.queryByRole('button', { name: 'Activer le certificat' })).not.toBeInTheDocument()
+
+    const certificateFile = new File(['-----BEGIN CERTIFICATE-----'], 'fullchain.pem', { type: 'application/x-pem-file' })
+    await user.upload(screen.getByLabelText(/Certificat \(PEM complet/), certificateFile)
+    await user.click(screen.getByRole('button', { name: 'Valider le certificat' }))
+
+    expect(await screen.findByRole('button', { name: 'Activer le certificat' })).toBeInTheDocument()
+    const afterValidation = within(screen.getByRole('list', { name: 'Parcours du certificat' }))
+      .getAllByRole('listitem')
+      .map((item) => item.textContent ?? '')
+    expect(afterValidation[1]).toContain('Contrôles réussis')
+    expect(afterValidation[2]).toContain('Prêt')
+  })
+
+  it('structure la Messagerie en groupes lisibles avec statut textuel', async () => {
     mockFetch({
       ...authenticatedRoutes,
       '/api/admin/email': () => jsonResponse(configuredEmail),
@@ -362,23 +528,57 @@ describe('interface d’administration Vysion', () => {
     const user = userEvent.setup()
     render(<AdminApp />)
 
-    expect(await screen.findByRole('heading', { name: 'Email' })).toBeInTheDocument()
-    expect(screen.getByText('Configurée — Microsoft 365')).toBeInTheDocument()
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Messagerie')
+
+    expect(screen.getByRole('heading', { name: 'Messagerie' })).toBeInTheDocument()
+    // Statut textuel, sans couleur seule.
+    expect(screen.getByText('Configuration complète — Microsoft 365')).toBeInTheDocument()
     expect(screen.getByText('Enregistré (jamais affiché)')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Tester l’envoi' })).toBeInTheDocument()
+
+    // Sélecteur de transport mis en avant.
+    const transport = screen.getByLabelText('Comment voulez-vous envoyer les courriels ?')
+    expect(transport).toBeInTheDocument()
+
+    // Groupes de champs.
+    expect(screen.getByRole('group', { name: 'Communs' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Connexion et identité' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Secret' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Récupération et test' })).toBeInTheDocument()
+
+    // Options avancées repliables : timeout + confirmation plaintext.
+    const advanced = screen.getByText('Options avancées').closest('details')
+    expect(advanced).not.toBeNull()
+    expect(within(advanced as HTMLElement).getByLabelText(/Délai d’envoi maximal/)).toBeInTheDocument()
+
+    // Le test d'envoi est explicitement relié à l'adresse de récupération.
+    expect(screen.getByText(/adresse de récupération utilisée par l’API/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tester l’envoi' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Enregistrer l’email' })).toBeInTheDocument()
 
-    // The Microsoft 365 shape is shown for the transport the server reports.
-    expect(screen.getByLabelText(/Secret de l’application/)).toBeInTheDocument()
+    // Le secret n'est jamais affiché ni prérempli.
+    expect(screen.getByLabelText(/Secret de l’application/)).toHaveValue('')
     expect(screen.queryByLabelText('Serveur SMTP')).not.toBeInTheDocument()
-    // Whatever the server holds, no configured value ever reaches the DOM.
     expect(document.body.textContent).not.toContain('graph-write')
+  })
 
-    await user.selectOptions(screen.getByLabelText('Transport'), 'smtp')
-    expect(screen.getByLabelText('Serveur SMTP')).toBeInTheDocument()
-    expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument()
-    expect(screen.getByText('Laisser vide pour conserver le mot de passe enregistré.')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/Secret de l’application/)).not.toBeInTheDocument()
+  it('annonce une Messagerie incomplète tant que le transport n’est pas utilisable', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/email': () => jsonResponse(emptyEmail),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Messagerie')
+
+    expect(screen.getByText('Configuration incomplète')).toBeInTheDocument()
+    expect(screen.getByText('Adresse de récupération : absente')).toBeInTheDocument()
+    // Sans adresse de récupération, l'API refuserait le test : le bouton l'annonce.
+    expect(screen.getByRole('button', { name: 'Tester l’envoi' })).toBeDisabled()
+    expect(screen.getByText(/Renseignez une adresse de récupération/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Comment voulez-vous envoyer les courriels ?')).toHaveValue('smtp')
   })
 
   it('isole les champs des deux transports en cas de bascule', async () => {
@@ -389,11 +589,12 @@ describe('interface d’administration Vysion', () => {
     const user = userEvent.setup()
     render(<AdminApp />)
 
-    expect(await screen.findByRole('heading', { name: 'Email' })).toBeInTheDocument()
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Messagerie')
     // The SMTP shape comes first and its port carries its default value.
     expect(screen.getByLabelText('Port')).toHaveValue(587)
 
-    await user.selectOptions(screen.getByLabelText('Transport'), 'microsoft365')
+    await user.selectOptions(screen.getByLabelText('Comment voulez-vous envoyer les courriels ?'), 'microsoft365')
 
     // The Microsoft 365 fields must mount empty: React must not reuse the
     // SMTP inputs (the port default would otherwise leak into the client ID,
@@ -403,10 +604,100 @@ describe('interface d’administration Vysion', () => {
     expect(screen.getByLabelText(/boîte/)).toHaveValue('')
     expect(screen.getByLabelText(/Secret de l’application/)).toHaveValue('')
 
-    await user.selectOptions(screen.getByLabelText('Transport'), 'smtp')
+    await user.selectOptions(screen.getByLabelText('Comment voulez-vous envoyer les courriels ?'), 'smtp')
 
     // And back: the SMTP defaults are pristine, no Microsoft 365 leftovers.
     expect(screen.getByLabelText('Port')).toHaveValue(587)
     expect(screen.getByLabelText('Serveur SMTP')).toHaveValue('')
+    expect(screen.queryByLabelText(/Secret de l’application/)).not.toBeInTheDocument()
+  })
+
+  it('conserve les contrats d’enregistrement email (secrets vides = conservation)', async () => {
+    const saved: { body: Record<string, unknown> | null } = { body: null }
+    const routes: Routes = {
+      ...authenticatedRoutes,
+      '/api/admin/email': () => jsonResponse(configuredEmail),
+      '/api/admin/email/test': () => jsonResponse({ status: 'sent', transport: 'microsoft365' }),
+    }
+    mockFetch(routes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Messagerie')
+
+    const transport = screen.getByLabelText('Comment voulez-vous envoyer les courriels ?')
+    expect(transport).toHaveValue('microsoft365')
+
+    await user.type(screen.getByLabelText('Adresse d’expédition'), 'no-reply@vysion.example')
+    await user.type(screen.getByLabelText(/Identifiant de locataire/), '11111111-1111-1111-1111-111111111111')
+    await user.type(screen.getByLabelText(/Identifiant d’application/), '22222222-2222-2222-2222-222222222222')
+
+    const putCall = vi.fn(async () => {
+      return jsonResponse(configuredEmail)
+    })
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url === '/api/admin/email' && init?.method === 'PUT') {
+        saved.body = JSON.parse(String(init.body)) as Record<string, unknown>
+        return putCall()
+      }
+      const handler = routes[url]
+      if (!handler) throw new Error(`unexpected fetch ${url}`)
+      return handler()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Enregistrer l’email' }))
+    await screen.findByText('Configuration email enregistrée')
+
+    expect(saved.body).not.toBeNull()
+    expect(saved.body?.transport).toBe('microsoft365')
+    expect(saved.body?.m365_client_secret).toBe('')
+    expect(saved.body?.smtp_password).toBe('')
+    expect(saved.body?.timeout_seconds).toBe(10)
+
+    await user.click(screen.getByRole('button', { name: 'Tester l’envoi' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Email de test envoyé via microsoft365')
+  })
+
+  it('résume le système avec les seules informations de Vysion', async () => {
+    mockFetch(authenticatedRoutes)
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Système')
+
+    const panel = screen.getByRole('tabpanel')
+    expect(within(panel).getByRole('heading', { name: 'Système' })).toBeInTheDocument()
+    expect(within(panel).getByText('Mode de déploiement')).toBeInTheDocument()
+    expect(within(panel).getByText('Backend TLS')).toBeInTheDocument()
+    expect(within(panel).getByText('Récupération de l’accès')).toBeInTheDocument()
+    expect(within(panel).getByText('Version du logiciel')).toBeInTheDocument()
+    expect(within(panel).getByText('2.0.0')).toBeInTheDocument()
+    // Aucune fonctionnalité absente de Vysion n'est recopiée de la référence.
+    expect(screen.queryByText(/Trivy/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Fortinet/)).not.toBeInTheDocument()
+  })
+
+  it('résume le compte et ses actions dans l’onglet Compte', async () => {
+    mockFetch({
+      ...authenticatedRoutes,
+      '/api/admin/sessions': () =>
+        jsonResponse({ sessions: [{ created_at: 'a', expires_at: 'b', current: true }] }),
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
+
+    expect(screen.getByRole('heading', { name: 'Compte' })).toBeInTheDocument()
+    expect(screen.getByText('Sessions actives')).toBeInTheDocument()
+    expect(screen.getByText('1 session ouverte')).toBeInTheDocument()
+    expect(screen.getByText('Récupération de l’accès')).toBeInTheDocument()
+    expect(screen.getByText('Indisponible — configuration ou origine publique incomplètes')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Changer le mot de passe' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Révoquer toutes les sessions' })).toBeInTheDocument()
   })
 })
