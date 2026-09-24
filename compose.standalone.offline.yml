@@ -1,13 +1,22 @@
-# Standalone deployment: this container terminates TLS itself with the
-# certificate imported through the administrator UI (PEM/PKCS#12) and
-# serves HTTPS on 443. The loopback plaintext port stays only for the
-# container healthcheck. Render with the immutable image digest:
+# Standalone deployment, OFFLINE distribution: same hardening and same
+# volumes as compose.standalone.yml, but the image is referenced by its
+# local tag instead of an OCI digest, because an image tar imported through
+# Portainer (Images → Import) carries its tag — never its registry digest.
 #
-#   IMAGE_DIGEST=sha256:<64 hex> VYSION_TLS_HOSTNAME=vysion.example.com \
-#     docker compose -f compose.standalone.yml config
+# The supplier ships `vysion-sha-<commit>.tar` (docker save, linux/amd64);
+# the operator imports it in Portainer, then uploads THIS file through
+# Stacks → Add stack → Upload with:
+#
+#   VYSION_IMAGE=ghcr.io/tetrax/vysion:sha-<commit>   (the imported tag)
+#   VYSION_TLS_HOSTNAME=vysion.client.example
+#
+# Immutability therefore rests on the tar archive itself (verify the sha256
+# the supplier states through your transfer channel) rather than on a
+# registry digest: that is the documented offline trade-off. The online
+# path (compose.standalone.yml + IMAGE_DIGEST) keeps the digest contract.
 services:
   vysion:
-    image: ghcr.io/tetrax/vysion@${IMAGE_DIGEST:?set IMAGE_DIGEST to the immutable OCI digest sha256:<64 hex> of the image to deploy}
+    image: ${VYSION_IMAGE:?set VYSION_IMAGE to the imported image tag ghcr.io/tetrax/vysion:sha-<commit>}
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HTTPS_PORT:-443}:443"
@@ -43,10 +52,9 @@ services:
       retries: 3
 
 volumes:
-  # Compose-managed named volumes with the stable production names: a fresh
-  # Git Stack deploys with zero host command (Portainer never pre-creates
-  # them), Docker initialises each empty volume from the image directory —
-  # app ownership (uid 10001) included — and the data survives recreate.
+  # Same Compose-managed volumes as the online stack: created on first
+  # deploy from the image directories (app ownership included), persistent
+  # across recreate, isolated by VYSION_VOLUME_PREFIX when prefixed.
   vysion-reports:
     name: ${VYSION_VOLUME_PREFIX:-}vysion-reports
   vysion-state:

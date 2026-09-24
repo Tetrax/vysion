@@ -144,6 +144,122 @@ describe('administration Vysion', () => {
     expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
   })
 
+  it('offers a first-run restore of an encrypted migration bundle', async () => {
+    let restored = false
+    mockFetch({
+      '/api/admin/status': () => jsonResponse(restored ? anonymousStatus : setupStatus),
+      '/api/admin/migration/import': () => {
+        restored = true
+        return jsonResponse(
+          {
+            status: 'restored',
+            certificate: {
+              included: false,
+              imported: false,
+              generation: null,
+              sha256: null,
+              reason: null,
+            },
+            reports_included: false,
+            email: { configured: false },
+          },
+          201,
+        )
+      },
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    expect(await screen.findByText('Restaurer une sauvegarde')).toBeInTheDocument()
+    const file = new File(['bundle-bytes'], 'vysion-migration.vysmig', {
+      type: 'application/octet-stream',
+    })
+    await user.upload(screen.getByLabelText('Fichier de sauvegarde (.vysmig)'), file)
+    await user.type(screen.getByLabelText('Passphrase de la sauvegarde'), 'a-migration-passphrase')
+    await user.click(screen.getByRole('button', { name: 'Restaurer la sauvegarde' }))
+
+    expect(await screen.findByText(/Restauration terminée/)).toBeInTheDocument()
+    // L'instance n'est plus vierge : le premier rendu bascule sur la connexion.
+    expect(await screen.findByLabelText('Mot de passe')).toBeInTheDocument()
+    expect(screen.queryByText('Configuration initiale')).not.toBeInTheDocument()
+  })
+
+  it('exports the encrypted migration bundle from the account tab', async () => {
+    const calls: { url: string; init?: RequestInit }[] = []
+    Object.assign(URL, {
+      createObjectURL: vi.fn(() => 'blob:vysion'),
+      revokeObjectURL: vi.fn(),
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      calls.push({ url, init })
+      if (url === '/api/admin/status') return jsonResponse(authenticatedStatus)
+      if (url === '/api/admin/sessions') return jsonResponse(emptySessions)
+      if (url === '/api/admin/certificates') return jsonResponse(emptyCertificates)
+      if (url === '/api/admin/email') return jsonResponse(emptyEmail)
+      if (url === '/api/admin/migration/export') {
+        return new Response(JSON.stringify({}), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/vnd.vysion.migration',
+            'Content-Disposition':
+              'attachment; filename="vysion-migration-20260924T120000Z.vysmig"',
+          },
+        })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
+    await user.type(screen.getByLabelText('Mot de passe courant'), 'a-first-admin-password')
+    await user.type(screen.getByLabelText('Passphrase de la sauvegarde'), 'a-migration-passphrase')
+    await user.type(screen.getByLabelText('Confirmer la passphrase'), 'a-migration-passphrase')
+    await user.click(screen.getByRole('button', { name: 'Télécharger la sauvegarde' }))
+
+    expect(await screen.findByText('Sauvegarde de migration chiffrée téléchargée')).toBeInTheDocument()
+    const exportCall = calls.find((call) => call.url === '/api/admin/migration/export')
+    expect(exportCall).toBeDefined()
+    const headers = exportCall!.init?.headers as Record<string, string>
+    expect(headers['X-CSRF-Token']).toBe('csrf-value')
+    expect(headers['Content-Type']).toBe('application/json')
+    const body = JSON.parse(String(exportCall!.init?.body)) as Record<string, unknown>
+    expect(body).toEqual({
+      current_password: 'a-first-admin-password',
+      passphrase: 'a-migration-passphrase',
+    })
+  })
+
+  it('refuses an export whose passphrase confirmation differs', async () => {
+    let exportHit = false
+    mockFetch({
+      '/api/admin/status': () => jsonResponse(authenticatedStatus),
+      '/api/admin/sessions': () => jsonResponse(emptySessions),
+      '/api/admin/certificates': () => jsonResponse(emptyCertificates),
+      '/api/admin/email': () => jsonResponse(emptyEmail),
+      '/api/admin/migration/export': () => {
+        exportHit = true
+        return jsonResponse({})
+      },
+    })
+    const user = userEvent.setup()
+    render(<AdminApp />)
+
+    await screen.findByRole('tablist', { name: 'Sections d’administration' })
+    await openTab(user, 'Compte')
+    await user.type(screen.getByLabelText('Mot de passe courant'), 'a-first-admin-password')
+    await user.type(screen.getByLabelText('Passphrase de la sauvegarde'), 'a-migration-passphrase')
+    await user.type(screen.getByLabelText('Confirmer la passphrase'), 'a-different-passphrase')
+    await user.click(screen.getByRole('button', { name: 'Télécharger la sauvegarde' }))
+
+    expect(
+      await screen.findByText('Export de migration : les passphrases ne correspondent pas'),
+    ).toBeInTheDocument()
+    expect(exportHit).toBe(false)
+  })
+
   it('offers recovery only when it is enabled server-side', async () => {
     mockFetch({ '/api/admin/status': () => jsonResponse({ ...anonymousStatus, recovery_enabled: true }) })
     render(<AdminApp />)
@@ -357,7 +473,9 @@ describe('interface d’administration Vysion', () => {
 
     expect(await screen.findByText('Zone d’administration privée')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Configuration initiale' })).toBeInTheDocument()
-    expect(screen.getByText('12 à 1 024 octets UTF-8.')).toBeInTheDocument()
+    expect(
+      document.getElementById('setup-password-help'),
+    ).toHaveTextContent('12 à 1 024 octets UTF-8.')
     expect(screen.getByLabelText('Nouveau mot de passe administrateur')).toHaveAttribute(
       'aria-describedby',
       'setup-password-help',

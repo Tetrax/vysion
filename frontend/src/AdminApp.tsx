@@ -124,6 +124,8 @@ function AdminApp() {
   const [emailTransport, setEmailTransport] = useState<EmailTransport>('smtp')
   const transportSeeded = useRef(false)
   const [validation, setValidation] = useState<Validation | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [theme, setTheme] = useState<ThemeChoice>(() => readStoredTheme())
   const [activeTab, setActiveTab] = useState<TabId>('certificates')
   const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({})
@@ -248,6 +250,95 @@ function AdminApp() {
       await refresh()
     } catch {
       setError('API administrateur injoignable')
+    }
+  }
+
+  // First-run restore: a multipart upload straight from the browser, before
+  // any account exists — same Origin gate as enrollment, no session yet.
+  async function submitRestore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const bundle = data.get('bundle')
+    if (!(bundle instanceof File)) {
+      setError('Restauration : sélectionnez un fichier de sauvegarde (.vysmig)')
+      return
+    }
+    const passphrase = String(data.get('passphrase') ?? '')
+    if (!passphrase) {
+      setError('Restauration : la passphrase de la sauvegarde est requise')
+      return
+    }
+    setRestoring(true)
+    try {
+      const response = await fetch('/api/admin/migration/import', {
+        method: 'POST',
+        headers: { Origin: window.location.origin },
+        body: data,
+      })
+      if (!response.ok) {
+        setError(await readDetail(response, 'Restauration'))
+        return
+      }
+      const payload = (await response.json()) as {
+        certificate?: { included?: boolean; imported?: boolean; reason?: string | null } | null
+      }
+      form.reset()
+      await refresh()
+      const certificate = payload.certificate
+      const suffix =
+        certificate && certificate.included && !certificate.imported && certificate.reason
+          ? ` (certificat non importé : ${certificate.reason})`
+          : ''
+      setMessage(`Restauration terminée${suffix} — connectez-vous avec le compte restauré.`)
+    } catch {
+      setError('API administrateur injoignable')
+    } finally {
+      setRestoring(false)
+    }
+  }
+
+  // Migration export: re-authenticated, sealed in the browser's download —
+  // the bundle never transits any URL and no secret ever leaves the form.
+  async function submitMigrationExport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const passphrase = String(data.get('passphrase') ?? '')
+    const confirmation = String(data.get('passphrase_confirm') ?? '')
+    if (passphrase !== confirmation) {
+      setError('Export de migration : les passphrases ne correspondent pas')
+      return
+    }
+    setExporting(true)
+    try {
+      const response = await mutate('/api/admin/migration/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: data.get('current_password'), passphrase }),
+      })
+      if (!response.ok) {
+        setError(await readDetail(response, 'Export de migration'))
+        return
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get('Content-Disposition') ?? ''
+      const match = /filename="([^"]+)"/.exec(disposition)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = match?.[1] ?? 'vysion-migration.vysmig'
+      anchor.style.display = 'none'
+      document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      form.reset()
+      setMessage('Sauvegarde de migration chiffrée téléchargée')
+    } catch {
+      setError('API administrateur injoignable')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -558,6 +649,49 @@ function AdminApp() {
               )}
             </div>
           </div>
+
+          {status.setup_required && (
+            <div className="admin-panel">
+              <div className="admin-panel-header">
+                <p className="admin-eyebrow">Migration</p>
+                <h2 className="admin-panel-title">Restaurer une sauvegarde</h2>
+                <p className="admin-panel-copy">
+                  Déposez le fichier <code>.vysmig</code> exporté depuis l’ancienne
+                  instance et saisissez sa passphrase : compte et certificat actif
+                  sont restaurés, les anciennes sessions restent invalides.
+                </p>
+              </div>
+              <div className="admin-panel-body">
+                <form noValidate onSubmit={(event) => void submitRestore(event)}>
+                  <div className="admin-field">
+                    <label htmlFor="restore-bundle">Fichier de sauvegarde (.vysmig)</label>
+                    <input
+                      id="restore-bundle"
+                      name="bundle"
+                      type="file"
+                      accept=".vysmig,application/octet-stream"
+                      required
+                    />
+                  </div>
+                  <div className="admin-field">
+                    <label htmlFor="restore-passphrase">Passphrase de la sauvegarde</label>
+                    <input
+                      id="restore-passphrase"
+                      name="passphrase"
+                      type="password"
+                      required
+                      autoComplete="off"
+                      aria-describedby="restore-passphrase-help"
+                    />
+                    <span className="admin-help" id="restore-passphrase-help">{PASSWORD_HELP}</span>
+                  </div>
+                  <button type="submit" className="button primary admin-submit" disabled={restoring}>
+                    {restoring ? 'Restauration…' : 'Restaurer la sauvegarde'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
 
           {!status.setup_required && status.recovery_enabled && (
             <div className="admin-panel">
@@ -1150,6 +1284,57 @@ function AdminApp() {
                 <span className="admin-help" id="new-password-help">{PASSWORD_HELP}</span>
               </div>
               <button type="submit" className="button primary admin-submit">Changer le mot de passe</button>
+            </form>
+          </div>
+        </div>
+
+        <div className="admin-panel">
+          <div className="admin-panel-header">
+            <p className="admin-eyebrow">Migration</p>
+            <h3 className="admin-panel-title">Sauvegarde de migration</h3>
+            <p className="admin-panel-copy">
+              Exporte l’état durable (compte, messagerie, certificat actif) dans un
+              fichier <code>.vysmig</code> chiffré, scellé avec la passphrase choisie
+              ici. Les rapports d’audit ne sont jamais inclus.
+            </p>
+          </div>
+          <div className="admin-panel-body">
+            <form onSubmit={(event) => void submitMigrationExport(event)}>
+              <div className="admin-field">
+                <label htmlFor="export-current-password">Mot de passe courant</label>
+                <input
+                  id="export-current-password"
+                  name="current_password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="admin-field">
+                <label htmlFor="export-passphrase">Passphrase de la sauvegarde</label>
+                <input
+                  id="export-passphrase"
+                  name="passphrase"
+                  type="password"
+                  required
+                  autoComplete="off"
+                  aria-describedby="export-passphrase-help"
+                />
+                <span className="admin-help" id="export-passphrase-help">{PASSWORD_HELP}</span>
+              </div>
+              <div className="admin-field">
+                <label htmlFor="export-passphrase-confirm">Confirmer la passphrase</label>
+                <input
+                  id="export-passphrase-confirm"
+                  name="passphrase_confirm"
+                  type="password"
+                  required
+                  autoComplete="off"
+                />
+              </div>
+              <button type="submit" className="button primary" disabled={exporting}>
+                {exporting ? 'Export en cours…' : 'Télécharger la sauvegarde'}
+              </button>
             </form>
           </div>
         </div>

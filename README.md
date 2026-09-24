@@ -11,7 +11,7 @@ Vysion v2 est le nouveau socle interne SNS Security d'audit de configurations Fo
 - stockage par UUID v4 avec timestamps UTC, TTL, purge au démarrage, avant écriture et à la lecture ;
 - adaptateur FortiGuard fail-closed pour la disponibilité et la corrélation PSIRT (`UNKNOWN` ou `ERROR`, jamais `PASS` implicite) ;
 - interface React minimale compilée au build, avec téléchargement des trois formats ;
-- un Dockerfile multi-stage, un conteneur, des piles Compose et trois volumes externes : `vysion-reports` (rapports UUID/TTL), `vysion-state` (état d'administration durable, fail-closed) et `vysion-certs` (certificats du mode standalone) ;
+- un Dockerfile multi-stage, un conteneur, des piles Compose et trois volumes nommés stables : `vysion-reports` (rapports UUID/TTL), `vysion-state` (état d'administration durable, fail-closed) et `vysion-certs` (certificats du mode standalone) ;
 - Nginx interne en HTTP sur `8080` pour les limites HTTP, les headers, les statiques et le proxy `/api` ;
 - TLS terminé chez l'opérateur (modes proxy : Nginx de l'hôte ou reverse proxy externe) ou dans le conteneur (mode standalone, certificats importés depuis `/admin`) : aucun montage de certificat ni de clé dans le mode proxy ;
 - FastAPI accessible uniquement sur `127.0.0.1` dans le conteneur.
@@ -97,7 +97,7 @@ Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans
   aucun lien n'étant fabriqué depuis un en-tête contrôlable. En standalone,
   l'origine est dérivée de `VYSION_TLS_HOSTNAME` (port 443 implicite) ;
   changez le port public, définissez `PUBLIC_ORIGIN` avec son port.
-- `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms des volumes externes
+- `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms des volumes
   pour que validations et smokes n'utilisent jamais les volumes de
   production ; avec le défaut vide les noms restent `vysion-reports`,
   `vysion-state`, `vysion-certs`.
@@ -119,13 +119,24 @@ Quatre piles coexistent, toutes immuables (`IMAGE_DIGEST` requis) et toutes sans
   systemd et les répertoires que cette unité exige avant démarrage. Voir
   `docs/OPERATIONS.md` et `docs/SECURITY.md`.
 
-Les piles déclarent les mêmes volumes externes (créés une fois par
-`docker volume create`, voir `docs/OPERATIONS.md`) et la sauvegarde manuelle
-coupe de façon cohérente les conteneurs qui les montent
+Les piles partagent les mêmes volumes nommés stables — externes sur
+`compose.yml`, `compose.proxy.yml` et `compose.helper.yml` (créés une fois
+par `docker volume create`, voir `docs/OPERATIONS.md`), gérés par Compose
+sur `compose.standalone.yml` et `compose.standalone.offline.yml` (créés au
+premier déploiement Portainer, zéro commande hôte) — et la sauvegarde
+manuelle coupe de façon cohérente les conteneurs qui les montent
 (`scripts/backup.sh`), avec restauration testée sur volumes jetables :
 `scripts/restore.sh` lit ses archives avec `VYSION_BACKUP_PREFIX` (le préfixe
 de la sauvegarde, vide pour la production) et écrit ses volumes avec
 `VYSION_VOLUME_PREFIX`, et échoue si aucune archive attendue n'est trouvée.
+
+Sans aucune commande sur la VM client, `/admin` exporte et restaure aussi
+l'état durable dans un bundle de migration chiffré (`.vysmig`, AES-256-GCM
++ scrypt, passphrase au choix, rapports TTL exclus) : l'export se fait
+depuis une session authentifiée après ré-authentification, la restauration
+uniquement depuis l'écran du premier rendu, avant la création du compte —
+voir « Installation neuve chez une entreprise » et « Migration chiffrée
+entre instances » dans `docs/OPERATIONS.md`.
 
 ## Développement local
 

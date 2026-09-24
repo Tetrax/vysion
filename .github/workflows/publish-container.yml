@@ -142,6 +142,24 @@ jobs:
           grep -q 'name: vysion-certs' /tmp/vysion-standalone.yml
           grep -q 'name: vysion-state' /tmp/vysion-standalone.yml
 
+      - name: Validate the offline standalone stack (zero-CLI Portainer install)
+        run: |
+          # A docker-load'ed tar carries no OCI digest: this stack must
+          # demand the imported tag and must never require a host command
+          # (no external volumes) for a fresh Portainer install.
+          if VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.offline.yml config --quiet; then
+            echo "compose.standalone.offline.yml resolved without VYSION_IMAGE, it must be required" >&2
+            exit 1
+          fi
+          VYSION_IMAGE=ghcr.io/tetrax/vysion:sha-deadbeef VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.offline.yml config > /tmp/vysion-standalone-offline.yml
+          grep -Eq '^ *image: ghcr\.io/tetrax/vysion:sha-deadbeef$' /tmp/vysion-standalone-offline.yml
+          grep -q 'VYSION_TLS_BACKEND: local' /tmp/vysion-standalone-offline.yml
+          grep -q 'name: vysion-certs' /tmp/vysion-standalone-offline.yml
+          if grep -q 'external: true' compose.standalone.yml compose.standalone.offline.yml; then
+            echo "standalone stacks must stay Compose-managed for the zero-CLI install" >&2
+            exit 1
+          fi
+
       - name: Assert loopback bind, exact external volume and no obsolete network
         run: |
           for rendered in /tmp/vysion-stack-8080.yml /tmp/vysion-stack-18080.yml; do

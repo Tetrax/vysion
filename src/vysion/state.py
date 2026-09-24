@@ -124,6 +124,46 @@ class EmailConfig:
         }
 
 
+def _normalize_ddl(sql: str) -> str:
+    """Whitespace-insensitive comparison form of a stored CREATE statement."""
+    return " ".join(sql.split())
+
+
+# Schema addenda executed by StateStore._migrate on databases created before
+# these tables existed. Kept as the single textual source: _migrate executes
+# exactly this text and the canonical-schema contract derives its accepted
+# variants from it, so the two definitions can never drift apart.
+MIGRATION_ADDENDA: dict[str, str] = {
+    "certificate_tickets": """
+        CREATE TABLE IF NOT EXISTS certificate_tickets (
+            digest TEXT PRIMARY KEY,
+            session_hash TEXT NOT NULL,
+            content_digest TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+        )
+        """,
+    "email": """
+        CREATE TABLE IF NOT EXISTS email (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            transport TEXT NOT NULL,
+            from_address TEXT NOT NULL,
+            recovery_email TEXT,
+            timeout_seconds INTEGER NOT NULL DEFAULT 10,
+            smtp_host TEXT,
+            smtp_port INTEGER,
+            smtp_security TEXT,
+            smtp_username TEXT,
+            smtp_password TEXT,
+            m365_tenant_id TEXT,
+            m365_client_id TEXT,
+            m365_client_secret TEXT,
+            m365_mailbox TEXT
+        )
+        """,
+}
+
+
 class StateStore:
     """Single-account admin state: atomic first-run, sessions, lockouts."""
 
@@ -187,6 +227,35 @@ class StateStore:
         if row is None:
             raise StateError("state database has no schema version")
         return int(row["value"])
+
+    @property
+    def directory(self) -> Path:
+        """Where the durable database lives (migration staging target)."""
+        return self._directory
+
+    def export_snapshot_bytes(self) -> bytes:
+        """Consistent point-in-time snapshot of the database (backup API).
+
+        Used by the migration export: SQLite's serialization is taken from
+        one read transaction, so an export can never capture a half-written
+        admin row or a session created between two statements. The bytes
+        leave this method only toward the in-process bundle builder — no
+        path, no log, no argv.
+        """
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = sqlite3.connect(
+                f"file:{self._path.resolve().as_posix()}?mode=ro", uri=True, timeout=5.0
+            )
+            snapshot = connection.serialize()
+        except sqlite3.Error as exc:
+            raise StateError("state database snapshot failed") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+        if not snapshot:
+            raise StateError("state database snapshot is empty")
+        return bytes(snapshot)
 
     def _create_database_file(self) -> bool:
         """Create the database exclusively; True only for the creating call."""
@@ -358,44 +427,13 @@ class StateStore:
                     "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)",
                     (str(version),),
                 )
-            # Addendum table: single-use certificate activation tickets. The
-            # CREATE is unconditional so pre-existing schema-1 databases get
-            # it on their next open as well.
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS certificate_tickets (
-                    digest TEXT PRIMARY KEY,
-                    session_hash TEXT NOT NULL,
-                    content_digest TEXT NOT NULL,
-                    created_at INTEGER NOT NULL,
-                    expires_at INTEGER NOT NULL
-                )
-                """
-            )
-            # Addendum table: the single transport-agnostic email row. The
-            # CREATE is unconditional so pre-existing schema-1 databases get
-            # it on their next open as well — the schema version deliberately
-            # stays at 1 so an older binary keeps reading the same file.
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS email (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    transport TEXT NOT NULL,
-                    from_address TEXT NOT NULL,
-                    recovery_email TEXT,
-                    timeout_seconds INTEGER NOT NULL DEFAULT 10,
-                    smtp_host TEXT,
-                    smtp_port INTEGER,
-                    smtp_security TEXT,
-                    smtp_username TEXT,
-                    smtp_password TEXT,
-                    m365_tenant_id TEXT,
-                    m365_client_id TEXT,
-                    m365_client_secret TEXT,
-                    m365_mailbox TEXT
-                )
-                """
-            )
+            # Addendum tables: single-use certificate activation tickets and
+            # the transport-agnostic e-mail row. The CREATEs are unconditional
+            # so pre-existing schema-1 databases get them on their next open —
+            # and the schema version deliberately stays at 1 so an older binary
+            # keeps reading the same file.
+            for addendum in MIGRATION_ADDENDA.values():
+                connection.execute(addendum)
             # One-shot adoption of a pre-email database: only while the email
             # table is still empty, so a stale smtp row can never overwrite a
             # configuration saved later through the admin surface.
@@ -488,6 +526,85 @@ class StateStore:
             """
         for statement in (part for part in statements.split(";") if part.strip()):
             connection.execute(statement)
+
+    @classmethod
+    def canonical_schema_objects(cls) -> dict[str, tuple[str, frozenset[str | None]]]:
+        """Every schema object a state database must contain — no more, no less.
+
+        Derived by executing this module's own schema statements in a
+        throwaway database, so a new table or column lands in the contract
+        without a second definition to keep in sync. Each entry maps the object
+        type to the set of accepted whitespace-normalized CREATE texts — all
+        derived from execution, never from the raw source, because SQLite
+        stores the statement as parsed (without ``IF NOT EXISTS``). A table
+        created by the migration addenda carries that statement's stored text
+        instead of ``_create_schema``'s, and both are legitimate. The implicit
+        ``sqlite_autoindex_*`` primary-key/unique indexes carry no SQL text.
+        """
+        variants: dict[str, set[str | None]] = {}
+        types: dict[str, str] = {}
+        connection = sqlite3.connect(":memory:")
+        try:
+            cls._create_schema(connection)
+            for addendum in MIGRATION_ADDENDA.values():
+                connection.execute(addendum)
+            for object_type, name, sql in connection.execute(
+                "SELECT type, name, sql FROM sqlite_master"
+            ):
+                types[str(name)] = str(object_type)
+                variants.setdefault(str(name), set()).add(
+                    None if sql is None else _normalize_ddl(str(sql))
+                )
+        finally:
+            connection.close()
+        # A database migrated from a pre-addendum schema had those tables
+        # created by executing the addendum on an older file: derive that
+        # variant the same way, by execution.
+        for table, addendum in MIGRATION_ADDENDA.items():
+            types.setdefault(table, "table")
+            extra = sqlite3.connect(":memory:")
+            try:
+                extra.execute(addendum)
+                row = extra.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table,),
+                ).fetchone()
+            finally:
+                extra.close()
+            if row is not None and row[0] is not None:
+                variants.setdefault(table, set()).add(_normalize_ddl(str(row[0])))
+        return {
+            name: (types[name], frozenset(accepted))
+            for name, accepted in variants.items()
+        }
+
+    @classmethod
+    def require_canonical_schema(cls, connection: sqlite3.Connection) -> None:
+        """Fail closed unless the schema is exactly the authoritative one.
+
+        The comparison is on the stored CREATE statements themselves (after
+        whitespace normalization), so columns, constraints, defaults and table
+        options all come from the text SQLite actually executed: a look-alike
+        carrying the right table names with arbitrary columns never matches.
+        Any object this application never created — a view, a trigger, an
+        extra table or index — is rejected the same way.
+        """
+        expected = cls.canonical_schema_objects()
+        seen: set[str] = set()
+        rows = connection.execute("SELECT type, name, sql FROM sqlite_master").fetchall()
+        for object_type, name, sql in rows:
+            entry = expected.get(str(name))
+            if entry is None or str(name) in seen:
+                raise StateError("state database schema is not the Vysion schema")
+            seen.add(str(name))
+            expected_type, accepted_sql = entry
+            if str(object_type) != expected_type:
+                raise StateError("state database schema is not the Vysion schema")
+            stored = None if sql is None else _normalize_ddl(str(sql))
+            if stored not in accepted_sql:
+                raise StateError("state database schema is not the Vysion schema")
+        if seen != set(expected):
+            raise StateError("state database schema is not the Vysion schema")
 
     # ------------------------------------------------------------------
     # time helpers

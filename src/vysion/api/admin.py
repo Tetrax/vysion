@@ -11,11 +11,12 @@ import asyncio
 import hmac
 import json
 import re
+from datetime import UTC
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vysion.build_info import VYSION_VERSION
@@ -24,6 +25,15 @@ from vysion.certclient import CertificateHelperUnavailable
 from vysion.certificates import CertificateError
 from vysion.config import HOSTNAME_PATTERN, Settings
 from vysion.mail import RecoveryUnavailable
+from vysion.migration import (
+    MAX_BUNDLE_BYTES,
+    MAX_STATE_DB_BYTES,
+    PASSPHRASE_CONTRACT,
+    RESTORE_DONE,
+    MigrationError,
+    build_bundle,
+    restore_bundle,
+)
 from vysion.security import (
     CSRF_HEADER_NAME,
     FORWARDED_CLIENT_PROTO_HEADER,
@@ -47,6 +57,16 @@ from vysion.state import (
 MAX_ADMIN_BODY_BYTES = 1 * 1024 * 1024
 MAX_CERTIFICATE_BYTES = 512 * 1024
 CERT_TICKET_TTL_SECONDS = 300
+# The migration bundle is bounded by its own cap (multipart file + form
+# fields): still well under the bundled nginx client_max_body_size, while a
+# plain admin JSON mutation stays at the tighter 1 MiB bound.
+MIGRATION_IMPORT_PATH = "/api/admin/migration/import"
+MIGRATION_MAX_BODY_BYTES = MAX_BUNDLE_BYTES + 512 * 1024
+MIGRATION_MEDIA_TYPE = "application/vnd.vysion.migration"
+MIGRATION_EXTENSION = "vysmig"
+MIGRATION_LOCK_PREFIX = "migration"
+MIGRATION_LOCK_THRESHOLD = 5
+MIGRATION_LOCK_SECONDS = 900
 NO_STAGING = "aucun certificat en staging : validez d'abord un certificat"
 BAD_TICKET = (
     "ticket d'activation invalide, expiré, déjà utilisé ou lié à une autre session"
@@ -129,6 +149,19 @@ class PasswordChangeRequest(BaseModel):
 
     current_password: str
     password: str
+
+
+class MigrationExportRequest(BaseModel):
+    """Re-authentication plus the passphrase that will seal the bundle.
+
+    Both stay in the POST body: no secret ever reaches a URL, a log line or
+    an error message.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: str
+    passphrase: str
 
 
 class RecoveryConfirmRequest(BaseModel):
@@ -371,11 +404,23 @@ def _rate_limited(request: Request, seconds: int) -> HTTPException:
 # body bounds, enforced before anything parses a body
 # ---------------------------------------------------------------------------
 class AdminBodyLimit:
-    """Bound /api/admin mutation bodies before FastAPI reads them."""
+    """Bound /api/admin mutation bodies before FastAPI reads them.
 
-    def __init__(self, app: Any, *, max_bytes: int = MAX_ADMIN_BODY_BYTES) -> None:
+    ``path_limits`` lets one bounded route (the migration import) accept a
+    larger multipart upload while every other admin mutation keeps the
+    tight default.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        max_bytes: int = MAX_ADMIN_BODY_BYTES,
+        path_limits: dict[str, int] | None = None,
+    ) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.path_limits = dict(path_limits or {})
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] == "http":
@@ -414,7 +459,9 @@ class AdminBodyLimit:
             return None
         if not declared.isdigit():
             return (status.HTTP_400_BAD_REQUEST, BAD_LENGTH)
-        if int(declared) > self.max_bytes:
+        path = str(scope.get("path", ""))
+        limit = self.path_limits.get(path, self.max_bytes)
+        if int(declared) > limit:
             return (status.HTTP_413_CONTENT_TOO_LARGE, BODY_TOO_LARGE)
         return None
 
@@ -426,7 +473,11 @@ VALIDATION_ERROR_HIDDEN_KEYS = frozenset({"input", "value", "ctx"})
 
 
 def install_admin_hardening(app: Any) -> None:
-    app.add_middleware(AdminBodyLimit, max_bytes=MAX_ADMIN_BODY_BYTES)
+    app.add_middleware(
+        AdminBodyLimit,
+        max_bytes=MAX_ADMIN_BODY_BYTES,
+        path_limits={MIGRATION_IMPORT_PATH: MIGRATION_MAX_BODY_BYTES},
+    )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_without_echo(
@@ -481,10 +532,15 @@ def build_admin_router() -> APIRouter:
         locked = state.lock_remaining(client_scope)
         if locked:
             raise _rate_limited(request, locked)
-        if state.has_admin():
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=SETUP_DONE)
         try:
-            created = state.create_admin(payload.password)
+            # Enrollment and a migration restore decide first-run together,
+            # under one lock: exactly one of them can ever win.
+            with request.app.state.first_run_lock:
+                if state.has_admin():
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, detail=SETUP_DONE
+                    )
+                created = state.create_admin(payload.password)
         except PASSWORD_ERRORS:
             remaining = state.register_failure(
                 client_scope,
@@ -889,6 +945,143 @@ def build_admin_router() -> APIRouter:
             )
         state.set_email_config(**fields)
         return _email_payload(request)
+
+    # -------------------------------------------------------------------------
+    # Migration: one encrypted bundle out (authenticated admin, re-auth),
+    # one first-run-only restore in (no session may exist yet).
+    # -------------------------------------------------------------------------
+    @router.post("/migration/export")
+    async def migration_export(
+        request: Request,
+        payload: MigrationExportRequest,
+        _session: Annotated[SessionRecord, Depends(require_mutation)],
+    ) -> Response:
+        """Seal the durable state (plus active TLS material) for migration."""
+        state = _state(request)
+        settings = _settings(request)
+        locked = state.lock_remaining(ACCOUNT_LOCK_SCOPE)
+        if locked:
+            raise _rate_limited(request, locked)
+        if not state.verify_password(payload.current_password):
+            remaining = state.register_failure(
+                ACCOUNT_LOCK_SCOPE,
+                threshold=ACCOUNT_LOCK_THRESHOLD,
+                lock_seconds=ACCOUNT_LOCK_SECONDS,
+            )
+            if remaining:
+                raise _rate_limited(request, remaining)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=GENERIC_CREDENTIALS
+            )
+        state.clear_failures(ACCOUNT_LOCK_SCOPE)
+        try:
+            _validated_password(payload.passphrase)
+        except PASSWORD_ERRORS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=PASSPHRASE_CONTRACT,
+            ) from None
+        certificate: bytes | None = None
+        private_key: bytes | None = None
+        store = request.app.state.certificate_store
+        if settings.tls_backend == "local" and store is not None:
+            active = store.active()
+            if active is not None:
+                # Read from the immutable generation: fullchain and key are
+                # sealed into the bundle immediately, never returned.
+                certificate = (active.path / "fullchain.pem").read_bytes()
+                private_key = (active.path / "key.pem").read_bytes()
+        snapshot = await asyncio.to_thread(state.export_snapshot_bytes)
+        if len(snapshot) > MAX_STATE_DB_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
+            )
+        created = request.app.state.clock()
+        try:
+            bundle = await asyncio.to_thread(
+                build_bundle,
+                state_db=snapshot,
+                passphrase=payload.passphrase,
+                certificate=certificate,
+                private_key=private_key,
+                created_at=created,
+            )
+        except ValueError as exc:
+            # Only the explicit bounds above can fail here; no secret, no
+            # bundle byte, nothing from the state ever appears in a message.
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
+            ) from exc
+        timestamp = created if created.tzinfo is not None else created.replace(tzinfo=UTC)
+        stamp = timestamp.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+        return Response(
+            content=bundle,
+            media_type=MIGRATION_MEDIA_TYPE,
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="vysion-migration-{stamp}.{MIGRATION_EXTENSION}"'
+                ),
+                "Cache-Control": "no-store, private",
+            },
+        )
+
+    @router.post("/migration/import", status_code=status.HTTP_201_CREATED)
+    async def migration_import(
+        request: Request,
+        bundle: Annotated[UploadFile, File()],
+        passphrase: Annotated[str, Form()],
+    ) -> JSONResponse:
+        """First-run restore: available only while no administrator exists."""
+        require_origin(request)
+        state = _state(request)
+        settings = _settings(request)
+        client_scope = f"{MIGRATION_LOCK_PREFIX}:{_client_id(request)}"
+        locked = state.lock_remaining(client_scope)
+        if locked:
+            raise _rate_limited(request, locked)
+        if state.has_admin():
+            # Fail closed: once initialized, no anonymous restore route exists.
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=RESTORE_DONE)
+        try:
+            _validated_password(passphrase)
+        except PASSWORD_ERRORS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=PASSPHRASE_CONTRACT,
+            ) from None
+        data = await bundle.read(MAX_BUNDLE_BYTES + 1)
+        if len(data) > MAX_BUNDLE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=BODY_TOO_LARGE
+            )
+        app_state = request.app.state
+        store = request.app.state.certificate_store if settings.tls_backend == "local" else None
+        try:
+            report = await asyncio.to_thread(
+                restore_bundle,
+                state_directory=state.directory,
+                data=data,
+                passphrase=passphrase,
+                lock=app_state.first_run_lock,
+                certificate_store=store,
+                hostname=settings.tls_hostname,
+                reloader=app_state.certificate_reloader,
+                smoker=app_state.certificate_smoker,
+            )
+        except MigrationError as exc:
+            # Fixed, content-free refusals only; wrong guesses are bounded.
+            remaining = state.register_failure(
+                client_scope,
+                threshold=MIGRATION_LOCK_THRESHOLD,
+                lock_seconds=MIGRATION_LOCK_SECONDS,
+            )
+            if remaining:
+                raise _rate_limited(request, remaining) from None
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+        state.clear_failures(client_scope)
+        # Public projection only: what is configured, never a stored value.
+        report["email"] = state.email_public_status()
+        return JSONResponse(report, status_code=status.HTTP_201_CREATED)
 
     @router.post("/email/test")
     async def email_test_send(
