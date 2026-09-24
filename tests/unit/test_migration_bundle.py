@@ -42,7 +42,7 @@ from vysion.migration import (
     restore_bundle,
 )
 from vysion.security import SCRYPT_DKLEN, SCRYPT_MAXMEM, SCRYPT_N, SCRYPT_P, SCRYPT_R
-from vysion.state import StateStore
+from vysion.state import StateError, StateStore
 
 PASSPHRASE = "a-migration-passphrase"
 NOW = datetime(2026, 9, 24, 12, 0, tzinfo=UTC)
@@ -609,6 +609,93 @@ def test_candidate_with_unusable_rows_is_refused(tmp_path: Path) -> None:
     connection.execute("UPDATE email SET timeout_seconds = 'not-an-integer'")
     connection.commit()
     connection.close()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with pytest.raises(MigrationError) as captured:
+        prepare_staged_state(candidate.read_bytes(), staging)
+    assert str(captured.value) == BAD_STATE
+    assert list(staging.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("digest", "!!!not-base64!!!"),
+        ("salt", "!!!not-base64!!!"),
+        ("password_algo", "md5"),
+        ("scrypt_n", 1024),
+    ],
+    ids=["digest", "salt", "algorithm", "parameters"],
+)
+def test_unreadable_admin_credentials_are_refused_and_the_original_survives(
+    tmp_path: Path, column: str, value
+) -> None:
+    """A category the pre-swap proof used to ignore: the credential record.
+
+    admin_revision() reads only the revision column, so a candidate whose
+    salt, digest, algorithm or scrypt parameters no verifier can parse used
+    to pass every earlier check and swap in — leaving an instance where
+    login fails closed forever. The corruption must now refuse the restore
+    and leave the first-run target byte-identical.
+    """
+    candidate = candidate_database(tmp_path, "credentials")
+    connection = sqlite3.connect(candidate)
+    connection.execute(f"UPDATE admin SET {column} = ?", (value,))
+    connection.commit()
+    connection.close()
+
+    bundle = build_bundle(
+        state_db=candidate.read_bytes(), passphrase=PASSPHRASE, created_at=NOW
+    )
+    state_directory = tmp_path / "target"
+    StateStore(state_directory, clock=lambda: NOW)
+    before = (state_directory / "vysion-state.db").read_bytes()
+
+    with pytest.raises(MigrationError) as captured:
+        restore_bundle(
+            state_directory=state_directory,
+            data=bundle,
+            passphrase=PASSPHRASE,
+            lock=threading.Lock(),
+        )
+    assert str(captured.value) == BAD_STATE
+    # The original target is byte-identical: first-run was never closed, no
+    # staging or backup residue, and normal enrollment still works after.
+    assert (state_directory / "vysion-state.db").read_bytes() == before
+    assert StateStore.probe_has_admin(state_directory) is False
+    assert list(state_directory.glob(".migration-staging-*")) == []
+    assert list(state_directory.glob("*.pre-restore-*")) == []
+    assert StateStore(state_directory, clock=lambda: NOW).create_admin(
+        "correct horse battery staple"
+    )
+
+
+@pytest.mark.parametrize(
+    "read_path",
+    [
+        "schema_version",
+        "admin_revision",
+        "email_config",
+        "smtp_config",
+        "list_sessions",
+        "lock_remaining",
+    ],
+)
+def test_pre_swap_probe_exercises_every_application_read_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, read_path: str
+) -> None:
+    """Every category the restored instance reads is read before the swap.
+
+    Breaking one read path makes prepare_staged_state refuse: a probe that
+    silently skipped a category could not fail here, which is exactly the
+    gap this coverage pins down.
+    """
+
+    def explode(self, *args, **kwargs):
+        raise StateError(f"simulated failure in {read_path}")
+
+    candidate = candidate_database(tmp_path, "coverage")
+    monkeypatch.setattr(StateStore, read_path, explode)
     staging = tmp_path / "staging"
     staging.mkdir()
     with pytest.raises(MigrationError) as captured:

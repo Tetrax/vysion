@@ -15,8 +15,10 @@ optional TLS material and nothing else out of or into an instance:
   proved to match the canonical Vysion schema object for object (integrity
   check, schema version, exact stored CREATE statements of every object,
   admin row), stripped of transient rows (sessions, recovery tokens,
-  lockouts, certificate tickets), proved fully usable through the
-  application's own StateStore, then swapped in atomically with a
+  lockouts, certificate tickets), then read back through the very paths
+  the application will use after the swap — schema, administrator
+  revision and credential record, e-mail and SMTP configuration, session
+  list, lockout lookup — before being swapped in atomically with a
   byte-identical rollback on any verification failure.
 
 Every refusal is a fixed, operator-safe message: no bundle byte, path or
@@ -57,6 +59,7 @@ from vysion.security import (
     SCRYPT_N,
     SCRYPT_P,
     SCRYPT_R,
+    verify_password,
 )
 from vysion.state import DATABASE_MODE, DATABASE_NAME, StateError, StateStore
 
@@ -124,6 +127,11 @@ STATE_REQUIRED_TABLES = (
     "certificate_tickets",
 )
 TRANSIENT_TABLES = ("sessions", "recovery_tokens", "lockouts", "certificate_tickets")
+
+# Deliberately shorter than MIN_PASSWORD_BYTES: the application's verifier
+# fully validates the stored credential record first, then refuses the probe
+# password length without ever spending scrypt work.
+_CREDENTIAL_PROBE_PASSWORD = "probe"
 
 
 class MigrationError(ValueError):
@@ -416,7 +424,9 @@ def prepare_staged_state(state_db: bytes, staging_directory: Path) -> Path:
     Refused: foreign or corrupt database, unknown schema version, any
     deviation from the canonical schema — missing table, look-alike table
     with arbitrary columns, unexpected view/trigger/index — an instance
-    without an administrator (there is nothing to migrate then), or a
+    without an administrator (there is nothing to migrate then), an
+    administrator credential record the application's own verifier can no
+    longer parse (there is nothing to log in with then), or a
     candidate that does not reopen and serve reads through the
     application's own StateStore. Transient rows — sessions, recovery
     tokens, lockouts, certificate tickets — are purged so nothing from the
@@ -467,9 +477,32 @@ def prepare_staged_state(state_db: bytes, staging_directory: Path) -> Path:
             StateStore.require_canonical_schema(connection)
         except StateError as exc:
             raise MigrationError(BAD_STATE) from exc
-        admin = connection.execute("SELECT 1 FROM admin WHERE id = 1").fetchone()
-        if admin is None:
+        credential_row = connection.execute(
+            "SELECT password_algo, scrypt_n, scrypt_r, scrypt_p, salt, digest"
+            " FROM admin WHERE id = 1"
+        ).fetchone()
+        if credential_row is None:
             raise MigrationError(BAD_STATE)
+        try:
+            # The exact record every login on the restored instance will
+            # parse. admin_revision() only reads the revision column, so a
+            # foreign algorithm, tampered scrypt parameters or an
+            # undecodable salt/digest used to pass every earlier check and
+            # then fail closed forever after the swap. The application's
+            # own verifier is the read path that must succeed.
+            verify_password(
+                _CREDENTIAL_PROBE_PASSWORD,
+                {
+                    "algorithm": credential_row[0],
+                    "n": credential_row[1],
+                    "r": credential_row[2],
+                    "p": credential_row[3],
+                    "salt": credential_row[4],
+                    "digest": credential_row[5],
+                },
+            )
+        except ValueError as exc:
+            raise MigrationError(BAD_STATE) from exc
         for table in TRANSIENT_TABLES:
             connection.execute(f"DELETE FROM {table}")
         connection.commit()
@@ -493,18 +526,27 @@ def _require_usable_state(staging_directory: Path, staged: Path) -> None:
     """Open the staged database exactly as the application will.
 
     Structural validity is not usability: this runs the real StateStore
-    constructor (schema read, migration, transient purge) plus the reads a
-    restored instance lives on — administrator row, e-mail row typing,
-    session list — against the staged copy, before any live byte is
-    touched. A candidate that cannot serve the instance never becomes the
-    state the instance serves; the staging file is removed and the original
-    database stays in place.
+    constructor (schema read, migration, transient purge) plus every read
+    path a restored instance lives on — schema version, administrator
+    revision, e-mail configuration, the legacy SMTP view, session list and
+    lockout lookup — against the staged copy, before any live byte is
+    touched. The administrator credential record is validated through the
+    application's own verifier just before this, in prepare_staged_state.
+    Recovery tokens and certificate tickets have no read-only application
+    path: their rows are purged before this probe and the purge itself
+    reads those tables. A candidate that cannot serve the instance never
+    becomes the state the instance serves; the staging file is removed and
+    the original database stays in place.
     """
     try:
         store = StateStore(staging_directory)
-        store.admin_revision()
+        store.schema_version()
+        if store.admin_revision() is None:
+            raise StateError("state database has no administrator record")
         store.email_config()
+        store.smtp_config()
         store.list_sessions()
+        store.lock_remaining("migration-usability-probe")
     except (StateError, sqlite3.Error, OSError, ValueError, TypeError, KeyError) as exc:
         staged.unlink(missing_ok=True)
         raise MigrationError(BAD_STATE) from exc
