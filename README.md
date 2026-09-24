@@ -62,22 +62,24 @@ HTTPS :443                     Nginx de l'hôte (Let's Encrypt)
 ```
 
 Le conteneur n'écoute qu'à travers le bind `${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8080}` :
-pas d'IP Docker statique, pas de réseau externe. `BIND_ADDRESS` sélectionne l'IP,
-`HOST_PORT` sélectionne le port (`8080` en production, `18080` pendant une validation
-temporaire).
+aucune IP Docker statique ni aucun réseau externe n'y est imposé — `BIND_ADDRESS`
+sélectionne l'IP, `HOST_PORT` sélectionne le port (`8080` en production, `18080`
+pendant une validation temporaire). Le seul endroit où un rattachement réseau
+existe est `compose.standalone.yml`, **optionnel et vide par défaut**
+(`DOCKER_NETWORK`, `DOCKER_NETWORK_EXTERNAL`, `IPV4_ADDRESS`).
 
 Décision d'edge : `docs/decisions/0001-single-container-http-edge.json` et
 `docs/decisions/0006-host-terminated-tls-loopback-http.json`.
 
 ## Modes de déploiement
 
-Quatre piles coexistent, toutes sans IP Docker statique : trois épinglées par digest (`IMAGE_DIGEST` requis — `compose.yml`, `compose.helper.yml`, `compose.proxy.yml`) et `compose.standalone.yml`, seule pile sans digest à saisir, qui suit le canal promu `ghcr.io/tetrax/vysion:stable` pour se mettre à jour en un clic depuis Portainer :
+Quatre piles coexistent, aucune n'impose d'IP Docker statique ni de réseau d'entreprise : trois épinglées par digest (`IMAGE_DIGEST` requis — `compose.yml`, `compose.helper.yml`, `compose.proxy.yml`) et `compose.standalone.yml`, seule pile sans digest à saisir, qui suit le canal promu `ghcr.io/tetrax/vysion:stable` pour se mettre à jour en un clic depuis Portainer et accepte, en option, un rattachement réseau déterministe :
 
-| Mode | Pile | TLS | `VYSION_TLS_HOSTNAME` | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
+| Mode | Pile | TLS | Variable hostname saisie | `TRUSTED_PROXY_CIDRS` | `PUBLIC_ORIGIN` |
 | --- | --- | --- | --- | --- | --- |
 | VPS / Portainer (production) | `compose.yml` | terminé par le Nginx de l'hôte | — | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** (cf. `docs/OPERATIONS.md`) | **requis pour l'admin** (503 sinon) |
-| VPS administrable (helper) | `compose.helper.yml` | terminé par le Nginx de l'hôte, certificat géré par le service root `vysion-cert-helper` | **requis** (SAN attendu) | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** | **requis pour l'admin** (503 sinon) |
-| Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | **requis** | défaut `127.0.0.1/32` | dérivée de `VYSION_TLS_HOSTNAME` |
+| VPS administrable (helper) | `compose.helper.yml` | terminé par le Nginx de l'hôte, certificat géré par le service root `vysion-cert-helper` | `VYSION_TLS_HOSTNAME` **requis** (SAN attendu) | défaut `127.0.0.1/32` : **à expliciter sur le hop Docker observé** | **requis pour l'admin** (503 sinon) |
+| Standalone (VM propre) | `compose.standalone.yml` | terminé dans le conteneur | `TLS_HOSTNAME` **requis** (transmis à l'application sous `VYSION_TLS_HOSTNAME`) | défaut `127.0.0.1/32` | dérivée de `TLS_HOSTNAME` |
 | VM derrière un reverse proxy externe | `compose.proxy.yml` | terminé chez l'opérateur | — | **requis, aucun défaut silencieux** | **requis pour l'admin** (503 sinon) |
 
 - **Mise à jour en un clic (standalone en ligne)** : `compose.standalone.yml`
@@ -106,12 +108,23 @@ Quatre piles coexistent, toutes sans IP Docker statique : trois épinglées par 
   d'un `Host` attaquant) et, sans origine configurée, **aucune mutation
   n'a lieu** — setup, connexion, récupération et certificats renvoient 503,
   aucun lien n'étant fabriqué depuis un en-tête contrôlable. En standalone,
-  l'origine est dérivée de `VYSION_TLS_HOSTNAME` (port 443 implicite) ;
-  changez le port public, définissez `PUBLIC_ORIGIN` avec son port.
+  l'origine est dérivée du hostname saisi (`TLS_HOSTNAME`, port 443
+  implicite) ; changez le port public, définissez `PUBLIC_ORIGIN` avec son
+  port.
 - `VYSION_VOLUME_PREFIX` (défaut vide) préfixe les noms des volumes
   pour que validations et smokes n'utilisent jamais les volumes de
   production ; avec le défaut vide les noms restent `vysion-reports`,
   `vysion-state`, `vysion-certs`.
+- **Rattachement réseau déterministe (standalone, optionnel)** : trois
+  variables Portainer, toutes vides par défaut — `DOCKER_NETWORK` (nom du
+  réseau Docker à rejoindre), `DOCKER_NETWORK_EXTERNAL=true` (le réseau doit
+  déjà exister, sinon Compose pourrait en créer un homonyme) et
+  `IPV4_ADDRESS` (IPv4 statique, refusée par le daemon si elle sort du
+  sous-réseau du réseau cible). Sans elles, Compose crée le réseau de la
+  pile comme avant ; le port publié reste piloté par `BIND_ADDRESS` /
+  `HTTPS_PORT`. Un WAF qui cible `IP_VM:port` n'a techniquement pas besoin
+  de l'IP du conteneur, mais ce réglage répond à l'exigence de
+  déterminisme. Détail et exemple : `docs/OPERATIONS.md`.
 - **Mode helper** : le certificat reste signé et renouvelé par Certbot, qui
   demeure l'autorité ACME ; c'est un service systemd root,
   `vysion-cert-helper`, qui détient les générations et recharge le Nginx
@@ -175,7 +188,7 @@ un SHA court ou une valeur non hexadécimale sont refusés par Docker lui-même
 journal de la CI de publication ou avec
 `docker buildx imagetools inspect ghcr.io/tetrax/vysion:sha-<commit>`.
 `compose.standalone.yml` est la seule exception : elle ne demande aucun digest
-et se rend avec le seul `VYSION_TLS_HOSTNAME` (canal `stable`, voir
+et se rend avec le seul `TLS_HOSTNAME` (canal `stable`, voir
 « Modes de déploiement »).
 
 ```bash

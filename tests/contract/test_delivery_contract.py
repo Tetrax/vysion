@@ -457,7 +457,9 @@ def test_standalone_stack_requires_tls_settings_and_the_three_stable_volumes() -
     assert "${IMAGE_DIGEST" not in raw
     environment = service["environment"]
     assert environment["VYSION_TLS_BACKEND"] == "local"
-    assert environment["VYSION_TLS_HOSTNAME"].startswith("${VYSION_TLS_HOSTNAME:?")
+    # The operator types the generic TLS_HOSTNAME in Portainer; the container
+    # receives the internal name the application has always read.
+    assert environment["VYSION_TLS_HOSTNAME"].startswith("${TLS_HOSTNAME:?")
     # The authoritative origin can be pinned (non-443 ports); otherwise it is
     # derived from VYSION_TLS_HOSTNAME inside the application.
     assert environment["VYSION_PUBLIC_ORIGIN"] == "${PUBLIC_ORIGIN:-}"
@@ -594,7 +596,7 @@ def test_volume_prefix_isolates_validation_stacks_from_the_live_volumes(
     prefixed = _render(
         "compose.standalone.yml",
         empty_env,
-        VYSION_TLS_HOSTNAME="vysion.example.com",
+        TLS_HOSTNAME="vysion.example.com",
         VYSION_VOLUME_PREFIX="smoke-20260922-",
     )
     assert prefixed.returncode == 0, prefixed.stderr
@@ -988,8 +990,9 @@ def test_runbook_documents_the_zero_cli_fresh_install_and_the_bundle() -> None:
         "*images* → *upload*",
         "*stacks*",
         "vysion_image",
-        # prerequisites spelled out
-        "vysion_tls_hostname",
+        # prerequisites spelled out (the online standalone asks for the
+        # generic TLS_HOSTNAME; the offline stack keeps VYSION_IMAGE)
+        "tls_hostname",
         "tcp 443",
         "linux/amd64",
         "dns",

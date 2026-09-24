@@ -14,7 +14,7 @@
 - dans le conteneur, Nginx non-root écoute en **HTTP clair sur le port 8080**, accessible uniquement via le bind hôte ;
 - en mode proxy hôte, aucun certificat, aucune clé et aucun montage TLS dans le conteneur : la configuration HTTP est versionnée (`deploy/nginx.conf`) et copiée dans l'image, jamais montée depuis un fichier non versionné (le mode standalone, lui, range ses certificats dans `vysion-certs`) ;
 - FastAPI reste sur `127.0.0.1:8000` dans le conteneur ;
-- le seul ingress est le bind `${BIND_ADDRESS}:${HOST_PORT}` ; pas d'IP Docker statique, pas de réseau externe `Subnet-Docker`.
+- le seul ingress est le bind `${BIND_ADDRESS}:${HOST_PORT}` ; aucune IP Docker statique ni aucun réseau d'entreprise n'est imposé — la seule exception, **optionnelle et vide par défaut**, est le rattachement du standalone (`DOCKER_NETWORK`, `DOCKER_NETWORK_EXTERNAL`, `IPV4_ADDRESS`, voir « Réseau Docker et IPv4 statique »).
 
 ## Variables de déploiement
 
@@ -25,8 +25,12 @@
 | `HOST_PORT` | port publié sur l'hôte (port uniquement) | `8080` en production, `18080` pendant la validation |
 | `VYSION_REVISION` | révision compilée dans l'image | renseignée par CI |
 | `TRUSTED_PROXY_CIDRS` | CIDRs des seules proxies dont l'application accepte les en-têtes transférés (`X-Forwarded-*`, `X-Real-IP`) | défaut `127.0.0.1/32` (**client local uniquement**, ce n'est pas « l'hôte ») : en VPS, à renseigner explicitement avec le hop Docker observé — la requête publiée arrive depuis la passerelle du bridge, jamais depuis `127.0.0.1` — sans subnet imposé (voir « Modes TLS ») ; **obligatoire, sans défaut** dans `compose.proxy.yml` |
-| `PUBLIC_ORIGIN` | origine publique de référence : toute mutation `/api/admin/*` (setup, connexion, récupération, certificats) et liens de récupération | vide : dérivée de `VYSION_TLS_HOSTNAME` (port 443) en standalone ; sans valeur, **toute mutation admin est refusée en 503** — jamais dérivée du `Host` |
+| `PUBLIC_ORIGIN` | origine publique de référence : toute mutation `/api/admin/*` (setup, connexion, récupération, certificats) et liens de récupération | vide : dérivée du hostname saisi en standalone (`TLS_HOSTNAME`, port 443) ; sans valeur, **toute mutation admin est refusée en 503** — jamais dérivée du `Host` |
 | `VYSION_VOLUME_PREFIX` | préfixe des noms de volumes externes (isolation des validations et des smokes) | vide : noms stables `vysion-reports`, `vysion-state`, `vysion-certs` |
+| `TLS_HOSTNAME` | nom DNS que l'instance standalone sert (certificat + origine) ; transmis à l'application sous `VYSION_TLS_HOSTNAME` | **requis** dans `compose.standalone.yml` ; sans lui la pile refuse de se résoudre. Les autres piles lisent `VYSION_TLS_HOSTNAME` (`compose.helper.yml`) ou n'en ont pas besoin |
+| `DOCKER_NETWORK` | nom du réseau Docker à rejoindre (`compose.standalone.yml` uniquement) | vide : réseau de la pile créé par Compose, comportement inchangé |
+| `DOCKER_NETWORK_EXTERNAL` | `true` exige que ce réseau existe déjà (`compose.standalone.yml` uniquement) | `false` par défaut ; `true` = la pile ne crée ni ne supprime jamais ce réseau |
+| `IPV4_ADDRESS` | IPv4 statique du conteneur sur le réseau cible (`compose.standalone.yml` uniquement) | vide : attribution Docker normale ; hors sous-réseau du réseau cible = refus explicite par le daemon |
 
 `BIND_ADDRESS` et `HOST_PORT` sont indépendants : on ne change jamais l'IP pour changer le port.
 
@@ -43,8 +47,51 @@ HOST_PORT=8080  IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
 # validation temporaire à côté de l'instance en service
 HOST_PORT=18080 IMAGE_DIGEST=sha256:<64 hex> docker compose config --quiet
 # standalone en ligne : AUCUN digest à saisir, le canal stable suffit
-VYSION_TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config --quiet
+TLS_HOSTNAME=vysion.example.com docker compose -f compose.standalone.yml config --quiet
 ```
+
+## Réseau Docker et IPv4 statique (standalone, optionnel)
+
+`compose.standalone.yml` accepte trois variables **toutes optionnelles**, saisies dans les *Environment variables* de la stack Portainer. Aucune n'a de valeur par défaut : sans elles, Compose crée le réseau de la pile (`<nom de pile>_default`) comme toujours, et le déploiement — `Update the stack` compris — se comporte exactement comme avant.
+
+| Variable | Rôle | Valeur par défaut |
+| --- | --- | --- |
+| `DOCKER_NETWORK` | nom du réseau Docker à rejoindre | vide : réseau de la pile, créé par Compose |
+| `DOCKER_NETWORK_EXTERNAL` | `true` exige que ce réseau existe **déjà** ; la pile ne le crée ni ne le supprime jamais | `false` |
+| `IPV4_ADDRESS` | IPv4 statique du conteneur sur ce réseau | vide : attribution Docker normale |
+
+Le port publié reste piloté indépendamment par `BIND_ADDRESS` / `HTTPS_PORT` : le rattachement réseau ne change ni le port ni l'ingress.
+
+**Exemple — aucun secret, placeholders à remplacer :**
+
+```bash
+# Environment variables de la stack Portainer (standalone en ligne)
+TLS_HOSTNAME=<nom-dns-porte-par-le-certificat>   # seule variable obligatoire
+DOCKER_NETWORK=<nom-du-réseau-docker-existant>
+DOCKER_NETWORK_EXTERNAL=true
+IPV4_ADDRESS=<ipv4-appartenant-au-sous-réseau-de-ce-réseau>
+BIND_ADDRESS=<ip-de-la-vm>                       # ex. 0.0.0.0 pour servir le réseau
+HTTPS_PORT=443
+```
+
+**Refus explicites** (aucun conteneur n'est créé) :
+
+- `DOCKER_NETWORK_EXTERNAL=true` avec un réseau qui n'existe pas → `network <nom> declared as external, but could not be found` ;
+- `IPV4_ADDRESS` hors sous-réseau du réseau cible → `no configured subnet contains IP address <ipv4>` (refus par le daemon Docker).
+
+**Vérifications :**
+
+```bash
+# rendu par défaut : le réseau de la pile ne porte ni nom ni external
+TLS_HOSTNAME=<nom-dns> docker compose -f compose.standalone.yml config
+# rendu avec rattachement
+TLS_HOSTNAME=<nom-dns> DOCKER_NETWORK=<nom> DOCKER_NETWORK_EXTERNAL=true IPV4_ADDRESS=<ipv4> \
+  docker compose -f compose.standalone.yml config
+# adresse réellement attribuée au conteneur
+docker inspect --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}={{$v.IPAddress}} {{end}}' <conteneur>
+```
+
+> **Rappel WAF** : l'architecture entreprise retenue fait cibler au WAF `IP_VM:port` — l'IP de la **VM** et le port HTTPS publié. Un WAF branché ainsi **n'a pas techniquement besoin de l'IP du conteneur**. Ces variables répondent à une exigence distincte : le **déterminisme** — imposer le réseau d'entreprise existant et l'adresse du conteneur évite toute attribution variable d'un redéploiement à l'autre. Elles restent optionnelles et vides par défaut, et aucun nom de réseau, sous-réseau, adresse ni port d'entreprise n'est versionné dans le dépôt.
 
 ## Le canal `stable` (mise à jour en un clic du standalone en ligne)
 
@@ -167,9 +214,10 @@ Le repository GitHub `Tetrax/vysion` **et** le package GHCR `vysion` sont **publ
    - Compose path : `compose.standalone.yml` ;
    - Ref : `main` (ou la branche/tag livré par le fournisseur) ;
    - Variables d'environnement — **aucun secret** ne s'y écrit :
-     - **obligatoire** : `VYSION_TLS_HOSTNAME=vysion.entreprise.lan` ;
+     - **obligatoire** : `TLS_HOSTNAME=vysion.entreprise.lan` (le nom DNS que l'instance sert ; transmis à l'application sous `VYSION_TLS_HOSTNAME`) ;
      - **jamais `IMAGE_DIGEST`** : la pile suit le canal `ghcr.io/tetrax/vysion:stable` (« Le canal `stable` ») ;
-     - optionnels : `BIND_ADDRESS=0.0.0.0` (généralement nécessaire pour servir le réseau ; défaut `127.0.0.1` = hôte seul), `HTTPS_PORT=443`, `PUBLIC_ORIGIN=https://vysion.entreprise.lan` (dérivé de `VYSION_TLS_HOSTNAME` si vide), `TRUSTED_PROXY_CIDRS=<sources autorisées>`, `MEM_LIMIT=512m`, `CPU_LIMIT=1.0`, `REPORT_TTL_SECONDS=3600`, `MAX_UPLOAD_BYTES=5242880`, `VYSION_VOLUME_PREFIX=` (vide) ;
+     - optionnels : `BIND_ADDRESS=0.0.0.0` (généralement nécessaire pour servir le réseau ; défaut `127.0.0.1` = hôte seul), `HTTPS_PORT=443`, `PUBLIC_ORIGIN=https://vysion.entreprise.lan` (dérivé de `TLS_HOSTNAME` si vide), `TRUSTED_PROXY_CIDRS=<sources autorisées>`, `MEM_LIMIT=512m`, `CPU_LIMIT=1.0`, `REPORT_TTL_SECONDS=3600`, `MAX_UPLOAD_BYTES=5242880`, `VYSION_VOLUME_PREFIX=` (vide) ;
+     - optionnels — rattachement réseau déterministe (« Réseau Docker et IPv4 statique ») : `DOCKER_NETWORK=<nom du réseau existant>`, `DOCKER_NETWORK_EXTERNAL=true`, `IPV4_ADDRESS=<ipv4 du sous-réseau de ce réseau>` ; tous vides par défaut, **jamais de subnet, d'adresse ni de port d'entreprise dans Git** ;
 3. **Déployer** : Portainer tire `ghcr.io/tetrax/vysion:stable` depuis `ghcr.io` en lecture anonyme (`pull_policy: always`) et crée lui-même les trois volumes nommés stables (`vysion-reports`, `vysion-state`, `vysion-certs`) au premier démarrage : **aucune commande hôte**, aucune étape `docker volume create` ;
 4. **Santé** : attendre l'état `healthy` (le healthcheck traverse Nginx puis FastAPI — voir « Healthcheck »), puis ouvrir `https://vysion.entreprise.lan/admin`.
 
@@ -426,7 +474,7 @@ docker rename vysion-vysion-1 vysion-legacy-fallback
 
     Sans ce hop de confiance, le `https` déclaré par le Nginx hôte (`X-Forwarded-Proto` transmis en `X-Forwarded-Client-Proto`) est ignoré : le cookie de session administrateur revient **sans** le drapeau `Secure` (preuve par le smoke VPS de la carte, négatif sur le défaut).
   - `PUBLIC_ORIGIN` doit porter l'origine publique exacte du navigateur (par ex. `https://vysion.valdev.me`) : sans elle, **toute mutation `/api/admin/*` est refusée en 503** (setup, connexion, récupération, certificats), la première exécution restant fermée plutôt que d'être réalisée sous une autorité arbitraire.
-- **Standalone (`compose.standalone.yml`, `VYSION_TLS_BACKEND=local`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé dans le conteneur sur 443. Au premier démarrage, l'entrypoint génère un certificat auto-signé de 2 jours (bootstrap) pour rendre l'UI accessible en HTTPS ; importer ensuite le vrai certificat depuis `/admin` : PEM complet + clé, ou PKCS#12 + passphrase. La validation refuse tout certificat expiré/à venir, SAN incompatible, chaîne incohérente ou clé non correspondante (test de chargement TLS réel). L'activation passe par un ticket à usage unique lié à la session et au digest du candidat (300 s), puis `nginx -t` + rechargement + vérification de l'empreinte servie, avec rollback automatique vers la génération précédente en cas d'échec. Une chaîne de type production (feuille + intermédiaires, sans racine — la racine vit chez les clients) est acceptée ; une feuille sans son émetteur ou une chaîne incohérente reste refusée.
+- **Standalone (`compose.standalone.yml`, `VYSION_TLS_BACKEND=local`, `TLS_HOSTNAME` obligatoire)** : TLS terminé dans le conteneur sur 443. Au premier démarrage, l'entrypoint génère un certificat auto-signé de 2 jours (bootstrap) pour rendre l'UI accessible en HTTPS ; importer ensuite le vrai certificat depuis `/admin` : PEM complet + clé, ou PKCS#12 + passphrase. La validation refuse tout certificat expiré/à venir, SAN incompatible, chaîne incohérente ou clé non correspondante (test de chargement TLS réel). L'activation passe par un ticket à usage unique lié à la session et au digest du candidat (300 s), puis `nginx -t` + rechargement + vérification de l'empreinte servie, avec rollback automatique vers la génération précédente en cas d'échec. Une chaîne de type production (feuille + intermédiaires, sans racine — la racine vit chez les clients) est acceptée ; une feuille sans son émetteur ou une chaîne incohérente reste refusée.
 - **Proxy externe (`compose.proxy.yml`, `VYSION_TLS_BACKEND=none`)** : TLS terminé par le reverse proxy de l'opérateur, conteneur en HTTP clair sur 8080. `TRUSTED_PROXY_CIDRS` est **obligatoire — aucun défaut silencieux** — et décrit les seules sources dont l'application accepte `X-Forwarded-*` / `X-Real-IP` (couche interne : le Nginx du conteneur rejette les en-têtes clients, réécrit `X-Real-IP` sur l'observation locale et complète `X-Forwarded-For`, uvicorn tourne sans confiance forwarded). `PUBLIC_ORIGIN` fixe l'autorité de toute mutation `/api/admin/*` et des liens de récupération : sans elle, ces mutations sont refusées en 503 — jamais fabriquées depuis un `Host` contrôlable.
 - **Helper VPS (`compose.helper.yml`, `VYSION_TLS_BACKEND=helper`, `VYSION_TLS_HOSTNAME` obligatoire)** : TLS terminé par le Nginx hôte comme en mode `none`, mais `/admin` gère réellement le certificat. Le conteneur reste non-root et read-only : il ne parle qu'à la socket Unix privée du service root `vysion-cert-helper`, montée **lecture seule**. Voir « Certificats en mode helper » ci-dessous.
 
