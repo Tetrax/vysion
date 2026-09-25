@@ -21,6 +21,10 @@ services:
       CORS_ORIGINS: "${CORS_ORIGINS:-}"
     volumes:
       - vysion-reports:/var/lib/vysion/reports
+    networks:
+      default:
+        # Optional static address on the selected Docker network.
+        ipv4_address: ${IPV4_ADDRESS:-}
     # The audit reaches fortiguard.com to check firmware CVEs. Without egress
     # that check cannot run; it now reports "vérification impossible" rather
     # than silently passing, but the result is less useful. Allow outbound
@@ -28,3 +32,9 @@ services:
 
 volumes:
   vysion-reports:
+
+networks:
+  default:
+    # With DOCKER_NETWORK_EXTERNAL=true, this network must already exist.
+    name: ${DOCKER_NETWORK:-${COMPOSE_PROJECT_NAME:-vysion}_default}
+    external: ${DOCKER_NETWORK_EXTERNAL:-false}
