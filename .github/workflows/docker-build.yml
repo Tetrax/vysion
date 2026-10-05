@@ -39,3 +39,18 @@ jobs:
           grep -q '<div id="root"' /tmp/vysion-index.html
           docker exec vysion-check sh -c 'grep -q "Uptime System" /opt/vysion/static/assets/*.js'
 
+      - name: Export image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker save vysion:latest vysion:${{ github.sha }} | gzip > vysion-docker.tar.gz
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: vysion-docker-${{ github.sha }}
+          path: vysion-docker.tar.gz
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+
