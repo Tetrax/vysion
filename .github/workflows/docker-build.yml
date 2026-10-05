@@ -1,0 +1,41 @@
+name: Build Vysion Docker
+
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build image
+        run: docker build --tag vysion:latest --tag vysion:${{ github.sha }} ./modern_audit_app
+
+      - name: Verify container
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name vysion-check -p 127.0.0.1:8000:8000 vysion:latest
+          trap 'docker logs vysion-check; docker rm -f vysion-check' EXIT
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8000/health; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
+          curl --fail --silent http://127.0.0.1:8000/ > /tmp/vysion-index.html
+          grep -q '<div id="root"' /tmp/vysion-index.html
+          docker exec vysion-check sh -c 'grep -q "Uptime System" /opt/vysion/static/assets/*.js'
+
