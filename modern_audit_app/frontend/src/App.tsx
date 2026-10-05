@@ -304,7 +304,7 @@ function App() {
               </label>
 
               <label className="checkbox-item">
-                <span>Uptime</span>
+                <span>Uptime System</span>
                 <input
                   type="date"
                   value={systemUptime}
