@@ -317,6 +317,7 @@ def generate_word_report(all_results: Dict[str, Any], output_dir: Path,client_na
         all_results["sequence_conform"],
         client_name=client_name,
         serial_number=serial_number,
+        eol_result=all_results.get("eol_result", ""),
     )
 
     # Move file to output directory if needed.

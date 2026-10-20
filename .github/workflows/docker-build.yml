@@ -37,7 +37,7 @@ jobs:
           test "$ready" = true
           curl --fail --silent http://127.0.0.1:8000/ > /tmp/vysion-index.html
           grep -q '<div id="root"' /tmp/vysion-index.html
-          docker exec vysion-check sh -c 'grep -q "Uptime System" /opt/vysion/static/assets/*.js'
+          docker exec vysion-check sh -c 'grep -Fq "Uptime (Up since)" /opt/vysion/static/assets/*.js'
 
       - name: Export image
         shell: bash
