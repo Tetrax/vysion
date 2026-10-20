@@ -951,11 +951,11 @@ def extraire_modele_version_fortigate(config_lines):
     def normaliser_modele(config_model):
         """
         Convertit le nom du modèle du fichier de config vers le nom standardisé
-        Exemple: FG100F -> 100F, FGVM64 -> VM64, F2K60F -> 2600F
+        Exemple: FG100F -> 100F, FGVM64 ou FGVMO6 -> VM, F2K60F -> 2600F
         """
         # Cas spéciaux VM
-        if config_model.startswith('FGVM'):
-            return config_model.replace('FG', '')
+        if config_model.upper().startswith('FGVM'):
+            return 'VM'
 
         # Cas spéciaux avec patterns complexes
         special_patterns = {
@@ -983,8 +983,8 @@ def extraire_modele_version_fortigate(config_lines):
         # Pattern générique pour les modèles standards
         # FGT30E -> 30E, FG100F -> 100F, etc.
         standard_patterns = [
-            (r'FGT(\d+[EFG])', r'\1'),  # FGT30E -> 30E
-            (r'FG(\d+[EFG])', r'\1'),  # FG100F -> 100F
+            (r'FGT(\d+[A-Z])', r'\1'),  # FGT30B -> 30B, FGT30E -> 30E
+            (r'FG(\d+[A-Z])', r'\1'),  # FG100F -> 100F
             (r'FG(\d+D)', r'\1'),  # FG800D -> 800D
         ]
 
@@ -1010,7 +1010,8 @@ def extraire_modele_version_fortigate(config_lines):
                     # Normaliser le modèle
                     normalized_model = normaliser_modele(config_model)
 
-                    return (f"Modèle FGT : {config_model} ({normalized_model}), Version firmware : {version}",
+                    display_model = 'VM' if normalized_model == 'VM' else f'{config_model} ({normalized_model})'
+                    return (f"Modèle FGT : {display_model}, Version firmware : {version}",
                             version,
                             normalized_model)
             except (IndexError, ValueError):
@@ -1034,165 +1035,246 @@ def parse_version(version_str):
 
 
 
+import json
+import re
+from typing import Tuple
 
-# Chemin fixe vers ton fichier local
-FORTIGATE_EOL_XLSX = _get_references_path("fortigate-model-eol.xlsx")
+import requests
+from bs4 import BeautifulSoup
+
+
+FORTIGATE_EOL_URL = (
+    "https://community.fortinet.com/fortigate-3/"
+    "technical-tip-recommended-release-for-fortios-116639"
+)
+
 
 def verifier_modele_fortigate_eol(modele) -> Tuple[str, bool]:
     """
-    Vérifie le statut de support Fortinet à partir du fichier Excel local.
+    Vérifie l'indicateur EOE depuis le tableau public Fortinet.
 
     Logique :
-      - Si le modèle est présent dans le fichier et EOE = Y => non conforme
-      - Si le modèle est présent dans le fichier et EOE != Y => conforme
-      - Si le modèle est absent du fichier :
-          - génération F ou supérieure => conforme
-          - génération inférieure à F => non conforme / obsolète
+      - Modèle présent : EOE = Y => non conforme
+      - Modèle présent : EOE != Y => conforme
+      - Variantes virtuelles regroupées sous VM pour correspondre à FortiGate-VM64
+      - Modèle absent : génération F ou suivante => conforme
+      - Modèle absent : génération A à E => considéré EOE
+      - Erreur réseau ou tableau illisible => contrôle indéterminé, False
     """
 
     def norm_key(s: str) -> str:
-        return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+        key = re.sub(r"[^A-Z0-9]", "", s.upper())
+        key = re.sub(
+            r"^(?:FORTIGATERUGGED|FORTIGATE|FORTIWIFI|FGR|FWF|FGT|FG)",
+            "",
+            key,
+        )
+        return "VM" if key.startswith("VM") else key
 
-    def extract_model_keys(product_details: str) -> set[str]:
-        """
-        Extrait des clés modèles depuis la colonne "Product Details".
+    def extract_model_keys(details: str) -> set[str]:
+        text = re.sub(
+            r"\b(?:AND\s+)?VARIANTS\b", "", details, flags=re.I
+        )
+        text = re.sub(
+            r"\s*-?\s*ALL\s+VERSIONS\b.*$", "", text, flags=re.I
+        )
 
-        Exemples :
-          - FortiGate-60E -> {"60E"}
-          - FortiWiFi-60E -> {"60E"}
-          - FortiGate-50G/51G and variants -> {"50G", "51G"}
-          - FortiGate-40F-3G4G -> {"40F3G4G"}
-        """
-        txt = (product_details or "").strip()
-        if not txt:
-            return set()
+        # Découper avant normalisation : 50G/51G => deux modèles.
+        keys = {
+            norm_key(part)
+            for part in re.split(r"[/,;]|\s+AND\s+", text, flags=re.I)
+        }
 
-        up = txt.upper()
-
-        up = re.sub(r"\bAND VARIANTS\b", "", up)
-        up = re.sub(r"\bVARIANTS\b", "", up)
-        up = re.sub(r"\bFORTIGATE\b", "", up)
-        up = re.sub(r"\bFORTIWIFI\b", "", up)
-        up = re.sub(r"\bRUGGED\b", "", up)
-
-        parts = re.split(r"[\/,;]|(?:\s+)", up)
-
-        keys: set[str] = set()
-
-        for p in parts:
-            p = p.strip("-_ \t")
-            if not p:
-                continue
-
-            k = norm_key(p)
-
-            if re.match(r"^\d", k) and re.search(r"[A-Z]", k):
-                keys.add(k)
-
-        # Extraction globale au cas où le découpage précédent ne suffit pas
-        for m in re.findall(r"\d+[A-Z]\w*", norm_key(up)):
-            if re.match(r"^\d", m) and re.search(r"[A-Z]", m):
-                keys.add(m)
-
-        return keys
-
-    def get_generation_letter(model_key: str) -> str | None:
-        """
-        Extrait la lettre de génération du modèle.
-
-        Exemples :
-          - 60E -> E
-          - 100F -> F
-          - 40F3G4G -> F
-          - 90G -> G
-        """
-        match = re.search(r"\d+([A-Z])", model_key)
-        return match.group(1) if match else None
+        return {
+            key for key in keys
+            if re.fullmatch(
+                r"(?:\d+[A-Z][A-Z0-9]*|VM[A-Z0-9]*)", key
+            )
+        }
 
     # --- validations ---
-    if not modele or not str(modele).strip():
-        return "Le modèle FortiGate n’a pas été renseigné.", False
+    if modele is None or not str(modele).strip():
+        return "Le modèle FortiGate n'a pas été renseigné.", False
 
-    if not os.path.exists(FORTIGATE_EOL_XLSX):
-        return f"Le fichier de référence EOE est introuvable : {FORTIGATE_EOL_XLSX}", False
+    target = norm_key(str(modele).strip())
 
-    target = norm_key(str(modele))
-
-    if not target:
+    if not re.fullmatch(
+        r"(?:\d+[A-Z][A-Z0-9]*|VM[A-Z0-9]*)", target
+    ):
         return f"Le modèle FortiGate renseigné est invalide : {modele}", False
 
-    # --- lecture Excel ---
+    # --- récupération de la page ---
     try:
-        wb = openpyxl.load_workbook(FORTIGATE_EOL_XLSX, data_only=True)
-        ws = wb.active
-    except Exception as e:
-        return f"Impossible d’ouvrir le fichier de référence EOE : {e}", False
+        with requests.get(
+            FORTIGATE_EOL_URL,
+            headers={"User-Agent": "FortiGate-EOE-Audit/1.0"},
+            timeout=(5, 20),
+        ) as response:
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, "html.parser")
 
-    # --- construire un index modèle -> (product_details, recommended, eoe) ---
-    index: dict[str, tuple[str, str, str]] = {}
+    except requests.RequestException as exc:
+        return (
+            f"Contrôle EOE indéterminé : impossible de consulter Fortinet "
+            f"({type(exc).__name__}).",
+            False,
+        )
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        product_details = row[0] if len(row) > 0 else None
-        recommended = row[1] if len(row) > 1 else None
-        eoe = row[2] if len(row) > 2 else None
+    # --- extraction du HTML contenu dans le JSON data-props ---
+    documents = []
 
-        if not product_details:
+    for node in soup.select('[data-preact*="TopicView"][data-props]'):
+        try:
+            props = json.loads(node["data-props"])
+        except (ValueError, TypeError):
             continue
 
-        product_details_str = str(product_details).strip()
-        recommended_str = str(recommended).strip() if recommended is not None else ""
-        eoe_str = str(eoe).strip().upper() if eoe is not None else ""
+        if not isinstance(props, dict):
+            continue
 
-        keys = extract_model_keys(product_details_str)
+        if props.get("topicPath") != (
+            "/fortigate-3/technical-tip-recommended-release-for-fortios-116639"
+        ):
+            continue
 
-        for k in keys:
-            if k not in index:
-                index[k] = (product_details_str, recommended_str, eoe_str)
+        topic = props.get("topic")
+        content = topic.get("content") if isinstance(topic, dict) else None
 
-    # --- modèle trouvé dans le fichier de référence ---
-    if target in index:
-        product_details, recommended, eoe_str = index[target]
+        if isinstance(content, str):
+            documents.append(BeautifulSoup(content, "html.parser"))
 
-        if eoe_str == "Y":
+    # Accepte aussi un tableau directement présent dans le HTML.
+    if not documents:
+        documents = [soup]
+
+    # --- recherche du tableau et identification des colonnes ---
+    tables = []
+
+    for document in documents:
+        for table in document.find_all("table"):
+            rows = [
+                row for row in table.find_all("tr")
+                if row.find_parent("table") is table
+            ]
+
+            for position, row in enumerate(rows):
+                cells = row.find_all(["td", "th"], recursive=False)
+
+                headers = [
+                    re.sub(
+                        r"[^A-Z0-9]",
+                        "",
+                        cell.get_text(" ", strip=True).upper(),
+                    )
+                    for cell in cells
+                ]
+
+                columns = {}
+
+                for i, header in enumerate(headers):
+                    if header == "PRODUCTDETAILS":
+                        columns["product"] = i
+                    elif header.startswith("RECOMMENDEDRELEASE"):
+                        columns["recommended"] = i
+                    elif header.startswith("ENDOFENGINEERINGSUPPORT"):
+                        columns["eoe"] = i
+
+                if len(columns) == 3:
+                    tables.append(
+                        (rows[position + 1:], len(cells), columns)
+                    )
+                    break
+
+    if len(tables) != 1:
+        return (
+            "Contrôle EOE indéterminé : tableau Fortinet absent ou ambigu.",
+            False,
+        )
+
+    # --- construction de l'index modèle -> informations EOE ---
+    rows, width, columns = tables[0]
+    index: dict[str, tuple[str, str, str]] = {}
+
+    for row in rows:
+        cells = row.find_all(["td", "th"], recursive=False)
+
+        if not cells or not row.get_text(strip=True):
+            continue
+
+        # Évite de lire la mauvaise colonne si la structure change.
+        if len(cells) != width or any(
+            str(cell.get(attr, "1")) != "1"
+            for cell in cells
+            for attr in ("rowspan", "colspan")
+        ):
             return (
-                f"Le modèle {product_details} est obsolète et n’est plus supporté par Fortinet "
-                f"(End of Engineering Support dépassé). "
-                f"(source : fichier local).",
+                "Contrôle EOE indéterminé : structure du tableau modifiée.",
+                False,
+            )
+
+        product = cells[columns["product"]].get_text(" ", strip=True)
+        recommended = cells[columns["recommended"]].get_text(" ", strip=True)
+        eoe = cells[columns["eoe"]].get_text(" ", strip=True).upper()
+
+        keys = extract_model_keys(product)
+
+        if not keys:
+            return (
+                f"Contrôle EOE indéterminé : ligne non reconnue ({product}).",
+                False,
+            )
+
+        for key in keys:
+            index.setdefault(key, (product, recommended, eoe))
+
+    if not index:
+        return "Contrôle EOE indéterminé : tableau Fortinet vide.", False
+
+    source = f"Source : {FORTIGATE_EOL_URL}"
+    model_label = f"FortiGate-{target}"
+
+    # --- modèle trouvé : le tableau est prioritaire ---
+    if target in index:
+        product, recommended, eoe = index[target]
+
+        if eoe == "Y":
+            return (
+                f"Le modèle {model_label} n'est plus maintenu par Fortinet. "
+                f"Il faut envisager un trade-up. {source}",
                 False,
             )
 
         return (
-            f"Le modèle {product_details} est actuellement supporté par Fortinet. "
-            f"(source : fichier local).",
+            f"Le modèle {model_label} est toujours maintenu par Fortinet. {source}",
             True,
         )
 
-    # --- modèle non trouvé : cas FortiGate VM ---
+    # --- modèle absent : exception FortiGate VM conservée ---
     if target.startswith("VM"):
         return (
-            f"Le modèle {modele} est un FortiGate virtuel. "
-            f"Son statut de support dépend de la version de FortiOS et de la licence, "
-            f"et non d’une génération matérielle E/F/G.",
+            f"Le modèle {model_label} est toujours maintenu par Fortinet.",
             True,
         )
 
-    # --- modèle non trouvé : décision selon génération ---
-    generation = get_generation_letter(target)
+    # --- modèle absent : règle de repli par génération ---
+    match = re.match(r"\d+([A-Z])", target)
+    generation = match.group(1) if match else None
 
     if generation and generation >= "F":
         return (
-            f"Le modèle {modele} est actuellement supporté par Fortinet.",
+            f"Le modèle {model_label} est toujours maintenu par Fortinet.",
             True,
         )
 
     if generation and generation < "F":
         return (
-            f"Le modèle {modele} est obsolète et n’est plus supporté par Fortinet.",
+            f"Le modèle {model_label} n'est plus maintenu par Fortinet. "
+            "Il faut envisager un trade-up.",
             False,
         )
 
     return (
-        f"Impossible de déterminer le statut de support Fortinet pour le modèle {modele}.",
+        f"Impossible de déterminer le statut EOE du modèle {modele}.",
         False,
     )
 
@@ -4334,15 +4416,15 @@ def ajouter_regle_ports_deny(rule, rules):
     """
     Ajoute (ou met à jour) la règle dans le dictionnaire 'rules'.
     On stocke un booléen 'ports_deny' qui indique la présence
-    ou l'absence du service "Ports-Deny".
+    ou l'absence du service "Ports-Deny" ou "Port-Deny", sans distinction de casse.
     """
     # Conversion des interfaces en majuscules pour assurer l'uniformité
     src = rule['src_interface'].upper() if rule['src_interface'] else None
     dst = rule['dst_interface'].upper() if rule['dst_interface'] else None
     services = rule['services']
 
-    # Le service "Ports-Deny" est recherché exactement dans la liste des services
-    ports_deny = "Ports-Deny" in services
+    # Accepte les deux noms complets, sans distinction de casse.
+    ports_deny = any(service.casefold() in {"ports-deny", "port-deny"} for service in services)
 
     # Crée ou met à jour l'entrée (src, dst)
     if (src, dst) not in rules:
@@ -4354,7 +4436,7 @@ def ajouter_regle_ports_deny(rule, rules):
 
 def verifier_ports_deny(config_lines, selected_wan_interfaces):
     """
-    Vérifie la configuration du service "Ports-Deny" dans les règles de firewall pour le flux LAN → WAN.
+    Vérifie les services "Ports-Deny" ou "Port-Deny" (sans distinction de casse) pour le flux LAN → WAN.
 
     La logique appliquée est la suivante :
       - Si une règle globale ANY → ANY avec "Ports-Deny" est présente, la configuration est considérée correcte.
@@ -7760,7 +7842,7 @@ def auditer():
                                            bande_5ghz_result, bande_5ghz_conform, bande_5ghz_non_conform, darrp_result, darrp_conform, darrp_non_conform, frequency_handoff_result, frequency_handoff_conform,
                                            frequency_handoff_non_conform, tim_result, tim_conform, tim_non_conform, band_result, band_conform, band_non_conform, channel_result, channel_conform, channel_non_conform, sgi_result, sgi_conform, sgi_non_conform,
                                            objets_result, objets_conform, objets_non_utilises, result_profils, conformity_profils, rule_ids_profils, blackhole_result, blackhole_conform, ports_deny_result, ports_deny_conform, fortiguard_result, fortiguard_conform, fortisandbox_result, fortisandbox_conform,
-                                           sequence_result, sequence_conform)
+                                           sequence_result, sequence_conform, eol_result=eol_result)
 
 
 def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform, usb_result, usb_conform, vs_any_result, vs_any_conform, vip_any_result, vip_any_conform, utilisation_ssl_result, utilisation_ssl_conform, all_in_rules_result, all_in_rules_conform, all_in_rules_ids, geo_ip_result, geo_ip_conform, hostname,
@@ -8400,7 +8482,7 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws.row_dimensions[1].height = 18
         for row in range(2, 6):
             ws.row_dimensions[row].height = 25
-        for row in [27, 28, 29, 30, 31, 32, 33, 34,35, 36, 37, 52, 53, 54, 55, 56, 57, 58, 59,60,61,62, 63, 64, 65, 66,67]:
+        for row in [9,27, 28, 29, 30, 31, 32, 33, 34,35, 36, 37, 52, 53, 54, 55, 56, 57, 58, 59,60,61,62, 63, 64, 65, 66,67]:
             ws.row_dimensions[row].height = 70
         ws.row_dimensions[11].height = 82
 
@@ -8425,8 +8507,9 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws['B2'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         ws['B2'].font = Font(size=20, bold=True)
 
-        ws.merge_cells('G2:G3')
+        ws.merge_cells('G2:G4')
         img = OpenpyxlImage(_get_references_path("sns-security-logo1.png"))
+        img.width, img.height = img.width * 1.4, img.height * 1.4
         img.anchor = 'G2'
         ws.add_image(img)
 
@@ -8446,11 +8529,7 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws['A5'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
         ws['A5'].font = Font(bold=True, size=12)
 
-        ws['G4'] = "Date audit : " + date_today
-        ws['G4'].alignment = Alignment(horizontal='center', vertical='center')
-        ws['G4'].font = Font(bold=True, size=12)
-
-        ws['G5'] = f"Date de fin de licence : {_fmt_date_fr(license_end_date)}"
+        ws['G5'] = "Date audit : " + date_today
         ws['G5'].alignment = Alignment(horizontal='center', vertical='center')
         ws['G5'].font = Font(bold=True, size=12)
 
@@ -8509,8 +8588,9 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.font = Font(bold=True, size=16)
 
-        ws_sans_accord.merge_cells('C2:C3')
+        ws_sans_accord.merge_cells('C2:C4')
         img_sans_accord = OpenpyxlImage(_get_references_path("sns-security-logo-actions.png"))
+        img_sans_accord.width, img_sans_accord.height = img_sans_accord.width * 1.4, img_sans_accord.height * 1.4
         img_sans_accord.anchor = 'C2'
         ws_sans_accord.add_image(img_sans_accord)
 
@@ -8560,7 +8640,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_sans_accord['A3'] = "=\'Audit de Configuration\'!A3"
         ws_sans_accord['A4'] = "=\'Audit de Configuration\'!A4"
         ws_sans_accord['A5'] = "=\'Audit de Configuration\'!A5"
-        ws_sans_accord['C4'] = "=\'Audit de Configuration\'!G4"
         ws_sans_accord['C5'] = "=\'Audit de Configuration\'!G5"
 
         ws_sans_accord['A2'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
@@ -8574,9 +8653,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
 
         ws_sans_accord['A5'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
         ws_sans_accord['A5'].font = Font(bold=True, size=12)
-
-        ws_sans_accord['C4'].alignment = Alignment(horizontal='center', vertical='center')
-        ws_sans_accord['C4'].font = Font(bold=True, size=12)
 
         ws_sans_accord['C5'].alignment = Alignment(horizontal='center', vertical='center')
         ws_sans_accord['C5'].font = Font(bold=True, size=12)
@@ -8635,8 +8711,9 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.font = Font(bold=True, size=16)
 
-        ws_avec_accord.merge_cells('C2:C3')
+        ws_avec_accord.merge_cells('C2:C4')
         img_avec_accord = OpenpyxlImage(_get_references_path("sns-security-logo-actions.png"))
+        img_avec_accord.width, img_avec_accord.height = img_avec_accord.width * 1.4, img_avec_accord.height * 1.4
         img_avec_accord.anchor = 'C2'
         ws_avec_accord.add_image(img_avec_accord)
 
@@ -8684,7 +8761,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_avec_accord['A3'] = "=\'Audit de Configuration\'!A3"
         ws_avec_accord['A4'] = "=\'Audit de Configuration\'!A4"
         ws_avec_accord['A5'] = "=\'Audit de Configuration\'!A5"
-        ws_avec_accord['C4'] = "=\'Audit de Configuration\'!G4"
         ws_avec_accord['C5'] = "=\'Audit de Configuration\'!G5"
 
         ws_avec_accord['A2'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
@@ -8698,9 +8774,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
 
         ws_avec_accord['A5'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
         ws_avec_accord['A5'].font = Font(bold=True, size=12)
-
-        ws_avec_accord['C4'].alignment = Alignment(horizontal='center', vertical='center')
-        ws_avec_accord['C4'].font = Font(bold=True, size=12)
 
         ws_avec_accord['C5'].alignment = Alignment(horizontal='center', vertical='center')
         ws_avec_accord['C5'].font = Font(bold=True, size=12)
@@ -8779,8 +8852,9 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         cell.font = Font(bold=True, size=16)
 
-        ws_stats.merge_cells('D2:D3')
+        ws_stats.merge_cells('D2:D4')
         img_stats = OpenpyxlImage(_get_references_path("sns-security-logo1.png"))
+        img_stats.width, img_stats.height = img_stats.width * 1.4, img_stats.height * 1.4
         img_stats.anchor = 'D2'
         ws_stats.add_image(img_stats)
 
@@ -8958,7 +9032,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_stats['A3'] = "=\'Audit de Configuration\'!A3"
         ws_stats['A4'] = "=\'Audit de Configuration\'!A4"
         ws_stats['A5'] = "=\'Audit de Configuration\'!A5"
-        ws_stats['D4'] = "=\'Audit de Configuration\'!G4"
         ws_stats['D5'] = "=\'Audit de Configuration\'!G5"
 
         ws_stats['A2'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
@@ -8969,8 +9042,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_stats['A4'].font = Font(bold=True, size=12)
         ws_stats['A5'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
         ws_stats['A5'].font = Font(bold=True, size=12)
-        ws_stats['D4'].alignment = Alignment(horizontal='center', vertical='center')
-        ws_stats['D4'].font = Font(bold=True, size=12)
         ws_stats['D5'].alignment = Alignment(horizontal='center', vertical='center')
         ws_stats['D5'].font = Font(bold=True, size=12)
         ws_stats['A7'].alignment = Alignment(horizontal='center', vertical='center')
@@ -9224,12 +9295,12 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
 
         if regle_no_match > 0:
             resultat_pie4 = (
-                f"Vous avez {regle_with_match} règles qui ont matchées depuis le {_fmt_date_fr(system_uptime)} (Uptime System).\n Vous avez {regle_no_match} règle(s) sans match(s). Est-ce que ces règles sont légitimes ?"
+                f"Vous avez {regle_with_match} règles qui ont matchées depuis le {_fmt_date_fr(system_uptime)} (Uptime (Up since)).\n Vous avez {regle_no_match} règle(s) sans match(s). Est-ce que ces règles sont légitimes ?"
                 f"\nAttention, nous vous conseillons de garder les règles en DENY (sauf si un regroupement est possible)\n et de vous concentrer sur la pertinence des règles en ACCEPT."
             )
         else:
             resultat_pie4 = (
-                f"Toutes vos règles sont utilisées, c'est à dire qu'il y a au moins un flux qui a matché chacune de vos règles depuis depuis le {_fmt_date_fr(system_uptime)} (Uptime System)."
+                f"Toutes vos règles sont utilisées, c'est à dire qu'il y a au moins un flux qui a matché chacune de vos règles depuis depuis le {_fmt_date_fr(system_uptime)} (Uptime (Up since))."
             )
 
         ws_stats["A116"] = resultat_pie4
@@ -9259,8 +9330,9 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_accounts['B2'].alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         ws_accounts['B2'].font = Font(bold=True, size=18)
 
-        ws_accounts.merge_cells('F2:F3')
+        ws_accounts.merge_cells('F2:F4')
         img_accounts = OpenpyxlImage(_get_references_path("sns-security-logo-account.png"))
+        img_accounts.width, img_accounts.height = img_accounts.width * 1.4, img_accounts.height * 1.4
         img_accounts.anchor = 'F2'
         ws_accounts.add_image(img_accounts)
 
@@ -9269,7 +9341,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_accounts['A3'] = "=\'Audit de Configuration\'!A3"
         ws_accounts['A4'] = "=\'Audit de Configuration\'!A4"
         ws_accounts['A5'] = "=\'Audit de Configuration\'!A5"
-        ws_accounts['F4'] = "=\'Audit de Configuration\'!G4"
         ws_accounts['F5'] = "=\'Audit de Configuration\'!G5"
 
         # Alignements + styles
@@ -9281,8 +9352,6 @@ def creer_rapport_excel(guest_result, guest_conform, admin_result, admin_conform
         ws_accounts['A4'].font = Font(bold=True, size=12)
         ws_accounts['A5'].alignment = Alignment(horizontal='left', vertical='center', indent=2)
         ws_accounts['A5'].font = Font(bold=True, size=12)
-        ws_accounts['F4'].alignment = Alignment(horizontal='center', vertical='center')
-        ws_accounts['F4'].font = Font(bold=True, size=12)
         ws_accounts['F5'].alignment = Alignment(horizontal='center', vertical='center')
         ws_accounts['F5'].font = Font(bold=True, size=12)
 
@@ -9567,7 +9636,7 @@ def creer_rapport_word(hostname, version, model, config_lines, version_conform, 
                                            bande_5ghz_result, bande_5ghz_conform, bande_5ghz_non_conform, darrp_result, darrp_conform, darrp_non_conform, frequency_handoff_result, frequency_handoff_conform,
                                            frequency_handoff_non_conform, tim_result, tim_conform, tim_non_conform, band_result, band_conform, band_non_conform, channel_result, channel_conform, channel_non_conform, sgi_result, sgi_conform, sgi_non_conform,
                                            objets_result, objets_conform, objets_non_utilises, result_profils, conformity_profils, rule_ids_profils, blackhole_result, blackhole_conform, ports_deny_result, ports_deny_conform, fortiguard_result, fortiguard_conform, fortisandbox_result, fortisandbox_conform,
-                                           sequence_result, sequence_conform,client_name: str = "", serial_number: str = ""):
+                                           sequence_result, sequence_conform,client_name: str = "", serial_number: str = "", eol_result: str = ""):
     modele = _get_references_path("generique.docx")
     current_time = datetime.now().strftime("%Y-%m-%d-%Hh%Mm%Ss")
     filename = f"{hostname} - Fichier audit Word - {current_time}.docx"
@@ -9737,14 +9806,11 @@ def creer_rapport_word(hostname, version, model, config_lines, version_conform, 
     else:
         run_status.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)  # Rouge #CC0000
     doc.add_paragraph(
-            f"Votre Fortigate est un modèle {model}. "
-            + ("Ce modèle bénéficie toujours d'un support actif par Fortinet." if eol_conform else
-               "Ce modèle ne bénéficie plus d'un support actif par Fortinet. Nous vous recommandons un trade-up.")
+        eol_result or (
+            f"Le modèle FortiGate-{model} est toujours maintenu par Fortinet." if eol_conform else
+            f"Le modèle FortiGate-{model} n'est plus maintenu par Fortinet. Il faut envisager un trade-up."
+        )
     )
-    doc.add_paragraph('')
-    doc.add_paragraph().add_run("Source :").bold = True
-    doc.add_paragraph().add_run(
-        "https://community.fortinet.com/t5/FortiGate/Technical-Tip-Recommended-Release-for-FortiOS/ta-p/227178")
     doc.add_paragraph('')
     doc.add_paragraph('')
 
